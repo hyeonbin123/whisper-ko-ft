@@ -6,6 +6,7 @@ Usage:
 
 Decoding settings are fixed in docs/experiments.md ("디코딩"). Test sets need --allow-test, because they
 are measured once per stage. The report keeps every reference and hypothesis so rates can be recomputed.
+With --channel telephone the report is written as <set>@telephone.json.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import numpy as np
 import torch
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
+from whisper_ko_ft.channel import CHANNELS
 from whisper_ko_ft.metrics import error_rate, interval, score
 from whisper_ko_ft.paths import REPORTS, ROOT
 from whisper_ko_ft.store import SAMPLE_RATE, AudioStore, load_set
@@ -52,6 +54,9 @@ def main() -> None:
     parser.add_argument("--adapter", help="LoRA adapter folder to merge into --model")
     parser.add_argument("--set", required=True, dest="set_name")
     parser.add_argument("--name", help="report name; defaults to the last part of --model")
+    parser.add_argument(
+        "--channel", choices=list(CHANNELS), help="pass the audio through a channel simulation"
+    )
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--limit", type=int, help="only the first N utterances (smoke runs, speed checks)")
     parser.add_argument("--allow-test", action="store_true", help="required for *-test sets")
@@ -73,6 +78,8 @@ def main() -> None:
     for begin in range(0, len(utterances), args.batch_size):
         batch = utterances[begin : begin + args.batch_size]
         audio = [stores.setdefault(u.store, AudioStore(u.store)).read(u) for u in batch]
+        if args.channel:
+            audio = [CHANNELS[args.channel](samples) for samples in audio]
         inputs = processor.feature_extractor(
             audio, sampling_rate=SAMPLE_RATE, return_tensors="pt", return_attention_mask=True, device="cuda"
         )
@@ -120,6 +127,7 @@ def main() -> None:
         "model": args.model,
         "adapter": args.adapter,
         "set": args.set_name,
+        "channel": args.channel,
         "language": language,
         "metric": "cer" if language == "ko" else "wer",
         "utterances": len(kept),
@@ -143,7 +151,8 @@ def main() -> None:
 
     if not args.no_report:
         name = args.name or Path(args.model).name
-        target = REPORTS / name / f"{args.set_name}.json"
+        suffix = f"@{args.channel}" if args.channel else ""
+        target = REPORTS / name / f"{args.set_name}{suffix}.json"
         target.parent.mkdir(parents=True, exist_ok=True)
         payload = {"summary": summary, "utterances": rows}
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")

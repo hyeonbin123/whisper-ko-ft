@@ -1,10 +1,12 @@
-"""Fine-tune a Whisper model on a prepared set (full fine-tuning, fp16 mixed precision).
+"""Fine-tune a Whisper model on a prepared set: full fine-tuning or LoRA, fp16 mixed precision.
 
 Usage:
     uv run python -m whisper_ko_ft.train --run-name small-a --model openai/whisper-small --learning-rate 1e-5
+    uv run python -m whisper_ko_ft.train --run-name turbo-l1 --learning-rate 1e-4 --lora-r 16 ...
 
-Settings that candidates share are the defaults here and are fixed in docs/experiments.md ("2단계").
-Writes outputs/<run-name>/: checkpoints, `best/` (model + processor of the lowest val-500 CER), `run.json`.
+Settings that candidates share are the defaults here and are fixed in docs/experiments.md.
+Writes outputs/<run-name>/: checkpoints, `best/` (lowest val-500 CER: the model, or the LoRA adapter when
+--lora-r is set, plus the processor) and `run.json`.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from transformers import (
     WhisperProcessor,
 )
 
+from whisper_ko_ft.channel import telephone
 from whisper_ko_ft.evaluate import MAX_NEW_TOKENS, git_commit
 from whisper_ko_ft.metrics import error_rate, score
 from whisper_ko_ft.paths import OUTPUTS
@@ -34,8 +37,9 @@ LANGUAGE_NAMES = {"ko": "korean", "en": "english"}
 class UtteranceDataset(Dataset):
     """Raw audio and text; features are computed in the collator so each model can use its own mel size."""
 
-    def __init__(self, utterances: list[Utterance]) -> None:
+    def __init__(self, utterances: list[Utterance], telephone_prob: float = 0.0) -> None:
         self.utterances = utterances
+        self.telephone_prob = telephone_prob
         self._stores: dict[str, AudioStore] = {}  # opened lazily: a memmap can't be pickled to workers
 
     def __len__(self) -> int:
@@ -45,7 +49,13 @@ class UtteranceDataset(Dataset):
         utterance = self.utterances[index]
         if utterance.store not in self._stores:
             self._stores[utterance.store] = AudioStore(utterance.store)
-        return {"audio": self._stores[utterance.store].read(utterance), "text": utterance.text}
+        audio = self._stores[utterance.store].read(utterance)
+        # torch seeds every loader worker from the run's seed, so the draw is repeatable per run.
+        # getattr: loader workers re-import this module, and may unpickle a dataset made by older code.
+        telephone_prob = getattr(self, "telephone_prob", 0.0)
+        if telephone_prob and torch.rand(1).item() < telephone_prob:
+            audio = telephone(audio)
+        return {"audio": audio, "text": utterance.text}
 
 
 @dataclass
@@ -78,6 +88,16 @@ def main() -> None:
     parser.add_argument("--model", default="openai/whisper-small")
     parser.add_argument("--learning-rate", type=float, required=True)
     parser.add_argument("--spec-augment", action="store_true", help="mask_time_prob=0.05 (candidate C)")
+    parser.add_argument("--lora-r", type=int, default=0, help="LoRA rank; 0 trains every weight")
+    parser.add_argument("--lora-alpha", type=int, help="defaults to 2 x rank")
+    parser.add_argument("--lora-dropout", type=float, default=0.05)
+    parser.add_argument("--lora-targets", nargs="+", default=["q_proj", "v_proj"])
+    parser.add_argument(
+        "--telephone-prob",
+        type=float,
+        default=0.0,
+        help="share of training audio sent through the telephone channel",
+    )
     parser.add_argument("--train-set", default="zeroth-train")
     parser.add_argument("--eval-set", default="zeroth-val500")
     parser.add_argument("--max-steps", type=int, default=3_000)
@@ -99,7 +119,10 @@ def main() -> None:
 
     processor = WhisperProcessor.from_pretrained(args.model)
     processor.tokenizer.set_prefix_tokens(language=LANGUAGE_NAMES[language], task="transcribe")
-    model = WhisperForConditionalGeneration.from_pretrained(args.model)
+    # LoRA keeps the frozen base in fp16 to fit 11 GB; PEFT creates the adapter weights in fp32.
+    model = WhisperForConditionalGeneration.from_pretrained(
+        args.model, dtype=torch.float16 if args.lora_r else torch.float32
+    )
     model.generation_config.language = LANGUAGE_NAMES[language]
     model.generation_config.task = "transcribe"
     model.generation_config.forced_decoder_ids = None
@@ -109,6 +132,19 @@ def main() -> None:
     if args.spec_augment:
         model.config.apply_spec_augment = True
         model.config.mask_time_prob = 0.05
+    decoder_start_token_id = model.config.decoder_start_token_id
+    if args.lora_r:
+        from peft import LoraConfig, get_peft_model
+
+        lora = LoraConfig(
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha or 2 * args.lora_r,
+            lora_dropout=args.lora_dropout,
+            target_modules=args.lora_targets,
+            bias="none",
+        )
+        model = get_peft_model(model, lora)
+        model.print_trainable_parameters()
 
     def compute_metrics(prediction) -> dict[str, float]:
         label_ids = np.where(
@@ -145,15 +181,16 @@ def main() -> None:
         logging_steps=25,
         dataloader_num_workers=args.workers,
         remove_unused_columns=False,
+        label_names=["labels"],
         report_to=[],
         seed=0,
     )
     trainer = Seq2SeqTrainer(
         model=model,
         args=training_args,
-        train_dataset=UtteranceDataset(train_utterances),
+        train_dataset=UtteranceDataset(train_utterances, args.telephone_prob),
         eval_dataset=UtteranceDataset(eval_utterances),
-        data_collator=Collator(processor, model.config.decoder_start_token_id),
+        data_collator=Collator(processor, decoder_start_token_id),
         compute_metrics=compute_metrics,
         processing_class=processor,
     )

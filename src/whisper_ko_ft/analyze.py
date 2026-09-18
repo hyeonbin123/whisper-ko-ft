@@ -31,7 +31,8 @@ def load_rows(report: str, set_name: str) -> dict[str, dict]:
 
 
 def digit_ids(set_name: str) -> set[str]:
-    path = REPORTS / "digit_utterances" / f"{set_name}.json"
+    """The list is defined on clean audio; "zeroth-val@telephone" uses the list of "zeroth-val"."""
+    path = REPORTS / "digit_utterances" / f"{set_name.split('@')[0]}.json"
     return set(json.loads(path.read_text(encoding="utf-8"))["ids"])
 
 
