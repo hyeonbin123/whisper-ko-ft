@@ -62,6 +62,9 @@ class UtteranceDataset(Dataset):
 class Collator:
     processor: WhisperProcessor
     decoder_start_token_id: int
+    # A LoRA run keeps the base model in fp16. Training runs under autocast, but generation during
+    # evaluation does not, so the features must already have the model's dtype.
+    features_dtype: torch.dtype = torch.float32
 
     def __call__(self, rows: list[dict]) -> dict[str, torch.Tensor]:
         inputs = self.processor.feature_extractor(
@@ -76,7 +79,7 @@ class Collator:
         if (ids[:, 0] == self.decoder_start_token_id).all():
             ids = ids[:, 1:]
         return {
-            "input_features": inputs.input_features,
+            "input_features": inputs.input_features.to(self.features_dtype),
             "attention_mask": inputs.attention_mask,
             "labels": ids,
         }
@@ -190,7 +193,9 @@ def main() -> None:
         args=training_args,
         train_dataset=UtteranceDataset(train_utterances, args.telephone_prob),
         eval_dataset=UtteranceDataset(eval_utterances),
-        data_collator=Collator(processor, decoder_start_token_id),
+        data_collator=Collator(
+            processor, decoder_start_token_id, torch.float16 if args.lora_r else torch.float32
+        ),
         compute_metrics=compute_metrics,
         processing_class=processor,
     )
