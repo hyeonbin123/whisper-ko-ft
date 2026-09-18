@@ -16,7 +16,7 @@ def write_report(root, name, set_name, rows):
 def rows(edits, digit_flags=None, length=10):
     flags = digit_flags or [False] * len(edits)
     return [
-        {"id": f"u{n}", "edits": e, "length": length, "has_digit": flag}
+        {"id": f"u{n}", "edits": e, "length": length, "has_digit": flag, "reference": "문장"}
         for n, (e, flag) in enumerate(zip(edits, flags, strict=True))
     ]
 
@@ -69,3 +69,22 @@ def test_verdict_no_effect_when_the_gain_is_only_digit_notation(reports):
     # Overall -40%, but every gain is in the digit utterance: the rest is unchanged.
     prepare_verdict(reports, zeroth_candidate=[0, 2, 2, 2], fleurs_candidate=[1, 1])
     assert analyze.verdict("whisper-small", "cand") == "효과 없음"
+
+
+def test_compare_can_split_by_digits_in_the_reference(reports):
+    base = [
+        {"id": "a", "edits": 1, "length": 10, "reference": "1978년"},
+        {"id": "b", "edits": 1, "length": 10, "reference": "올해"},
+    ]
+    cand = [
+        {"id": "a", "edits": 6, "length": 10, "reference": "1978년"},
+        {"id": "b", "edits": 1, "length": 10, "reference": "올해"},
+    ]
+    write_report(reports, "base", "fleurs-ko-val", base)
+    write_report(reports, "cand", "fleurs-ko-val", cand)
+
+    with_digit = analyze.compare("fleurs-ko-val", "cand", "base", reference_digits=True)
+    without = analyze.compare("fleurs-ko-val", "cand", "base", reference_digits=False)
+
+    assert (with_digit["utterances"], round(with_digit["delta"], 3)) == (1, 0.5)
+    assert (without["utterances"], without["delta"]) == (1, 0.0)

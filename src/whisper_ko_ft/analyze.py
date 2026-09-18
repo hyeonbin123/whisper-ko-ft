@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 
 import numpy as np
 
@@ -28,6 +29,7 @@ BASE_MODELS = ("whisper-small", "whisper-large-v3-turbo")
 IN_DOMAIN_RELATIVE = -0.20
 IN_DOMAIN_NO_DIGITS_RELATIVE = -0.10
 OUT_OF_DOMAIN_MAX_INCREASE = 0.010
+_DIGIT = re.compile(r"[0-9]")
 
 
 def load_rows(report: str, set_name: str) -> dict[str, dict]:
@@ -97,13 +99,28 @@ def table(set_name: str, reports: list[str], baseline: str | None, split_digits:
             print(line)
 
 
-def compare(set_name: str, candidate: str, baseline: str, without_digits: bool = False) -> dict:
-    """Rates of two reports over their shared utterances and the paired interval of the difference."""
+def compare(
+    set_name: str,
+    candidate: str,
+    baseline: str,
+    without_digits: bool = False,
+    reference_digits: bool | None = None,
+) -> dict:
+    """Rates of two reports over their shared utterances and the paired interval of the difference.
+
+    `without_digits` drops the fixed digit utterances of a Zeroth set. `reference_digits` keeps only the
+    utterances whose reference has (True) or lacks (False) an Arabic digit, for sets like FLEURS whose
+    references write numbers as digits.
+    """
     cand_rows, base_rows = load_rows(candidate, set_name), load_rows(baseline, set_name)
     ids = sorted(set(cand_rows) & set(base_rows))
     if without_digits:
         digits = digit_ids(set_name)
         ids = [i for i in ids if i not in digits]
+    if reference_digits is not None:
+        ids = [i for i in ids if bool(_DIGIT.search(base_rows[i]["reference"])) == reference_digits]
+    if not ids:
+        return {"utterances": 0}
     cand_edits, lengths = arrays(cand_rows, ids)
     base_edits, _ = arrays(base_rows, ids)
     base, cand = error_rate(base_edits, lengths), error_rate(cand_edits, lengths)
@@ -121,11 +138,17 @@ def verdict(baseline: str, candidate: str) -> str:
     overall = compare("zeroth-val", candidate, baseline)
     no_digits = compare("zeroth-val", candidate, baseline, without_digits=True)
     other = compare("fleurs-ko-val", candidate, baseline)
-    for label, result in (
+    shown = [
         ("zeroth-val all", overall),
         ("zeroth-val no digits", no_digits),
         ("fleurs-ko-val", other),
-    ):
+        # Reported since stage 3, not part of the verdict (docs/experiments.md, stage 2 post-hoc analysis).
+        ("  reference has digit", compare("fleurs-ko-val", candidate, baseline, reference_digits=True)),
+        ("  reference has none", compare("fleurs-ko-val", candidate, baseline, reference_digits=False)),
+    ]
+    for label, result in shown:
+        if not result["utterances"]:
+            continue
         low, high = result["delta_interval"]
         print(
             f"{label:22s} {result['baseline'] * 100:5.2f}% -> {result['candidate'] * 100:5.2f}%"
