@@ -5,8 +5,11 @@ Usage:
     uv run python -m whisper_ko_ft.analyze table --set zeroth-val --reports whisper-small small-a \
         --baseline whisper-small
 
+    uv run python -m whisper_ko_ft.analyze verdict --baseline whisper-small --candidate small-a
+
 `digits` fixes the list of "digit utterances" of a set (docs/experiments.md, "숫자 표기"): utterances where
 either base model wrote an Arabic digit. It is written once and not overwritten without --force.
+`verdict` applies the verdict rules of stages 2 and 3 to validation reports.
 """
 
 from __future__ import annotations
@@ -20,6 +23,11 @@ from whisper_ko_ft.metrics import difference_interval, error_rate, interval
 from whisper_ko_ft.paths import REPORTS
 
 BASE_MODELS = ("whisper-small", "whisper-large-v3-turbo")
+# Verdict rules (docs/experiments.md, "판정 규칙"): relative CER change on Zeroth validation, overall and
+# without digit utterances, and the largest allowed absolute CER increase on FLEURS Korean validation.
+IN_DOMAIN_RELATIVE = -0.20
+IN_DOMAIN_NO_DIGITS_RELATIVE = -0.10
+OUT_OF_DOMAIN_MAX_INCREASE = 0.010
 
 
 def load_rows(report: str, set_name: str) -> dict[str, dict]:
@@ -89,6 +97,55 @@ def table(set_name: str, reports: list[str], baseline: str | None, split_digits:
             print(line)
 
 
+def compare(set_name: str, candidate: str, baseline: str, without_digits: bool = False) -> dict:
+    """Rates of two reports over their shared utterances and the paired interval of the difference."""
+    cand_rows, base_rows = load_rows(candidate, set_name), load_rows(baseline, set_name)
+    ids = sorted(set(cand_rows) & set(base_rows))
+    if without_digits:
+        digits = digit_ids(set_name)
+        ids = [i for i in ids if i not in digits]
+    cand_edits, lengths = arrays(cand_rows, ids)
+    base_edits, _ = arrays(base_rows, ids)
+    base, cand = error_rate(base_edits, lengths), error_rate(cand_edits, lengths)
+    return {
+        "utterances": len(ids),
+        "baseline": base,
+        "candidate": cand,
+        "delta": cand - base,
+        "relative": (cand - base) / base,
+        "delta_interval": difference_interval(cand_edits, base_edits, lengths),
+    }
+
+
+def verdict(baseline: str, candidate: str) -> str:
+    overall = compare("zeroth-val", candidate, baseline)
+    no_digits = compare("zeroth-val", candidate, baseline, without_digits=True)
+    other = compare("fleurs-ko-val", candidate, baseline)
+    for label, result in (
+        ("zeroth-val all", overall),
+        ("zeroth-val no digits", no_digits),
+        ("fleurs-ko-val", other),
+    ):
+        low, high = result["delta_interval"]
+        print(
+            f"{label:22s} {result['baseline'] * 100:5.2f}% -> {result['candidate'] * 100:5.2f}%"
+            f"  {result['delta'] * 100:+.2f}%p [{low * 100:+.2f}, {high * 100:+.2f}]"
+            f"  relative {result['relative'] * 100:+.1f}%  ({result['utterances']} utterances)"
+        )
+    in_domain = (
+        overall["relative"] <= IN_DOMAIN_RELATIVE and no_digits["relative"] <= IN_DOMAIN_NO_DIGITS_RELATIVE
+    )
+    kept = other["delta"] <= OUT_OF_DOMAIN_MAX_INCREASE
+    if not in_domain:
+        label = "효과 없음"
+    else:
+        label = "범용 개선" if kept else "도메인 전용"
+    print(f"1. 같은 도메인 개선: {'만족' if in_domain else '불만족'}")
+    print(f"2. 다른 도메인 유지: {'만족' if kept else '불만족'}")
+    print(f"판정: {label}")
+    return label
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -100,10 +157,15 @@ def main() -> None:
     tab.add_argument("--reports", nargs="+", required=True)
     tab.add_argument("--baseline")
     tab.add_argument("--no-digit-split", action="store_true", help="FLEURS sets have no digit list")
+    ver = commands.add_parser("verdict")
+    ver.add_argument("--baseline", required=True)
+    ver.add_argument("--candidate", required=True)
     args = parser.parse_args()
 
     if args.command == "digits":
         write_digits(args.set_name, args.force)
+    elif args.command == "verdict":
+        verdict(args.baseline, args.candidate)
     else:
         table(args.set_name, args.reports, args.baseline, not args.no_digit_split)
 
