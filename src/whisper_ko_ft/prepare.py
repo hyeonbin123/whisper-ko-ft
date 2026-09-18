@@ -54,6 +54,7 @@ def build_store(name: str, folder: Path, text_column: str, speaker_column: str |
     CACHE.mkdir(parents=True, exist_ok=True)
     columns = ["id", "audio", text_column] + ([speaker_column] if speaker_column else [])
     entries: list[dict] = []
+    seen: dict[str, int] = {}
     offset = 0
     partial = CACHE / f"{name}.int16.part"
     with partial.open("wb") as out:
@@ -63,9 +64,12 @@ def build_store(name: str, folder: Path, text_column: str, speaker_column: str |
                 for row in batch.to_pylist():
                     samples = decode(row["audio"]["bytes"])
                     out.write(samples.tobytes())
+                    # FLEURS ids are sentence ids: several speakers read the same sentence.
+                    source_id = str(row["id"])
+                    seen[source_id] = seen.get(source_id, 0) + 1
                     entries.append(
                         {
-                            "id": str(row["id"]),
+                            "id": source_id if seen[source_id] == 1 else f"{source_id}#{seen[source_id]}",
                             "speaker": str(row[speaker_column]) if speaker_column else "",
                             "text": row[text_column].strip(),
                             "store": name,
