@@ -73,12 +73,13 @@ def main() -> None:
     for begin in range(0, len(utterances), args.batch_size):
         batch = utterances[begin : begin + args.batch_size]
         audio = [stores.setdefault(u.store, AudioStore(u.store)).read(u) for u in batch]
-        features = processor.feature_extractor(
-            audio, sampling_rate=SAMPLE_RATE, return_tensors="pt", device="cuda"
-        ).input_features.to("cuda", dtype=torch.float16)
+        inputs = processor.feature_extractor(
+            audio, sampling_rate=SAMPLE_RATE, return_tensors="pt", return_attention_mask=True, device="cuda"
+        )
         with torch.inference_mode():
             ids = model.generate(
-                input_features=features,
+                input_features=inputs.input_features.to("cuda", dtype=torch.float16),
+                attention_mask=inputs.attention_mask.to("cuda"),
                 language=language,
                 task="transcribe",
                 num_beams=1,
