@@ -2,7 +2,7 @@
 
 공개 한국어 음성 데이터(Zeroth-Korean, 51.6시간)로 Whisper를 파인튜닝하고, **미리 정한 규칙으로 전후를 측정**하는 프로젝트. 같은 도메인에서 얼마나 좋아지는지뿐 아니라 다른 도메인(FLEURS)과 영어에서 무엇을 잃는지, 전화 음질(8kHz)에서는 어떻게 되는지를 함께 잰다.
 
-진행 중이다. 계획은 [docs/plan.md](docs/plan.md), 측정 규칙과 결과는 [docs/experiments.md](docs/experiments.md).
+계획은 [docs/plan.md](docs/plan.md), 측정 규칙과 결과는 [docs/experiments.md](docs/experiments.md).
 
 ## 단계
 
@@ -13,7 +13,7 @@
 | 2. small 전체 파인튜닝 | 후보 설정 중 validation으로 선택, 다른 도메인·영어 확인 | 완료 (도메인 전용) |
 | 3. turbo LoRA | 같은 절차 | 완료 (도메인 전용) |
 | 4. 전화 음질 | 8kHz·μ-law 조건의 기준선과, 그 조건을 섞어 학습한 모델 | 완료 (섞어 학습하는 것이 이득, 크기는 작음) |
-| 5. 정리 | 결과표, 한계, 추론 속도 | 예정 |
+| 5. 되풀이 오류와 추론 엔진 | faster-whisper의 재시도가 되풀이 오류를 막는지 | 완료 (막는다) |
 
 ## 지금까지의 결과
 
@@ -29,6 +29,8 @@ RTX 2080 Ti, 대괄호는 95% 부트스트랩 구간. 전체 표와 규칙은 [d
 | FLEURS 영어 test, WER | 7.08% [6.38, 7.76] | **4.95%** [4.51, 5.42] | 7.63% [6.89, 8.39] | 5.23% [4.78, 5.71] |
 | 배치 1 속도 (음성 초 ÷ 걸린 초) | 12.1 | 21.3 | 12.0 | turbo와 같은 구조 |
 | 배치 1 GPU 메모리 | 551MB | 1,599MB | 550MB | 〃 |
+
+**5단계(되풀이 오류)의 판정: 추론 엔진의 재시도가 막는다.** 파인튜닝한 small을 faster-whisper로 돌리면 재시도를 껐을 때 2,214발화 중 1개가 같은 구절을 되풀이했고(오류 199~231개), 재시도를 켜면 그 한 발화만 다시 디코딩되어 0개가 됐다. 다른 발화와 속도는 그대로다. 되풀이에 빠지는 발화는 엔진(Transformers, faster-whisper)에 따라 달라서, 특정 발화가 아니라 모델의 성질로 봐야 한다.
 
 **4단계(전화 음질)의 판정: 섞어 학습하는 것이 이득.** 음성을 300~3400Hz, 8kHz, μ-law로 바꾼 조건이다(실제 통화 녹음이 아니다).
 
@@ -49,6 +51,15 @@ RTX 2080 Ti, 대괄호는 95% 부트스트랩 구간. 전체 표와 규칙은 [d
 - 한국어만 학습한 비용은 작았다. FLEURS 영어 WER은 small 전체 파인튜닝에서 +0.55%p, turbo LoRA에서 +0.28%p(test)
 - turbo는 크기가 3배지만 한 발화씩 처리할 때는 small보다 1.8배 빠르다(디코더가 4층). 파인튜닝한 small이 turbo를 대신할 수 있는 경우는 GPU 메모리가 묶여 있고 도메인과 표기가 정해진 때뿐이다
 
+## 한계
+- **데이터**: 읽는 말투 한 종류(Zeroth-Korean, 뉴스 문장 낭독)로만 학습했다. 대화체, 실제 통화, 잡음이 있는 환경에서는 재지 않았다. 전화 음질은 공개 데이터를 변환한 것이지 통화 녹음이 아니다
+- **Whisper가 이미 본 데이터일 수 있다**: Whisper의 학습 데이터는 공개되지 않았다. Zeroth-Korean이나 FLEURS가 들어 있었는지 확인할 방법이 없다
+- **작은 test 묶음**: Zeroth test는 457발화, 화자 10명이다. 발화 하나가 구간을 크게 흔들었다(2단계). 세 모델이 똑같이 틀린, 정답과 녹음이 맞지 않아 보이는 발화도 하나 있다(빼지 않았다)
+- **규칙에 없던 분석**: FLEURS를 숫자 유무로 나눈 분석은 2단계 결과를 본 뒤에 했다. 사후 분석이라고 표시했고 판정은 바꾸지 않았다. 3단계부터는 재기 전에 규칙에 넣었다
+- **학습 설정을 넓게 찾지 않았다**: 후보는 단계마다 한두 개다. turbo LoRA는 1,500스텝에서도 오류율이 내려가는 중이었다(학습 시간 때문에 미리 정한 규칙으로 줄인 값). 더 나은 설정이 있을 수 있다
+- **한 대의 PC**: RTX 2080 Ti(fp16만 지원) 한 장에서 학습하고 쟀다. 일부 측정은 같은 GPU를 다른 프로그램이 쓰는 동안 했고, 그런 측정의 속도 수치는 쓰지 않았다
+- **표기**: 파인튜닝한 모델은 숫자와 영문 약어를 한글로 풀어 쓴다. 그 표기를 원하지 않는 서비스라면 학습 전에 정답 텍스트의 표기를 바꾸거나, 인식 결과를 되돌리는 후처리가 필요하다. 이 저장소는 둘 다 다루지 않았다
+
 ## 실행
 
 준비: NVIDIA GPU(11GB에서 확인), Python 3.11, [uv](https://docs.astral.sh/uv/).
@@ -64,6 +75,16 @@ uv run python -m whisper_ko_ft.train --run-name small-a --learning-rate 1e-5   #
 
 - `prepare`는 Zeroth-Korean train에서 화자 10명을 validation으로 떼어 낸다 (화자 ID의 SHA-256 순, 규칙은 experiments.md)
 - `evaluate`는 `reports/<이름>/<묶음>.json`에 요약과 발화별 정답·가설·오류 수를 남긴다. test 묶음은 `--allow-test`를 줘야 잰다 (단계마다 한 번만 재기 위한 장치)
+
+faster-whisper로 재기 (5단계):
+
+```bash
+uv sync --group ct2
+uv run ct2-transformers-converter --model outputs/small-a/best --output_dir outputs/small-a/ct2 --quantization float16 --copy_files tokenizer.json
+uv run python -m whisper_ko_ft.evaluate_ct2 --model outputs/small-a/ct2 --name small-a-ct2-fallback --set zeroth-val --fallback
+```
+
+LoRA 후보와 전화 음질 조건의 명령은 [docs/experiments.md](docs/experiments.md)의 각 단계 설정과 `train.py`, `evaluate.py`의 도움말(`--lora-r`, `--lora-targets`, `--telephone-prob`, `--adapter`, `--channel telephone`)을 따른다.
 
 테스트: `uv run pytest`, `uv run ruff check .`
 
