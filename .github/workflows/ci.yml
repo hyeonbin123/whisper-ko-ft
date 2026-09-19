@@ -16,7 +16,6 @@ jobs:
       # the CPU build first and then the project without touching torch again.
       - name: Install
         run: |
-          uv venv
           uv pip install torch --index-url https://download.pytorch.org/whl/cpu
           uv pip install -e . pytest ruff
       - name: Lint
