@@ -1,9 +1,8 @@
 """Transcribe a set with faster-whisper (CTranslate2), with or without its decoding fallback.
 
 Usage (needs `uv sync --group ct2` and a model converted with ct2-transformers-converter):
-    uv run python -m whisper_ko_ft.evaluate_ct2 --model outputs/small-a/ct2 --name small-a-ct2 --set zeroth-val
-    uv run python -m whisper_ko_ft.evaluate_ct2 --model outputs/small-a/ct2 --name small-a-ct2-fallback \
-        --set zeroth-val --fallback
+    uv run python -m whisper_ko_ft.evaluate_ct2 --model outputs/small-a/ct2 --name a-ct2 --set zeroth-val
+    (add --fallback, with another --name, to turn on the decoding fallback)
 
 One utterance at a time, greedy, fixed language, no timestamps, no VAD (docs/experiments.md, "5단계").
 --fallback turns on faster-whisper's defaults: when the text compresses too well (a repeated phrase) or the
