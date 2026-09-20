@@ -1,0 +1,3971 @@
+{
+ "summary": {
+  "model": "openai/whisper-large-v3-turbo",
+  "adapter": "outputs/turbo-n/best",
+  "set": "fleurs-en-val",
+  "channel": null,
+  "language": "en",
+  "metric": "wer",
+  "utterances": 394,
+  "skipped_empty_reference": 0,
+  "error_rate": 0.06091,
+  "interval_95": [
+   0.05222,
+   0.0706
+  ],
+  "hypotheses_with_digit": 60,
+  "over_30_seconds": 1,
+  "audio_seconds": 3765.2,
+  "wall_seconds": 33.7,
+  "audio_seconds_per_second": 111.8,
+  "batch_size": 16,
+  "peak_gpu_memory_mb": 2525,
+  "limit": null,
+  "commit": "0db1c24",
+  "measured_at": "2026-09-20T05:44:52+00:00",
+  "torch": "2.11.0+cu128",
+  "gpu": "NVIDIA GeForce RTX 2080 Ti"
+ },
+ "utterances": [
+  {
+   "id": "1548",
+   "speaker": "",
+   "seconds": 6.54,
+   "reference": "when you call someone who is thousands of miles away you are using a satellite",
+   "hypothesis": "When you call someone who is thousands of miles away, you are using a satellite.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1620",
+   "speaker": "",
+   "seconds": 16.38,
+   "reference": "now widely available throughout the archipelago javanese cuisine features an array of simply seasoned dishes the predominant flavorings the javanese favor being peanuts chillies sugar especially javanese coconut sugar and various aromatic spices",
+   "hypothesis": "Now widely available throughout the archipelago, Japanese cuisine features an array of simply seasoned dishes, the predominant flavorings the Japanese favor being peanut chilies, sugar, especially Japanese coconut sugar, and various aromatic spices.",
+   "edits": 5,
+   "length": 33,
+   "has_digit": false
+  },
+  {
+   "id": "1510",
+   "speaker": "",
+   "seconds": 7.92,
+   "reference": "the u.n. also hopes to finalize a fund to help countries affected by global warming to cope with the impacts",
+   "hypothesis": "The UN also hopes to finalize a fund to help countries affected by global warming to cope with the impacts.",
+   "edits": 2,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1578",
+   "speaker": "",
+   "seconds": 4.14,
+   "reference": "then lakkha singh took the lead in singing the bhajans",
+   "hypothesis": "Then Laka sing to the lead and singing the Bajshams.",
+   "edits": 5,
+   "length": 10,
+   "has_digit": false
+  },
+  {
+   "id": "1652",
+   "speaker": "",
+   "seconds": 4.92,
+   "reference": "the major religion in moldova is orthodox christian",
+   "hypothesis": "The major religion in Moldova is Orthodox Christian.",
+   "edits": 0,
+   "length": 8,
+   "has_digit": false
+  },
+  {
+   "id": "1531",
+   "speaker": "",
+   "seconds": 4.44,
+   "reference": "the east african islands are in the indian ocean off the eastern coast of africa",
+   "hypothesis": "The East African islands are in the Indian Ocean off the eastern coast of Africa.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1528",
+   "speaker": "",
+   "seconds": 6.84,
+   "reference": "some festivals have special camping areas for families with young children",
+   "hypothesis": "Some festivals have special camping areas for families with young children.",
+   "edits": 0,
+   "length": 11,
+   "has_digit": false
+  },
+  {
+   "id": "1595",
+   "speaker": "",
+   "seconds": 10.02,
+   "reference": "the tibetan buddhism is based on the teachings of buddha but were extended by the mahayana path of love and by a lot of techniques from indian yoga",
+   "hypothesis": "The Thibitan Buddhism is based on the teachings of Buddha but were extended by the Myana Path of Love and by a lot of techniques from Indian Yoga.",
+   "edits": 2,
+   "length": 28,
+   "has_digit": false
+  },
+  {
+   "id": "1559",
+   "speaker": "",
+   "seconds": 9.32,
+   "reference": "pronunciation is relatively easy in italian since most words are pronounced exactly how they are written",
+   "hypothesis": "Pronunciation is relatively easy in Italian since most words are pronounced exactly how they are written",
+   "edits": 0,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1633",
+   "speaker": "",
+   "seconds": 9.48,
+   "reference": "in this dynamic transport shuttle everyone is somehow connected with and supporting a transport system based on private cars",
+   "hypothesis": "In this dynamic transport shuttle everyone is connected with and supporting a transport system based on private cars.",
+   "edits": 1,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1560",
+   "speaker": "",
+   "seconds": 7.32,
+   "reference": "as soon as you get out of the current swimming back is no more difficult than normally",
+   "hypothesis": "As soon as you get out of the current, swimming back is no more difficult than normally.",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1536",
+   "speaker": "",
+   "seconds": 8.16,
+   "reference": "local authorities are warning residents in the vicinity of the plant to stay indoors turn off air-conditioners and not to drink tap water",
+   "hypothesis": "Local authorities are warning residents in the vicinity of the plant to stay indoors, turn off air conditioners, and not to drink tap water.",
+   "edits": 0,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1619",
+   "speaker": "",
+   "seconds": 7.08,
+   "reference": "however most signs are indicated only in catalan because it is established by law as the first official language",
+   "hypothesis": "However, most signs are indicated only in Catalan because it is established by law as the first official language.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1598",
+   "speaker": "",
+   "seconds": 7.54,
+   "reference": "although three people were inside the house when the car impacted it none of them were hurt",
+   "hypothesis": "Although three people were inside the house when the car impacted it, none of them were hurt",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1549",
+   "speaker": "",
+   "seconds": 10.06,
+   "reference": "these theories suggest that people have certain needs and/or desires which have been internalized as they mature to adulthood",
+   "hypothesis": "These theories suggest that people have certain needs and or desires which have been internalized as they mature to adulthood.",
+   "edits": 0,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1583",
+   "speaker": "",
+   "seconds": 17.54,
+   "reference": "she came to this conclusion due to the multitude of positive comments and encouragement sent to her by both female and male individuals urging that contraception medication be considered a medical necessity",
+   "hypothesis": "She came to this conclusion due to the multitude of positive comments and encouragement sent to her by both female and male individuals urging that contraception medication be considered a medical necessity",
+   "edits": 0,
+   "length": 32,
+   "has_digit": false
+  },
+  {
+   "id": "1605",
+   "speaker": "",
+   "seconds": 12.58,
+   "reference": "due to the long distance from the continent mammals were unable to make the journey making the giant tortoise the primary grazing animal in the galapagos",
+   "hypothesis": "Due to the long distance from the continent, mammals were unable to make the journey making the giant tortoise the primary raising animal in the Gopalos.",
+   "edits": 2,
+   "length": 26,
+   "has_digit": false
+  },
+  {
+   "id": "1593",
+   "speaker": "",
+   "seconds": 8.52,
+   "reference": "eventually wooden wheels were replaced by iron wheels in 1767 the first full-iron rails were introduced",
+   "hypothesis": "Eventually wooden wheels were replaced by iron wheels. In 1767 the first full iron rails were introduced.",
+   "edits": 0,
+   "length": 17,
+   "has_digit": true
+  },
+  {
+   "id": "1551",
+   "speaker": "",
+   "seconds": 7.8,
+   "reference": "they are still trying to determine just how large the crash was and how the earth will be affected",
+   "hypothesis": "They are still trying to determine just how large the crash was and how the Earth will be affected.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1596",
+   "speaker": "",
+   "seconds": 6.78,
+   "reference": "naturalists and philosophers focused on classical texts and in particular on the bible in latin",
+   "hypothesis": "Naturalists and philosophers focused on classical texts and in particular on the Bible and Latin.",
+   "edits": 1,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1573",
+   "speaker": "",
+   "seconds": 8.16,
+   "reference": "a satellite phone is not generally a replacement for a mobile phone as you have to be outdoors with clear line of sight to the satellite to make a phone call",
+   "hypothesis": "A satellite phone is not generally a replacement for a mobile phone as you have to be outdoors with clear line of sight to the satellite to make a phone call.",
+   "edits": 0,
+   "length": 31,
+   "has_digit": false
+  },
+  {
+   "id": "1629",
+   "speaker": "",
+   "seconds": 8.16,
+   "reference": "some reports put the official death toll at eight and official reports confirm that up to 30 were injured but final numbers are not yet known",
+   "hypothesis": "Some reports put the official death toll at eight, and official reports confirm that up to 30 were injured, but final numbers are not yet known.",
+   "edits": 0,
+   "length": 26,
+   "has_digit": true
+  },
+  {
+   "id": "1615",
+   "speaker": "",
+   "seconds": 6.78,
+   "reference": "thousands of years ago a man called aristarchus said that the solar system moved around the sun",
+   "hypothesis": "Thousands of years ago, a man called Aris Churse said the solar system moved around the sun.",
+   "edits": 3,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1560#2",
+   "speaker": "",
+   "seconds": 5.52,
+   "reference": "as soon as you get out of the current swimming back is no more difficult than normally",
+   "hypothesis": "As soon as you get out of the current, swimming back is no more difficult than normally.",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1526",
+   "speaker": "",
+   "seconds": 13.74,
+   "reference": "if you visit the arctic or antarctic areas in the winter you will experience the polar night which means that the sun doesn't rise above the horizon",
+   "hypothesis": "If you visit the Arctic or Antarctic areas in the winter, you will experience the polar night, which means that the sun doesn't rise above the horizon.",
+   "edits": 0,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1550",
+   "speaker": "",
+   "seconds": 10.68,
+   "reference": "skiing is a major travelling activity with many enthusiasts occasionally known as ski bums planning entire vacations around skiing at a particular location",
+   "hypothesis": "Skiing is a major traveling activity with many enthusiasts occasionally known as ski bones planning entire vacations around skiing at a particular location.",
+   "edits": 2,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1518",
+   "speaker": "",
+   "seconds": 11.76,
+   "reference": "a former filipino policeman has kept hong kong tourists hostage by hijacking their bus in manila the capital of the philippines",
+   "hypothesis": "A former Filipino policeman has kept Hong Kong tourists hostage while hijacking their bus in Manila, the capital of the Philippines.",
+   "edits": 1,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1629#2",
+   "speaker": "",
+   "seconds": 8.04,
+   "reference": "some reports put the official death toll at eight and official reports confirm that up to 30 were injured but final numbers are not yet known",
+   "hypothesis": "Some reports put the official death toll at eight and official reports confirm that up to 30 were injured but final numbers are not yet known.",
+   "edits": 0,
+   "length": 26,
+   "has_digit": true
+  },
+  {
+   "id": "1607",
+   "speaker": "",
+   "seconds": 3.84,
+   "reference": "it's worth half an hour to stroll about the intriguing village",
+   "hypothesis": "It's worth half an hour to stroll about the intriguing village.",
+   "edits": 0,
+   "length": 11,
+   "has_digit": false
+  },
+  {
+   "id": "1517",
+   "speaker": "",
+   "seconds": 7.02,
+   "reference": "research in ai involves making machines to automate tasks that require intelligent behavior",
+   "hypothesis": "Research in AI involves making machines to automate tasks that require intelligent behavior.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1511",
+   "speaker": "",
+   "seconds": 9.48,
+   "reference": "soon officers equipped with riot gear entered the yard and cornered the inmates with tear gas",
+   "hypothesis": "Soon, officers equipped with riot gear entered the yard and cornered the inmates with tear gas.",
+   "edits": 0,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1530",
+   "speaker": "",
+   "seconds": 4.92,
+   "reference": "it had been scheduled to be cut down on tuesday but was saved after an emergency court ruling",
+   "hypothesis": "It has been scheduled to be cut down on Tuesday but was saved after an emergency court ruling.",
+   "edits": 1,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1587",
+   "speaker": "",
+   "seconds": 5.52,
+   "reference": "the first cases of the disease this season were reported in late july",
+   "hypothesis": "The first cases of the disease this season were reported in late July.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1539",
+   "speaker": "",
+   "seconds": 8.46,
+   "reference": "members of a subculture often signal their membership through a distinctive and symbolic use of style which includes fashions mannerisms and argot",
+   "hypothesis": "Members of a subculture often signal their membership through a distinctive and symbolic use of style which includes fashions, mannerisms, and argot.",
+   "edits": 0,
+   "length": 22,
+   "has_digit": false
+  },
+  {
+   "id": "1598#2",
+   "speaker": "",
+   "seconds": 5.28,
+   "reference": "although three people were inside the house when the car impacted it none of them were hurt",
+   "hypothesis": "Although three people were inside the house when the car impacted it, none of them were hurt.",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1642",
+   "speaker": "",
+   "seconds": 7.44,
+   "reference": "the war expenditures of u.s. imperialism in the conquest of the philippines were paid for by the filipino people themselves",
+   "hypothesis": "The war expeditures of U.S. imperialism and the conquest of the Philippines were paid for by the Filipino people themselves.",
+   "edits": 2,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1613",
+   "speaker": "",
+   "seconds": 9.66,
+   "reference": "next some saddles particularly english saddles have safety bars that allow a stirrup leather to fall off the saddle if pulled backwards by a falling rider",
+   "hypothesis": "Next some saddles particularly English saddles have safety bars that allow a stirrup leather to fall off the saddle if pulled backwards by a falling rider.",
+   "edits": 0,
+   "length": 26,
+   "has_digit": false
+  },
+  {
+   "id": "1635",
+   "speaker": "",
+   "seconds": 8.76,
+   "reference": "we can start living more friendly to the environment we can join to the environmental movement and we can even be activists in order to reduce the future suffering in some degree",
+   "hypothesis": "We can start living more friendly to the environment, we can join to the environmental movement, and we can even be activists in order to reduce the future suffering in some degree.",
+   "edits": 0,
+   "length": 32,
+   "has_digit": false
+  },
+  {
+   "id": "1563",
+   "speaker": "",
+   "seconds": 10.74,
+   "reference": "the researchers suggested that even though this is the tail of a young dinosaur the sample shows adult plumage and not a chick's down",
+   "hypothesis": "The researchers suggested that even though this is the tail of a young dinosaur, the sample shows adult plumage and not a chick's down.",
+   "edits": 0,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1586",
+   "speaker": "",
+   "seconds": 12.52,
+   "reference": "her first was the slalom where she earned a did not finish in her first run 36 of the 116 competitors had the same result in that race",
+   "hypothesis": "Her first was the Shalom where she earned a did not finish in her first run. 36 of the 116 competitors had the same result in that race.",
+   "edits": 1,
+   "length": 28,
+   "has_digit": true
+  },
+  {
+   "id": "1541",
+   "speaker": "",
+   "seconds": 10.92,
+   "reference": "courier companies are well paid for delivering things quickly frequently time is very important with business documents merchandise or spare parts for an urgent repair",
+   "hypothesis": "Career companies are well paid for delivering things quickly. Frequently, time is very important with business documents, merchandise, or spare parts for an urgent repair.",
+   "edits": 1,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1619#2",
+   "speaker": "",
+   "seconds": 9.84,
+   "reference": "however most signs are indicated only in catalan because it is established by law as the first official language",
+   "hypothesis": "However, most signs are indicated only in Catalan because it is established by law as the first official language.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1520",
+   "speaker": "",
+   "seconds": 9.36,
+   "reference": "out of 1,400 people polled prior to the 2010 federal election those who oppose australia becoming a republic grew by 8 per cent since 2008",
+   "hypothesis": "Out of 1400 people polled prior to the 2010 federal election, those who oppose Australia becoming a republic grew by 8 percent since 2008.",
+   "edits": 4,
+   "length": 26,
+   "has_digit": true
+  },
+  {
+   "id": "1594",
+   "speaker": "",
+   "seconds": 10.98,
+   "reference": "some animals such as elephants and giraffes tend to approach closely to cars and standard equipment will allow good viewing",
+   "hypothesis": "Some animals such as elephants and giraffes tend to approach closely to cars and standard equipment will allow good viewing.",
+   "edits": 0,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1555",
+   "speaker": "",
+   "seconds": 5.52,
+   "reference": "in the churchyard there are interesting marble sculptures of doves over some tombs",
+   "hypothesis": "In the church yard there are interesting marble sculptures of dust over some tombs.",
+   "edits": 3,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1564",
+   "speaker": "",
+   "seconds": 7.32,
+   "reference": "some patients might have contracted the bug in the hospital dr moll thinks and at least two were hospital health workers",
+   "hypothesis": "Some patients might have contracted the bug in the hospital, Dr. Malthanks, and at least two were hospital health workers.",
+   "edits": 2,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1535",
+   "speaker": "",
+   "seconds": 12.18,
+   "reference": "it uses satellite-based technology as opposed to older ground-radar-based technology to allow air traffic controllers to pinpoint aircraft with greater precision and give pilots more accurate information",
+   "hypothesis": "It uses satellite based technology as opposed to older ground radar based technology to allow air traffic controllers to pinpoint aircraft with greater precision and give pilots more accurate information.",
+   "edits": 0,
+   "length": 30,
+   "has_digit": false
+  },
+  {
+   "id": "1546",
+   "speaker": "",
+   "seconds": 14.88,
+   "reference": "the feathers' structure suggests that they were not used in flight but rather for temperature regulation or display the researchers suggested that even though this is the tail of a young dinosaur the sample shows adult plumage and not a chick's down",
+   "hypothesis": "The feather's structure suggests that they were not used in flight, but rather for temperature regulation or display. The researchers suggest that even though this is the tail of a young dinosaur, the sample shows an adult plumage and not a chick's down.",
+   "edits": 3,
+   "length": 42,
+   "has_digit": false
+  },
+  {
+   "id": "1527",
+   "speaker": "",
+   "seconds": 23.44,
+   "reference": "poland's men's visually impaired skier maciej krezel and guide anna ogarzynska finished thirteenth in the super-g south korea's jong seork park finished twenty-fourth in the men's sitting super-g",
+   "hypothesis": "Poland's men's visually impaired skier Masy Jeff Kreskel and guide Anna Ogarzinska finished 13th in the Super G South Korea's Jong-Seok Park finished 24th in the men's sitting Super G",
+   "edits": 8,
+   "length": 31,
+   "has_digit": true
+  },
+  {
+   "id": "1513",
+   "speaker": "",
+   "seconds": 7.44,
+   "reference": "argentina is well known for having one of the best polo teams and players in the world",
+   "hypothesis": "Argentina is well known for having one of the best polo teams and players in the world",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1584",
+   "speaker": "",
+   "seconds": 10.56,
+   "reference": "widespread looting reportedly continued overnight as law enforcement officers were not present on bishkek's streets",
+   "hypothesis": "Widespread looting reportedly continued overnight as law enforcement officers were not present on Bishkek streets.",
+   "edits": 1,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1521",
+   "speaker": "",
+   "seconds": 5.52,
+   "reference": "the satellite in space gets the call and then reflects it back down almost instantly",
+   "hypothesis": "The satellite in space gets the call and then reflects it back down almost instantly.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1575",
+   "speaker": "",
+   "seconds": 15.32,
+   "reference": "israel demands an ongoing military presence in the valley for ten years once an agreement is signed while the pa agrees to leave such presence only for five years",
+   "hypothesis": "Israel demands an ongoing military presence in the valley for 10 years once an agreement is signed while the PA agrees to leave such presence only for five years.",
+   "edits": 1,
+   "length": 29,
+   "has_digit": true
+  },
+  {
+   "id": "1521#2",
+   "speaker": "",
+   "seconds": 7.42,
+   "reference": "the satellite in space gets the call and then reflects it back down almost instantly",
+   "hypothesis": "The satellite in space gets the call and then reflects it back down almost instantly",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1652#2",
+   "speaker": "",
+   "seconds": 6.02,
+   "reference": "the major religion in moldova is orthodox christian",
+   "hypothesis": "The major religion in Moldova is Orthodox Christian",
+   "edits": 0,
+   "length": 8,
+   "has_digit": false
+  },
+  {
+   "id": "1618",
+   "speaker": "",
+   "seconds": 11.82,
+   "reference": "the northern part or sentinel range has antarctica's highest mountains the vinson massif peaking at 4892 m mount vinson",
+   "hypothesis": "the northern part or central range has antarctica's highest mountains the vincent massif peaking at four thousand eight hundred and ninety two meters mount vincent",
+   "edits": 11,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1589",
+   "speaker": "",
+   "seconds": 9.9,
+   "reference": "the qualities that determine a subculture as distinct may be linguistic aesthetic religious political sexual geographical or a combination of factors",
+   "hypothesis": "The qualities that determine a subculture as distinct may be linguistic, aesthetic, religious, political, sexual, geographical, or a combination of factors.",
+   "edits": 0,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1511#2",
+   "speaker": "",
+   "seconds": 5.64,
+   "reference": "soon officers equipped with riot gear entered the yard and cornered the inmates with tear gas",
+   "hypothesis": "Soon officers equipped with riot gear entered the yard and cornered the inmates with tear gas.",
+   "edits": 0,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1568",
+   "speaker": "",
+   "seconds": 13.26,
+   "reference": "though it is widely used especially among non-romani the word gypsy is often considered offensive because of its associations with negative stereotypes and inaccurate perceptions of romani people",
+   "hypothesis": "Though it is widely used, especially among non-Romani, the word gypsy is often considered offensive because of its association with negative stereotypes and inaccurate perceptions of Romani people.",
+   "edits": 1,
+   "length": 29,
+   "has_digit": false
+  },
+  {
+   "id": "1575#2",
+   "speaker": "",
+   "seconds": 9.6,
+   "reference": "israel demands an ongoing military presence in the valley for ten years once an agreement is signed while the pa agrees to leave such presence only for five years",
+   "hypothesis": "Israel demands an ongoing military presence in the valley for ten years once an agreement is signed while the PA agrees to leave such presence only for five years.",
+   "edits": 0,
+   "length": 29,
+   "has_digit": false
+  },
+  {
+   "id": "1654",
+   "speaker": "",
+   "seconds": 8.04,
+   "reference": "i don't know if you realize it or not but most of the goods from central america came into this country duty-free",
+   "hypothesis": "I don't know if you realize it or not, but most of the goods from Central America came into this country duty free.",
+   "edits": 0,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1572",
+   "speaker": "",
+   "seconds": 6.18,
+   "reference": "three more bombs exploded near government buildings in a period of two hours",
+   "hypothesis": "Three more bombs exploded near government buildings in a period of two hours",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1659",
+   "speaker": "",
+   "seconds": 5.8,
+   "reference": "scientists say the explosion caused by the collision was massive",
+   "hypothesis": "Scientists say the explosion caused by the collision was massive",
+   "edits": 0,
+   "length": 10,
+   "has_digit": false
+  },
+  {
+   "id": "1644",
+   "speaker": "",
+   "seconds": 6.36,
+   "reference": "when asked for comment miller said mike talks a lot during the hearing...i was getting ready so i wasn't really hearing what he was saying.",
+   "hypothesis": "When asked for comment, Miller said, Mike talked a lot during the hearing. I was getting ready, so I wasn't really hearing what he was saying.",
+   "edits": 1,
+   "length": 26,
+   "has_digit": false
+  },
+  {
+   "id": "1648",
+   "speaker": "",
+   "seconds": 6.12,
+   "reference": "there were no large forests in the land of canaan so wood was extremely expensive",
+   "hypothesis": "there were no large forests in the land of canaan so wood was extremely expensive",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1616",
+   "speaker": "",
+   "seconds": 13.08,
+   "reference": "science now indicates that this massive carbon economy has dislodged the biosphere from one of its stable states that has supported human evolution for the past two million years",
+   "hypothesis": "Signs now indicate that this massive carbon economy has dislodged the biosphere from one of its stable states that has supported human evolution for the past two million years.",
+   "edits": 2,
+   "length": 29,
+   "has_digit": false
+  },
+  {
+   "id": "1615#2",
+   "speaker": "",
+   "seconds": 6.0,
+   "reference": "thousands of years ago a man called aristarchus said that the solar system moved around the sun",
+   "hypothesis": "Thousands of years ago, a man called Aristarchus said that the solar system moved around the sun.",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1600",
+   "speaker": "",
+   "seconds": 11.7,
+   "reference": "examples of on-site activities include hunting fishing photography bird watching and visiting parks and studying information about the ecosystem",
+   "hypothesis": "Examples on off-site activities include hunting, fishing, photography, bird watching, and visiting parks and studying information about the ecosystem.",
+   "edits": 2,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1557",
+   "speaker": "",
+   "seconds": 10.68,
+   "reference": "after seeing the horrors and atrocities of war during world war i nations desired to avoid such a situation again in the future",
+   "hypothesis": "After seeing the horrors and atrocities of war during World War I, nations desired to avoid such a situation again in the future.",
+   "edits": 0,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1514",
+   "speaker": "",
+   "seconds": 10.26,
+   "reference": "when the fighting ceased after the wounded were transported to the hospital about 40 of the other remaining inmates stayed in the yard and refused to return to their cells",
+   "hypothesis": "When the fighting ceased after the wounded were transported to the hospital, about 40 of the other remaining inmates stayed in the yard and refused to return to their cells.",
+   "edits": 0,
+   "length": 30,
+   "has_digit": true
+  },
+  {
+   "id": "1513#2",
+   "speaker": "",
+   "seconds": 5.82,
+   "reference": "argentina is well known for having one of the best polo teams and players in the world",
+   "hypothesis": "Argentina is well known for having one of the best polo teams and players in the world.",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1530#2",
+   "speaker": "",
+   "seconds": 5.1,
+   "reference": "it had been scheduled to be cut down on tuesday but was saved after an emergency court ruling",
+   "hypothesis": "It had been scheduled to be cut down on Tuesday but was saved after an emergency court healing.",
+   "edits": 1,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1566",
+   "speaker": "",
+   "seconds": 6.48,
+   "reference": "yet eighty percent of our goods were taxed through tariffs in central american countries we treat you",
+   "hypothesis": "Yet 80 percent of our goods were taxed through tariffs in Central American countries. We treat you.",
+   "edits": 1,
+   "length": 17,
+   "has_digit": true
+  },
+  {
+   "id": "1512",
+   "speaker": "",
+   "seconds": 10.68,
+   "reference": "this new environment has different resources and different competitors so the new population will need different features or adaptations to be a strong competitor than what they had needed before",
+   "hypothesis": "This new environment has different resources and different competitors so the new population will need different features or adaptations to be a strong competitor than what they had needed before.",
+   "edits": 0,
+   "length": 30,
+   "has_digit": false
+  },
+  {
+   "id": "1590",
+   "speaker": "",
+   "seconds": 10.58,
+   "reference": "the main local beer is number one' it is not a complex beer but pleasant and refreshing the other local beer is called manta",
+   "hypothesis": "The main local beer is number one. It is not a complex beer, but pleasant and refreshing. The other local beer is called Manta.",
+   "edits": 1,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1612",
+   "speaker": "",
+   "seconds": 5.22,
+   "reference": "water is spilling over the levee in a section 100 feet wide",
+   "hypothesis": "Water is spilling over the levee and is section 100 feet wide.",
+   "edits": 2,
+   "length": 12,
+   "has_digit": true
+  },
+  {
+   "id": "1533",
+   "speaker": "",
+   "seconds": 10.2,
+   "reference": "many common formats aps family of formats for example are equal to or closely approximate this aspect ratio",
+   "hypothesis": "Many common formats, EPS family of formats for example, are equal to or closely approximate this aspect ratio.",
+   "edits": 1,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1522",
+   "speaker": "",
+   "seconds": 10.14,
+   "reference": "technology offers the solution with virtual field trips students can look at museum artifacts visit an aquarium or admire beautiful art while sitting with their class",
+   "hypothesis": "Technology offers a solution with virtual field trips. Students can look at museum artifacts, visit an aquarium, or admire beautiful art while sitting with their class.",
+   "edits": 1,
+   "length": 26,
+   "has_digit": false
+  },
+  {
+   "id": "1600#2",
+   "speaker": "",
+   "seconds": 8.94,
+   "reference": "examples of on-site activities include hunting fishing photography bird watching and visiting parks and studying information about the ecosystem",
+   "hypothesis": "Examples of on-site activities include hunting, fishing, photography, bird watching in visiting parks and studying information about the ecosystem.",
+   "edits": 1,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1515",
+   "speaker": "",
+   "seconds": 6.86,
+   "reference": "it is martelly's fifth cep in four years",
+   "hypothesis": "It is Martelli's fifth CEP in four years",
+   "edits": 1,
+   "length": 8,
+   "has_digit": false
+  },
+  {
+   "id": "1613#2",
+   "speaker": "",
+   "seconds": 13.4,
+   "reference": "next some saddles particularly english saddles have safety bars that allow a stirrup leather to fall off the saddle if pulled backwards by a falling rider",
+   "hypothesis": "Next some saddles particularly English saddles have safety bars that allow a stirrup leather to fall off the saddle if pulled backwards by a falling rider",
+   "edits": 0,
+   "length": 26,
+   "has_digit": false
+  },
+  {
+   "id": "1547",
+   "speaker": "",
+   "seconds": 11.04,
+   "reference": "nhk also reported that the kashiwazaki kariwa nuclear power plant in niigata prefecture was operating normally",
+   "hypothesis": "NHK also reported that the Kashiwaki Kira Nuclear Power Plant in Nijigata pre-future was operating normally.",
+   "edits": 5,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1620#2",
+   "speaker": "",
+   "seconds": 18.6,
+   "reference": "now widely available throughout the archipelago javanese cuisine features an array of simply seasoned dishes the predominant flavorings the javanese favor being peanuts chillies sugar especially javanese coconut sugar and various aromatic spices",
+   "hypothesis": "Not widely available throughout the archipelago, Japanese cuisine features an array of simply seasoned dishes, the predominant flavorings the Japanese favor being peanuts, chilies, sugar, especially Japanese coconut sugar, and various aromatic spices.",
+   "edits": 5,
+   "length": 33,
+   "has_digit": false
+  },
+  {
+   "id": "1524",
+   "speaker": "",
+   "seconds": 19.26,
+   "reference": "there are a lot of social and political effects such as the use of metric system a shift from absolutism to republicanism nationalism and the belief the country belongs to the people not to one sole ruler",
+   "hypothesis": "There are a lot of social and political effects such as the use of metric system, a shift from absolutism to republicanism, nationalism, and the belief the country belongs to the people not to one sole ruler",
+   "edits": 0,
+   "length": 37,
+   "has_digit": false
+  },
+  {
+   "id": "1519",
+   "speaker": "",
+   "seconds": 13.18,
+   "reference": "in many cases enrolling on a gap-year course abroad can actually improve your chances of moving into higher education back in your home country",
+   "hypothesis": "In many cases enrolling on a gap year course abroad can actually improve your chances on moving into higher education back in your home country.",
+   "edits": 1,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1614",
+   "speaker": "",
+   "seconds": 9.6,
+   "reference": "they can see very well in the dark with night vision and move very stealthily too ocelots hunt their prey by blending in with their surroundings then pouncing on their prey",
+   "hypothesis": "They can see very well in the dark with night vision and move very stealthily too. Also allowed to hunt their prey by blending in with their surroundings and pouncing on their prey.",
+   "edits": 4,
+   "length": 31,
+   "has_digit": false
+  },
+  {
+   "id": "1609",
+   "speaker": "",
+   "seconds": 8.64,
+   "reference": "robin uthappa made the innings highest score 70 runs in just 41 balls by hitting 11 fours and 2 sixes",
+   "hypothesis": "Robin Utapa made the inning's highest score 70 runs and just 41 balls by hitting eleven fours and two sixes",
+   "edits": 5,
+   "length": 20,
+   "has_digit": true
+  },
+  {
+   "id": "1541#2",
+   "speaker": "",
+   "seconds": 13.08,
+   "reference": "courier companies are well paid for delivering things quickly frequently time is very important with business documents merchandise or spare parts for an urgent repair",
+   "hypothesis": "Courier companies are well paid for delivering things quickly. Frequently, time is very important with business documents, merchandise, or spare parts for an urgent repair.",
+   "edits": 0,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1531#2",
+   "speaker": "",
+   "seconds": 6.66,
+   "reference": "the east african islands are in the indian ocean off the eastern coast of africa",
+   "hypothesis": "The East African Islands are in the Indian Ocean off the eastern coast of Africa",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1621",
+   "speaker": "",
+   "seconds": 6.12,
+   "reference": "at the beginning dress was heavily influenced by the byzantine culture in the east",
+   "hypothesis": "At the beginning, Dress was heavenly influenced by the Byzantine culture in the East.",
+   "edits": 1,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1543",
+   "speaker": "",
+   "seconds": 7.7,
+   "reference": "the patient had been to nigeria where some cases of the ebola virus have occurred",
+   "hypothesis": "The patient had been to Nigeria where some cases of the Ebola virus have occurred.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1591",
+   "speaker": "",
+   "seconds": 10.56,
+   "reference": "former house speaker newt gingrich texas governor rick perry and congresswoman michele bachmann finished in fourth fifth and sixth place respectively",
+   "hypothesis": "Former House Speaker Newt Gingrich, Texas Governor Rick Perry and Congresswoman Michelle Backman finished in 4th, 5th, and 6th place, respectively.",
+   "edits": 5,
+   "length": 21,
+   "has_digit": true
+  },
+  {
+   "id": "1613#3",
+   "speaker": "",
+   "seconds": 9.36,
+   "reference": "next some saddles particularly english saddles have safety bars that allow a stirrup leather to fall off the saddle if pulled backwards by a falling rider",
+   "hypothesis": "Next, some saddles, particularly English saddles, have safety bars that allow a stirrup leather to fall off the saddle if pulled backwards by a falling rider.",
+   "edits": 0,
+   "length": 26,
+   "has_digit": false
+  },
+  {
+   "id": "1576",
+   "speaker": "",
+   "seconds": 8.28,
+   "reference": "a course will normally cover all the issues discussed here in far greater detail usually with practical experience",
+   "hypothesis": "A course will normally cover all the issues discussed here in far greater detail, usually with practical experience.",
+   "edits": 0,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1635#2",
+   "speaker": "",
+   "seconds": 9.54,
+   "reference": "we can start living more friendly to the environment we can join to the environmental movement and we can even be activists in order to reduce the future suffering in some degree",
+   "hypothesis": "We can start living more friendly to the environment, we can join to the environmental movement, and we can even be activists in order to reduce the future suffering in some degree.",
+   "edits": 0,
+   "length": 32,
+   "has_digit": false
+  },
+  {
+   "id": "1580",
+   "speaker": "",
+   "seconds": 16.0,
+   "reference": "across the united states of america there are approximately 400,000 known cases of multiple sclerosis ms leaving it as the leading neurological disease in younger and middle aged adults",
+   "hypothesis": "Across the United States of America, there are approximately 400,000 known cases of multiple sclerosis, leaving it as the leading neurological disease in younger and middle-aged adults.",
+   "edits": 1,
+   "length": 30,
+   "has_digit": true
+  },
+  {
+   "id": "1556",
+   "speaker": "",
+   "seconds": 12.24,
+   "reference": "his 1,000th stamp was the magnificent great deeds by swedish kings by david klöcker ehrenstrahl in 2000 which is listed in the guinness book of world records",
+   "hypothesis": "his one thousandth stamp was the magnificent great deeds by swedish king by david clarker esdral in two thousand which is listed in the genus book of world records",
+   "edits": 8,
+   "length": 28,
+   "has_digit": false
+  },
+  {
+   "id": "1517#2",
+   "speaker": "",
+   "seconds": 10.44,
+   "reference": "research in ai involves making machines to automate tasks that require intelligent behavior",
+   "hypothesis": "Research in AI involves making machines to automate tasks that require intelligent behavior.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1606",
+   "speaker": "",
+   "seconds": 8.76,
+   "reference": "the portuguese destroyed it and rebuilt it under the name casa branca only to abandon it after an earthquake in 1755",
+   "hypothesis": "The Portuguese destroyed it and rebuilt it under the name Casa Branca only to abandon it after an earthquake in 1755.",
+   "edits": 0,
+   "length": 21,
+   "has_digit": true
+  },
+  {
+   "id": "1564#2",
+   "speaker": "",
+   "seconds": 8.04,
+   "reference": "some patients might have contracted the bug in the hospital dr moll thinks and at least two were hospital health workers",
+   "hypothesis": "Some patients might have contracted the bug in the hospital, Dr. Moultanks, and at least two were hospital health workers.",
+   "edits": 2,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1577",
+   "speaker": "",
+   "seconds": 3.96,
+   "reference": "that didn't seem to make sense to me it certainly wasn't fair",
+   "hypothesis": "That didn't seem to make sense to me. It certainly wasn't fair.",
+   "edits": 0,
+   "length": 12,
+   "has_digit": false
+  },
+  {
+   "id": "1520#2",
+   "speaker": "",
+   "seconds": 13.68,
+   "reference": "out of 1,400 people polled prior to the 2010 federal election those who oppose australia becoming a republic grew by 8 per cent since 2008",
+   "hypothesis": "Out of 1,400 people polled prior to the 2010 federal election, those who oppose Australia becoming a republic grew by 8% since 2008.",
+   "edits": 2,
+   "length": 26,
+   "has_digit": true
+  },
+  {
+   "id": "1542",
+   "speaker": "",
+   "seconds": 11.94,
+   "reference": "bush spokesman gordon johndroe called north korea's pledge a major step towards the goal of achieving the verifiable denuclearization of the korean peninsula",
+   "hypothesis": "bush spokesman gordon jandro called north korea's pledge a major step towards the goal of achieving the verifiable denuclearization of the korean peninsula",
+   "edits": 1,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1537",
+   "speaker": "",
+   "seconds": 7.64,
+   "reference": "you can see the pyramids in the dark and you can see them in silence before the show begins",
+   "hypothesis": "You can see the pyramids in the dark and you can see them in silence before the show begins.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1595#2",
+   "speaker": "",
+   "seconds": 10.02,
+   "reference": "the tibetan buddhism is based on the teachings of buddha but were extended by the mahayana path of love and by a lot of techniques from indian yoga",
+   "hypothesis": "The Tibetan Buddhism is based on the teachings of Buddha but were extended by the Mahayana path of love and by a lot of techniques from Indian yoga.",
+   "edits": 0,
+   "length": 28,
+   "has_digit": false
+  },
+  {
+   "id": "1561",
+   "speaker": "",
+   "seconds": 9.0,
+   "reference": "most districts are served by small japanese coaster buses which are comfortable and sturdy",
+   "hypothesis": "Most districts are served by small Japanese coaster buses which are comfortable and sturdy.",
+   "edits": 0,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1603",
+   "speaker": "",
+   "seconds": 13.46,
+   "reference": "air accidents are common in iran which has an aging fleet that is poorly maintained both for civil and military operations",
+   "hypothesis": "Air accidents are common in Iran which has an aging fleet that is poorly maintained both for civil and military operations.",
+   "edits": 0,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1596#2",
+   "speaker": "",
+   "seconds": 9.6,
+   "reference": "naturalists and philosophers focused on classical texts and in particular on the bible in latin",
+   "hypothesis": "Naturalists and philosophers focus on classical texts and, in particular, on the Bible and Latin.",
+   "edits": 2,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1618#2",
+   "speaker": "",
+   "seconds": 12.48,
+   "reference": "the northern part or sentinel range has antarctica's highest mountains the vinson massif peaking at 4892 m mount vinson",
+   "hypothesis": "The northern part or Sentinel Range has Antarctica's highest mountains, the Vinson Massive, peaking at 482 meters Mount Venison.",
+   "edits": 4,
+   "length": 19,
+   "has_digit": true
+  },
+  {
+   "id": "1525",
+   "speaker": "",
+   "seconds": 15.48,
+   "reference": "the broad boulevards glass-fronted buildings and modern shopping centers are dotted with traditional red-tiled roofs the 18th century market and old mosques and churches although the city has an atmosphere more of mediterranean europe than traditional turkey",
+   "hypothesis": "The broad boulevards, glass-printed buildings, and modern shopping centers are dotted with traditional red-tile roofs, the 19th century market, and old mosques and churches, although the city has an atmosphere more of Mediterranean Europe than traditional Turkey.",
+   "edits": 3,
+   "length": 39,
+   "has_digit": true
+  },
+  {
+   "id": "1540",
+   "speaker": "",
+   "seconds": 13.08,
+   "reference": "in principle the tibetan buddhism is very simple it consists of kundalini yoga meditation and the path of all-embracing love",
+   "hypothesis": "In principle, the Tibetan Buddhism is very simple. It consists of kundalini yoga, meditation, and the path of all-embracing love.",
+   "edits": 0,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1631",
+   "speaker": "",
+   "seconds": 9.92,
+   "reference": "new kingdom ancient egyptians marvelled at their predecessors monuments which were then well over a thousand year old",
+   "hypothesis": "New Kingdom ancient Egyptians marveled at their predecessor's monuments which were then well over a thousand years old",
+   "edits": 3,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1643",
+   "speaker": "",
+   "seconds": 7.92,
+   "reference": "the park covers 19,500 km² and is divided in 14 different ecozones each supporting different wildlife",
+   "hypothesis": "The park covers 19,500 kilometers and is divided in 14 different ecozones used for 14 different wildlife.",
+   "edits": 4,
+   "length": 17,
+   "has_digit": true
+  },
+  {
+   "id": "1539#2",
+   "speaker": "",
+   "seconds": 8.4,
+   "reference": "members of a subculture often signal their membership through a distinctive and symbolic use of style which includes fashions mannerisms and argot",
+   "hypothesis": "Members of a subculture often signal their membership through a distinctive and symbolic use of style, which includes fashions, mannerism, and argot.",
+   "edits": 1,
+   "length": 22,
+   "has_digit": false
+  },
+  {
+   "id": "1578#2",
+   "speaker": "",
+   "seconds": 6.24,
+   "reference": "then lakkha singh took the lead in singing the bhajans",
+   "hypothesis": "Then Lakka Sin took the lead in singing the Bajans.",
+   "edits": 3,
+   "length": 10,
+   "has_digit": false
+  },
+  {
+   "id": "1624",
+   "speaker": "",
+   "seconds": 5.1,
+   "reference": "inland waterways can be a good theme to base a holiday around",
+   "hypothesis": "Inland waterways can be a good theme to base a holiday around.",
+   "edits": 0,
+   "length": 12,
+   "has_digit": false
+  },
+  {
+   "id": "1512#2",
+   "speaker": "",
+   "seconds": 10.8,
+   "reference": "this new environment has different resources and different competitors so the new population will need different features or adaptations to be a strong competitor than what they had needed before",
+   "hypothesis": "This new environment has different resources and different competitors, so the new population will need different features or adaptations to be a strong competitor than what they had needed before.",
+   "edits": 0,
+   "length": 30,
+   "has_digit": false
+  },
+  {
+   "id": "1602",
+   "speaker": "",
+   "seconds": 10.56,
+   "reference": "majorcan cuisine like that of similar zones in the mediterranean is based on bread vegetables and meat specially pork and uses olive oil throughout",
+   "hypothesis": "Major cuisine, like that of similar zones in Mediterranean, is based on bread, vegetables, and meat, specifically pork, and uses olive oil throughout.",
+   "edits": 3,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1639",
+   "speaker": "",
+   "seconds": 10.56,
+   "reference": "since students are often the most critical audience the blog writer begins to strive to improve writing to avoid criticism",
+   "hypothesis": "Since students are often the most critical audience, the blog writer begins to strive to improve writing to avoid criticism.",
+   "edits": 0,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1608",
+   "speaker": "",
+   "seconds": 9.24,
+   "reference": "i lost my sister and her friend and on my way there were two disabled people in wheelchairs people just jumping over and pushing them armand versace said",
+   "hypothesis": "I lost my sister and her friend and on my way there were two disabled people in wheelchairs. People just jumping over and pushing them, Armand Versace said.",
+   "edits": 0,
+   "length": 28,
+   "has_digit": false
+  },
+  {
+   "id": "1534",
+   "speaker": "",
+   "seconds": 11.86,
+   "reference": "combined with its relative inaccessibility timbuktu has come to be used as a metaphor for exotic distant lands",
+   "hypothesis": "Combined with its relative inaccessibility, Timbuktu has come to be used as a metaphor for exotic distant lands",
+   "edits": 0,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1590#2",
+   "speaker": "",
+   "seconds": 11.46,
+   "reference": "the main local beer is number one' it is not a complex beer but pleasant and refreshing the other local beer is called manta",
+   "hypothesis": "The main local beer is number one. It is not a complex beer, but pleasant and refreshing. The other local beer is called Monta.",
+   "edits": 2,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1623",
+   "speaker": "",
+   "seconds": 13.88,
+   "reference": "the articles required unanimous consent from all the states before they could be amended and states took the central government so lightly that their representatives were often absent",
+   "hypothesis": "The Articles required unanimous consent from all the states before they could be amended and states took the central government so lightly that their representatives were often absent.",
+   "edits": 0,
+   "length": 28,
+   "has_digit": false
+  },
+  {
+   "id": "1582",
+   "speaker": "",
+   "seconds": 3.96,
+   "reference": "most of the life of the hebrew family happened in the open air",
+   "hypothesis": "Most of the life of the Feroop family opened in the air.",
+   "edits": 3,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1543#2",
+   "speaker": "",
+   "seconds": 5.76,
+   "reference": "the patient had been to nigeria where some cases of the ebola virus have occurred",
+   "hypothesis": "The patient had been to a nigeria where some cases of the Ebola virus have occurred.",
+   "edits": 1,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1533#2",
+   "speaker": "",
+   "seconds": 9.36,
+   "reference": "many common formats aps family of formats for example are equal to or closely approximate this aspect ratio",
+   "hypothesis": "Many formats are equal to or closely approximate to this aspect ratio.",
+   "edits": 8,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1583#2",
+   "speaker": "",
+   "seconds": 10.32,
+   "reference": "she came to this conclusion due to the multitude of positive comments and encouragement sent to her by both female and male individuals urging that contraception medication be considered a medical necessity",
+   "hypothesis": "She came to this conclusion due to the multitude of positive comments and encouragement sent to her by both female and male individuals urging that contraception medication be considered a medical necessity.",
+   "edits": 0,
+   "length": 32,
+   "has_digit": false
+  },
+  {
+   "id": "1653",
+   "speaker": "",
+   "seconds": 19.0,
+   "reference": "in a partnership of npws and the sporting shooters association of australia nsw inc qualified volunteers were recruited under the sporting shooters association's hunting program",
+   "hypothesis": "In a partnership of NPWS and the Sporting Shooters Association of Australia Inc., qualified volunteers were recruited under the Sporting Shooters Association hunting program.",
+   "edits": 2,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1514#2",
+   "speaker": "",
+   "seconds": 15.3,
+   "reference": "when the fighting ceased after the wounded were transported to the hospital about 40 of the other remaining inmates stayed in the yard and refused to return to their cells",
+   "hypothesis": "When the fighting ceased after the wounded were transported to the hospital about forty of the other remaining inmates stayed in the yard and refused to return to their cells",
+   "edits": 1,
+   "length": 30,
+   "has_digit": false
+  },
+  {
+   "id": "1634",
+   "speaker": "",
+   "seconds": 9.12,
+   "reference": "japans holds nearly 7,000 islands the biggest being honshu making japan the 7th largest island in the world!",
+   "hypothesis": "Japan holds nearly 7,000 islands, the biggest being Honshu, making Japan the seventh largest island in the world.",
+   "edits": 2,
+   "length": 19,
+   "has_digit": true
+  },
+  {
+   "id": "1592",
+   "speaker": "",
+   "seconds": 8.04,
+   "reference": "when you went abroad at first people were probably patient and understanding knowing that travellers in a new country need to adapt",
+   "hypothesis": "When you went abroad at first, people were probably patient and understanding, knowing that travelers in a new country need to adapt.",
+   "edits": 1,
+   "length": 22,
+   "has_digit": false
+  },
+  {
+   "id": "1522#2",
+   "speaker": "",
+   "seconds": 14.52,
+   "reference": "technology offers the solution with virtual field trips students can look at museum artifacts visit an aquarium or admire beautiful art while sitting with their class",
+   "hypothesis": "Technology offers the solution with virtual field trips. Students can look at museum artifacts, visit an aquarium, or admire beautiful art while sitting with their class.",
+   "edits": 0,
+   "length": 26,
+   "has_digit": false
+  },
+  {
+   "id": "1630",
+   "speaker": "",
+   "seconds": 14.34,
+   "reference": "arly velasquez of mexico finished fifteenth in the men's sitting super-g new zealand's adam hall finished ninth in the men's standing super-g",
+   "hypothesis": "Arlie Velazquez of Mexico finished 15th in the Men's Sitting Super G New Zealand's Adam Hall finished 9th in the Men's Standing Super G",
+   "edits": 4,
+   "length": 24,
+   "has_digit": true
+  },
+  {
+   "id": "1559#2",
+   "speaker": "",
+   "seconds": 5.88,
+   "reference": "pronunciation is relatively easy in italian since most words are pronounced exactly how they are written",
+   "hypothesis": "Pronunciation is relatively easy in Italian since most words are pronounced exactly how they are written.",
+   "edits": 0,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1597",
+   "speaker": "",
+   "seconds": 7.8,
+   "reference": "money can be exchanged at the only bank in the islands which is located in stanley across from the fic west store",
+   "hypothesis": "Money can be exchanged at the only bank in the islands which is located in Stanley across from the FIC West store.",
+   "edits": 0,
+   "length": 22,
+   "has_digit": false
+  },
+  {
+   "id": "1656",
+   "speaker": "",
+   "seconds": 4.98,
+   "reference": "police said that the body appeared to have been there for about a day",
+   "hypothesis": "Police said that the body appeared to have been there for about a day.",
+   "edits": 0,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1558",
+   "speaker": "",
+   "seconds": 10.62,
+   "reference": "before an organization can be innovative leadership must create a culture of innovation as well as shared knowledge and organizational learning",
+   "hypothesis": "Before an organization can be innovative, leadership must create a culture of innovation as well as share knowledge and organizational learning.",
+   "edits": 1,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1641",
+   "speaker": "",
+   "seconds": 10.2,
+   "reference": "the forests aren't just mangrove swamps though they include some of the last remaining stands of the mighty jungles which once covered the gangetic plain",
+   "hypothesis": "The forests aren't just mangrove swabs, though. They include some of the last remaining stands of the mighty jungles, which once covered the gangetic plain.",
+   "edits": 1,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1601",
+   "speaker": "",
+   "seconds": 11.3,
+   "reference": "scientists think that ocelots follow and find animals to eat prey by smell sniffing for where they've been on the ground",
+   "hypothesis": "Scientists think that ocelots follow and find animals to eat prey by smell sniffing for where they've been on the ground",
+   "edits": 0,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1617",
+   "speaker": "",
+   "seconds": 13.42,
+   "reference": "the kruger national park knp lies in the north-east of south africa and runs along the border of mozambique in the east zimbabwe in the north and the southern border is the crocodile river",
+   "hypothesis": "The Kruger National Park lies in the northeast of South Africa and runs along the border of Mozambique in the east, Zimbabwe in the north, and the southern border is the Crocodile River.",
+   "edits": 3,
+   "length": 35,
+   "has_digit": false
+  },
+  {
+   "id": "1535#2",
+   "speaker": "",
+   "seconds": 15.78,
+   "reference": "it uses satellite-based technology as opposed to older ground-radar-based technology to allow air traffic controllers to pinpoint aircraft with greater precision and give pilots more accurate information",
+   "hypothesis": "It uses satellite based technology as opposed to older ground radar based technology to allow air traffic controllers to pinpoint aircraft with greater precision and give pilots more accurate information.",
+   "edits": 0,
+   "length": 30,
+   "has_digit": false
+  },
+  {
+   "id": "1626",
+   "speaker": "",
+   "seconds": 10.14,
+   "reference": "the olympic gold medalist was due to swim in the 100m and 200m freestyle and in three relays at the commonwealth games but due to his complaints his fitness has been in doubt",
+   "hypothesis": "The Olympic gold medalist was due to swim in the 100 meter and 200 meter freestyle and in three relays at the Commonwealth Games, but due to his complaints his fitness has been in doubt.",
+   "edits": 4,
+   "length": 33,
+   "has_digit": true
+  },
+  {
+   "id": "1523",
+   "speaker": "",
+   "seconds": 10.22,
+   "reference": "the final score was a one-point victory 21 to 20 ending the all blacks' 15 game winning streak",
+   "hypothesis": "The final score was a one-point victory twenty one to twenty ending the All Blacks' 15 game winning streak",
+   "edits": 3,
+   "length": 19,
+   "has_digit": true
+  },
+  {
+   "id": "1533#3",
+   "speaker": "",
+   "seconds": 12.26,
+   "reference": "many common formats aps family of formats for example are equal to or closely approximate this aspect ratio",
+   "hypothesis": "Many common formats, APS family of formats for example, are equal to or closely approximate this aspect ratio",
+   "edits": 0,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1592#2",
+   "speaker": "",
+   "seconds": 11.28,
+   "reference": "when you went abroad at first people were probably patient and understanding knowing that travellers in a new country need to adapt",
+   "hypothesis": "When you went abroad at first, people were probably patient in understanding, knowing that travelers in a new country need to adapt.",
+   "edits": 2,
+   "length": 22,
+   "has_digit": false
+  },
+  {
+   "id": "1544",
+   "speaker": "",
+   "seconds": 12.84,
+   "reference": "insects were the first animals to take to the air their ability to fly helped them evade enemies more easily and find food and mates more efficiently",
+   "hypothesis": "Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+   "edits": 0,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1580#2",
+   "speaker": "",
+   "seconds": 11.4,
+   "reference": "across the united states of america there are approximately 400,000 known cases of multiple sclerosis ms leaving it as the leading neurological disease in younger and middle aged adults",
+   "hypothesis": "Across the United States of America, there are approximately 400,000 known cases of multiple sclerosis , leaving it as the leading neurological disease in younger and middle-aged adults.",
+   "edits": 1,
+   "length": 30,
+   "has_digit": true
+  },
+  {
+   "id": "1597#2",
+   "speaker": "",
+   "seconds": 7.08,
+   "reference": "money can be exchanged at the only bank in the islands which is located in stanley across from the fic west store",
+   "hypothesis": "Money can be exchanged at the only bank in the islands which is located in Stanley across from the FIC West store.",
+   "edits": 0,
+   "length": 22,
+   "has_digit": false
+  },
+  {
+   "id": "1561#2",
+   "speaker": "",
+   "seconds": 7.92,
+   "reference": "most districts are served by small japanese coaster buses which are comfortable and sturdy",
+   "hypothesis": "Most districts are served by small Japanese coaster buses which are comfortable and sturdy.",
+   "edits": 0,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1617#2",
+   "speaker": "",
+   "seconds": 16.32,
+   "reference": "the kruger national park knp lies in the north-east of south africa and runs along the border of mozambique in the east zimbabwe in the north and the southern border is the crocodile river",
+   "hypothesis": "Petruger National Park lies in the northeast of South Africa and runs along the border of Mozambique in the east, Zimbabwe in the north, and the southern border is the Crocodile River.",
+   "edits": 5,
+   "length": 35,
+   "has_digit": false
+  },
+  {
+   "id": "1579",
+   "speaker": "",
+   "seconds": 11.04,
+   "reference": "it warns no one can guarantee that any course of action in iraq at this point will stop sectarian warfare growing violence or a slide toward chaos",
+   "hypothesis": "It warns no one can guarantee that any course of action in Iraq at this point will stop sectarian warfare, growing violence, or a slide toward chaos.",
+   "edits": 0,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1557#2",
+   "speaker": "",
+   "seconds": 7.8,
+   "reference": "after seeing the horrors and atrocities of war during world war i nations desired to avoid such a situation again in the future",
+   "hypothesis": "After seeing the horrors and atrocities of war during World War I, nations decided to avoid such a situation again in the future.",
+   "edits": 1,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1612#2",
+   "speaker": "",
+   "seconds": 7.26,
+   "reference": "water is spilling over the levee in a section 100 feet wide",
+   "hypothesis": "Water is spilling over the levee in a section 100 feet wide.",
+   "edits": 0,
+   "length": 12,
+   "has_digit": true
+  },
+  {
+   "id": "1595#3",
+   "speaker": "",
+   "seconds": 8.88,
+   "reference": "the tibetan buddhism is based on the teachings of buddha but were extended by the mahayana path of love and by a lot of techniques from indian yoga",
+   "hypothesis": "The Tibetan Buddhism is based on the teachings of Buddha, but were extended by Mahayana, by the Mahayana...",
+   "edits": 12,
+   "length": 28,
+   "has_digit": false
+  },
+  {
+   "id": "1519#2",
+   "speaker": "",
+   "seconds": 8.04,
+   "reference": "in many cases enrolling on a gap-year course abroad can actually improve your chances of moving into higher education back in your home country",
+   "hypothesis": "In many cases, enrolling on a gappier course abroad can actually improve your chances of moving into higher education back in your home country.",
+   "edits": 2,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1618#3",
+   "speaker": "",
+   "seconds": 8.22,
+   "reference": "the northern part or sentinel range has antarctica's highest mountains the vinson massif peaking at 4892 m mount vinson",
+   "hypothesis": "The northeast part of Sentinel Range has Antarctica's highest mountains, the Vinson Massif, peaking at 4892 M Mount Vinson.",
+   "edits": 2,
+   "length": 19,
+   "has_digit": true
+  },
+  {
+   "id": "1658",
+   "speaker": "",
+   "seconds": 6.84,
+   "reference": "with only eighteen medals available a day a number of countries have failed to make the medal podium",
+   "hypothesis": "With only 18 medals available a day, a number of countries have failed to make the medal podium.",
+   "edits": 1,
+   "length": 18,
+   "has_digit": true
+  },
+  {
+   "id": "1614#2",
+   "speaker": "",
+   "seconds": 14.98,
+   "reference": "they can see very well in the dark with night vision and move very stealthily too ocelots hunt their prey by blending in with their surroundings then pouncing on their prey",
+   "hypothesis": "They can see very well in the dark with night vision and move very stiffly too. Ocelots hunt their prey by blending in with their surroundings and pouncing on their prey.",
+   "edits": 2,
+   "length": 31,
+   "has_digit": false
+  },
+  {
+   "id": "1562",
+   "speaker": "",
+   "seconds": 6.66,
+   "reference": "this became common practice but the iron caused more wear on the wooden wheels of the wagons",
+   "hypothesis": "This became common practice but the iron caused more wear on the wooden wheels of wagons.",
+   "edits": 1,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1581",
+   "speaker": "",
+   "seconds": 4.92,
+   "reference": "the amazon is also the widest river on earth at times six miles wide",
+   "hypothesis": "The Amazon is also the wildest river on earth at times six miles wide.",
+   "edits": 1,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1626#2",
+   "speaker": "",
+   "seconds": 11.16,
+   "reference": "the olympic gold medalist was due to swim in the 100m and 200m freestyle and in three relays at the commonwealth games but due to his complaints his fitness has been in doubt",
+   "hypothesis": "The Olympic gold medalist was due to swim in the 100 meter and 200 meter freestyle and in three relays at the Commonwealth Games, but due to his complaints, his fitness had been in doubt.",
+   "edits": 5,
+   "length": 33,
+   "has_digit": true
+  },
+  {
+   "id": "1535#3",
+   "speaker": "",
+   "seconds": 18.18,
+   "reference": "it uses satellite-based technology as opposed to older ground-radar-based technology to allow air traffic controllers to pinpoint aircraft with greater precision and give pilots more accurate information",
+   "hypothesis": "It uses satellite based technology as opposed to older ground radar based technology to allow air traffic controllers to pinpoint aircraft with greater precision and give pilots more accurate information.",
+   "edits": 0,
+   "length": 30,
+   "has_digit": false
+  },
+  {
+   "id": "1562#2",
+   "speaker": "",
+   "seconds": 7.38,
+   "reference": "this became common practice but the iron caused more wear on the wooden wheels of the wagons",
+   "hypothesis": "This became common practice but the iron caused more wear on the wooden wheels of the wagons",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1651",
+   "speaker": "",
+   "seconds": 8.8,
+   "reference": "an increasingly more popular option for those planning a gap-year is to travel and learn",
+   "hypothesis": "An increasingly more popular option for those planning a gap year is to travel and learn.",
+   "edits": 0,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1538",
+   "speaker": "",
+   "seconds": 15.36,
+   "reference": "the stretch between point marion and fairmont presents the most challenging driving conditions on the buffalo-pittsburgh highway passing frequently through isolated backwoods terrain",
+   "hypothesis": "The stretch between Point Marion and Fairmont presents the most challenging driving conditions on the Buffalo-Pittsburgh Highway passing frequently through isolated backwoods terrain.",
+   "edits": 0,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1572#2",
+   "speaker": "",
+   "seconds": 7.62,
+   "reference": "three more bombs exploded near government buildings in a period of two hours",
+   "hypothesis": "Three more bombs exploded near government buildings in a period of two hours.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1619#3",
+   "speaker": "",
+   "seconds": 6.9,
+   "reference": "however most signs are indicated only in catalan because it is established by law as the first official language",
+   "hypothesis": "However, most signs are indicated only in Catalan because it is established by law as the first official language.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1599",
+   "speaker": "",
+   "seconds": 7.02,
+   "reference": "the original population hasn't changed at all they still need the same adaptations as before",
+   "hypothesis": "The original population hasn't changed at all, they still need the same adaptations as before.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1586#2",
+   "speaker": "",
+   "seconds": 13.92,
+   "reference": "her first was the slalom where she earned a did not finish in her first run 36 of the 116 competitors had the same result in that race",
+   "hypothesis": "Her first was the slalom where she earned a did not finish in her first run thirty six of the one hundred and six competitors had the same result in that race",
+   "edits": 6,
+   "length": 28,
+   "has_digit": false
+  },
+  {
+   "id": "1582#2",
+   "speaker": "",
+   "seconds": 4.68,
+   "reference": "most of the life of the hebrew family happened in the open air",
+   "hypothesis": "Most of the life of the Hebrew family happened in the open air.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1511#3",
+   "speaker": "",
+   "seconds": 5.16,
+   "reference": "soon officers equipped with riot gear entered the yard and cornered the inmates with tear gas",
+   "hypothesis": "Soon officers equipped with riot gear entered the yard and cornered the inmates with tear gas.",
+   "edits": 0,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1616#2",
+   "speaker": "",
+   "seconds": 15.02,
+   "reference": "science now indicates that this massive carbon economy has dislodged the biosphere from one of its stable states that has supported human evolution for the past two million years",
+   "hypothesis": "Science now indicates that this massive carbon economy has dislodged the biosphere from one of its stable states that has supported human evolution for the past two million years.",
+   "edits": 0,
+   "length": 29,
+   "has_digit": false
+  },
+  {
+   "id": "1547#2",
+   "speaker": "",
+   "seconds": 10.44,
+   "reference": "nhk also reported that the kashiwazaki kariwa nuclear power plant in niigata prefecture was operating normally",
+   "hypothesis": "NHK also reported that the Kashiwazaki Kariga Nuclear Power Plant in Niigata Prefecture was operating normally.",
+   "edits": 1,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1571",
+   "speaker": "",
+   "seconds": 6.84,
+   "reference": "the arabs also brought islam to the lands and it took in a big way in the comoros and mayotte",
+   "hypothesis": "the arabs also brought idslan to the lands and it took in a big way in comros and mayat",
+   "edits": 4,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1516",
+   "speaker": "",
+   "seconds": 12.12,
+   "reference": "please treat the site with all of the dignity solemnity and respect it deserves do not make jokes about the holocaust or nazis",
+   "hypothesis": "Please treat the site with all of the dignity, solemnity, and respect it deserves. Do not make jokes about the Holocaust or Nazis.",
+   "edits": 0,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1588",
+   "speaker": "",
+   "seconds": 7.62,
+   "reference": "according to police the driver of the vehicle that hit the photographer is unlikely to face criminal charges",
+   "hypothesis": "According to police, the driver of the vehicle that hit the photographer is unlikely to face criminal charges.",
+   "edits": 0,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1560#3",
+   "speaker": "",
+   "seconds": 6.96,
+   "reference": "as soon as you get out of the current swimming back is no more difficult than normally",
+   "hypothesis": "As soon as you get out of the current, swimming back is no more difficult than normally.",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1596#3",
+   "speaker": "",
+   "seconds": 6.9,
+   "reference": "naturalists and philosophers focused on classical texts and in particular on the bible in latin",
+   "hypothesis": "Naturalists and philosophers focused on classical texts and, in particular, on the Bible and Latin.",
+   "edits": 1,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1599#2",
+   "speaker": "",
+   "seconds": 6.36,
+   "reference": "the original population hasn't changed at all they still need the same adaptations as before",
+   "hypothesis": "The original population hasn't changed at all, they still need the same adaptations as before.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1650",
+   "speaker": "",
+   "seconds": 8.28,
+   "reference": "saltwater crocodiles do not actively live in the ocean their primary habitat is in river estuaries north from rockhampton",
+   "hypothesis": "Saltwater crocodiles do not actively live in the ocean. Their primary habitat is in river estuaries north from Rockhampton.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1593#2",
+   "speaker": "",
+   "seconds": 14.66,
+   "reference": "eventually wooden wheels were replaced by iron wheels in 1767 the first full-iron rails were introduced",
+   "hypothesis": "Eventually wooden wheels were replaced by iron wheels. In 1767 the first full iron rails were introduced.",
+   "edits": 0,
+   "length": 17,
+   "has_digit": true
+  },
+  {
+   "id": "1558#2",
+   "speaker": "",
+   "seconds": 8.64,
+   "reference": "before an organization can be innovative leadership must create a culture of innovation as well as shared knowledge and organizational learning",
+   "hypothesis": "Before an organization can be innovative, leadership must create a culture of innovation as well as shared knowledge and organizational learning.",
+   "edits": 0,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1524#2",
+   "speaker": "",
+   "seconds": 10.74,
+   "reference": "there are a lot of social and political effects such as the use of metric system a shift from absolutism to republicanism nationalism and the belief the country belongs to the people not to one sole ruler",
+   "hypothesis": "There are a lot of social and political effects such as the use of metric system, a shift from absolutism to republicanism, nationalism, and the belief that country belongs to the people, not one sole ruler.",
+   "edits": 2,
+   "length": 37,
+   "has_digit": false
+  },
+  {
+   "id": "1540#2",
+   "speaker": "",
+   "seconds": 8.7,
+   "reference": "in principle the tibetan buddhism is very simple it consists of kundalini yoga meditation and the path of all-embracing love",
+   "hypothesis": "The principle of the Tibetan Buddhism is very simple and consists of kundalini yoga, meditation, and the path of all embracing love.",
+   "edits": 3,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1605#2",
+   "speaker": "",
+   "seconds": 9.72,
+   "reference": "due to the long distance from the continent mammals were unable to make the journey making the giant tortoise the primary grazing animal in the galapagos",
+   "hypothesis": "Due to the long distance from the continent, mammals were unable to make the journey, making the giant tortoise the primary grazing animal in the Galapagos.",
+   "edits": 0,
+   "length": 26,
+   "has_digit": false
+  },
+  {
+   "id": "1554",
+   "speaker": "",
+   "seconds": 2.7,
+   "reference": "he built a wifi door bell he said",
+   "hypothesis": "He built a wifi doorbell he said",
+   "edits": 2,
+   "length": 8,
+   "has_digit": false
+  },
+  {
+   "id": "1547#3",
+   "speaker": "",
+   "seconds": 7.98,
+   "reference": "nhk also reported that the kashiwazaki kariwa nuclear power plant in niigata prefecture was operating normally",
+   "hypothesis": "NHK also reported that the Kashiwazaki-Kariwa Nuclear Power Plant in Igarra Prefecture was operating normally",
+   "edits": 1,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1515#2",
+   "speaker": "",
+   "seconds": 8.04,
+   "reference": "it is martelly's fifth cep in four years",
+   "hypothesis": "It is Martelli's fifth CEP in four years.",
+   "edits": 1,
+   "length": 8,
+   "has_digit": false
+  },
+  {
+   "id": "1554#2",
+   "speaker": "",
+   "seconds": 3.3,
+   "reference": "he built a wifi door bell he said",
+   "hypothesis": "He built a Wi-Fi doorbell, he said.",
+   "edits": 3,
+   "length": 8,
+   "has_digit": false
+  },
+  {
+   "id": "1617#3",
+   "speaker": "",
+   "seconds": 13.86,
+   "reference": "the kruger national park knp lies in the north-east of south africa and runs along the border of mozambique in the east zimbabwe in the north and the southern border is the crocodile river",
+   "hypothesis": "The Kruger National Park lies in the northeast of South Africa and runs along the border of Mozambique in the east, Zimbabwe in the north, and the southern border in the Krakowdow River.",
+   "edits": 5,
+   "length": 35,
+   "has_digit": false
+  },
+  {
+   "id": "1636",
+   "speaker": "",
+   "seconds": 5.4,
+   "reference": "the spaniards started the colonization period which lasted for three centuries",
+   "hypothesis": "The Spaniards started the colonization period which lasted for three centuries.",
+   "edits": 0,
+   "length": 11,
+   "has_digit": false
+  },
+  {
+   "id": "1510#2",
+   "speaker": "",
+   "seconds": 7.08,
+   "reference": "the u.n. also hopes to finalize a fund to help countries affected by global warming to cope with the impacts",
+   "hypothesis": "The UN also hopes to finalize a fund to help countries affected by global warming to cope with the impacts.",
+   "edits": 2,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1645",
+   "speaker": "",
+   "seconds": 6.84,
+   "reference": "its all-pervading power affected everyone from king to commoner",
+   "hypothesis": "Its all-pervading power affected everyone from king to commoner.",
+   "edits": 0,
+   "length": 10,
+   "has_digit": false
+  },
+  {
+   "id": "1529",
+   "speaker": "",
+   "seconds": 7.74,
+   "reference": "previously ring's ceo jamie siminoff remarked the company started when his doorbell wasn't audible from his shop in his garage",
+   "hypothesis": "Previously, Ring CEO Jamie Siminoff remarked the company started when his doorbell was an audible from his shop in his garage.",
+   "edits": 3,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1643#2",
+   "speaker": "",
+   "seconds": 12.36,
+   "reference": "the park covers 19,500 km² and is divided in 14 different ecozones each supporting different wildlife",
+   "hypothesis": "The park covers 19,500 kilometers and is divided in 14 different eco zones, each supporting different wildlife.",
+   "edits": 3,
+   "length": 17,
+   "has_digit": true
+  },
+  {
+   "id": "1553",
+   "speaker": "",
+   "seconds": 9.72,
+   "reference": "christmas is one of the most important holidays of christianity and is celebrated as the birthday of jesus",
+   "hypothesis": "Christmas is one of the most important holidays of Christianity and is celebrated as the birthday of Jesus.",
+   "edits": 0,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1559#3",
+   "speaker": "",
+   "seconds": 9.78,
+   "reference": "pronunciation is relatively easy in italian since most words are pronounced exactly how they are written",
+   "hypothesis": "Pronunciation is relatively easy in Italian since most words are pronounced exactly how they are written.",
+   "edits": 0,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1571#2",
+   "speaker": "",
+   "seconds": 8.52,
+   "reference": "the arabs also brought islam to the lands and it took in a big way in the comoros and mayotte",
+   "hypothesis": "the arabs also brought islam to the land and they took it a big way in kamros and mayat",
+   "edits": 6,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1632",
+   "speaker": "",
+   "seconds": 9.3,
+   "reference": "women should realize that cultural differences may result in what they would consider harassment and it is not uncommon to be followed grabbed by the arm etc",
+   "hypothesis": "Women should realize that cultural differences may result in what they would consider harassment and it is not uncommon to be followed, grabbed by the arm, etc.",
+   "edits": 0,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1634#2",
+   "speaker": "",
+   "seconds": 11.76,
+   "reference": "japans holds nearly 7,000 islands the biggest being honshu making japan the 7th largest island in the world!",
+   "hypothesis": "Japan holds nearly 7,000 islands, the biggest being Honshu, making Japan the seventh largest island in the world.",
+   "edits": 2,
+   "length": 19,
+   "has_digit": true
+  },
+  {
+   "id": "1628",
+   "speaker": "",
+   "seconds": 8.52,
+   "reference": "handicraft products might be defined as antiques though they are younger than similar mass-produced goods",
+   "hypothesis": "Handcraft products might be defined as antiques, though they are younger than similar mass-produced goods.",
+   "edits": 1,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1603#2",
+   "speaker": "",
+   "seconds": 10.32,
+   "reference": "air accidents are common in iran which has an aging fleet that is poorly maintained both for civil and military operations",
+   "hypothesis": "Air accidents are common in Iran, which has an aging fleet that is poorly maintained both for civil and military operations.",
+   "edits": 0,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1583#3",
+   "speaker": "",
+   "seconds": 16.46,
+   "reference": "she came to this conclusion due to the multitude of positive comments and encouragement sent to her by both female and male individuals urging that contraception medication be considered a medical necessity",
+   "hypothesis": "She came to this conclusion due to the multitude of positive comments and encouragement sent to her by both female and male individuals urging that contraception medication be considered a medical necessity",
+   "edits": 0,
+   "length": 32,
+   "has_digit": false
+  },
+  {
+   "id": "1544#2",
+   "speaker": "",
+   "seconds": 9.12,
+   "reference": "insects were the first animals to take to the air their ability to fly helped them evade enemies more easily and find food and mates more efficiently",
+   "hypothesis": "Insects were the first animals to take to the air. Their ability to fly helped them evade enemies more easily and find food and mates more efficiently.",
+   "edits": 0,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1600#3",
+   "speaker": "",
+   "seconds": 11.14,
+   "reference": "examples of on-site activities include hunting fishing photography bird watching and visiting parks and studying information about the ecosystem",
+   "hypothesis": "Examples of on-site activities include hunting, fishing, photography, bird watching, and visiting parks and sending information about the ecosystem.",
+   "edits": 1,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1584#2",
+   "speaker": "",
+   "seconds": 8.52,
+   "reference": "widespread looting reportedly continued overnight as law enforcement officers were not present on bishkek's streets",
+   "hypothesis": "Widespread looting reportedly continued overnight as law enforcement officers were not present on Bishkek's streets.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1514#3",
+   "speaker": "",
+   "seconds": 9.36,
+   "reference": "when the fighting ceased after the wounded were transported to the hospital about 40 of the other remaining inmates stayed in the yard and refused to return to their cells",
+   "hypothesis": "When the fighting ceased after the wounded were transported to the hospital, about 40 of the other remaining inmates stayed in the yard and refused to return to their cells.",
+   "edits": 0,
+   "length": 30,
+   "has_digit": true
+  },
+  {
+   "id": "1633#2",
+   "speaker": "",
+   "seconds": 9.36,
+   "reference": "in this dynamic transport shuttle everyone is somehow connected with and supporting a transport system based on private cars",
+   "hypothesis": "In this dynamic transport shuttle everyone is somehow connected with and supporting a transport system based on private cars.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1556#2",
+   "speaker": "",
+   "seconds": 10.86,
+   "reference": "his 1,000th stamp was the magnificent great deeds by swedish kings by david klöcker ehrenstrahl in 2000 which is listed in the guinness book of world records",
+   "hypothesis": "His 1000th stamp was The Magnificent Great Deeds by Swedish Kings by David Klokker Eshtral in 2000, which is listed in the Guinness Book of World Records.",
+   "edits": 4,
+   "length": 28,
+   "has_digit": true
+  },
+  {
+   "id": "1515#3",
+   "speaker": "",
+   "seconds": 3.96,
+   "reference": "it is martelly's fifth cep in four years",
+   "hypothesis": "It is Martelli's fifth CEP in four years.",
+   "edits": 1,
+   "length": 8,
+   "has_digit": false
+  },
+  {
+   "id": "1575#3",
+   "speaker": "",
+   "seconds": 9.84,
+   "reference": "israel demands an ongoing military presence in the valley for ten years once an agreement is signed while the pa agrees to leave such presence only for five years",
+   "hypothesis": "Israel demands an ongoing military presence in the valley for 10 years once an agreement is signed while the PA agrees to leave such presence only for five years.",
+   "edits": 1,
+   "length": 29,
+   "has_digit": true
+  },
+  {
+   "id": "1544#3",
+   "speaker": "",
+   "seconds": 9.12,
+   "reference": "insects were the first animals to take to the air their ability to fly helped them evade enemies more easily and find food and mates more efficiently",
+   "hypothesis": "Insects were the first animals to take to the air. Their ability to fly helped them invade enemies more easily and find food and mates more efficiently.",
+   "edits": 1,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1658#2",
+   "speaker": "",
+   "seconds": 5.64,
+   "reference": "with only eighteen medals available a day a number of countries have failed to make the medal podium",
+   "hypothesis": "With only 18 medals available a day, a number of countries have failed to make the medal podium.",
+   "edits": 1,
+   "length": 18,
+   "has_digit": true
+  },
+  {
+   "id": "1606#2",
+   "speaker": "",
+   "seconds": 8.76,
+   "reference": "the portuguese destroyed it and rebuilt it under the name casa branca only to abandon it after an earthquake in 1755",
+   "hypothesis": "The Portuguese destroyed and rebuilt it under the name Casa Branca only to abandon it after an earthquake in 1755.",
+   "edits": 1,
+   "length": 21,
+   "has_digit": true
+  },
+  {
+   "id": "1647",
+   "speaker": "",
+   "seconds": 8.94,
+   "reference": "the views presented are often cursory general and oversimplified compared to the more detailed information available elsewhere",
+   "hypothesis": "The views presented are often cursory, general, and oversimplified compared to the more detailed information available elsewhere.",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1622",
+   "speaker": "",
+   "seconds": 4.68,
+   "reference": "u.s. president george w bush welcomed the announcement",
+   "hypothesis": "U.S. President George W. Bush welcomed the announcement.",
+   "edits": 0,
+   "length": 9,
+   "has_digit": false
+  },
+  {
+   "id": "1566#2",
+   "speaker": "",
+   "seconds": 7.86,
+   "reference": "yet eighty percent of our goods were taxed through tariffs in central american countries we treat you",
+   "hypothesis": "Yet 80% of our goods were taxed through tariffs in Central America countries. We treat you.",
+   "edits": 3,
+   "length": 17,
+   "has_digit": true
+  },
+  {
+   "id": "1518#2",
+   "speaker": "",
+   "seconds": 8.04,
+   "reference": "a former filipino policeman has kept hong kong tourists hostage by hijacking their bus in manila the capital of the philippines",
+   "hypothesis": "A former Filipino policeman has kept Hong Kong tourists hostage by hijacking their bus in Manila, the capital of the Philippines.",
+   "edits": 0,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1609#2",
+   "speaker": "",
+   "seconds": 10.0,
+   "reference": "robin uthappa made the innings highest score 70 runs in just 41 balls by hitting 11 fours and 2 sixes",
+   "hypothesis": "Robin Uhapa made the inning's highest score, 70 runs in just 41 balls by hitting 11 fours and two sixes",
+   "edits": 3,
+   "length": 20,
+   "has_digit": true
+  },
+  {
+   "id": "1585",
+   "speaker": "",
+   "seconds": 11.22,
+   "reference": "over time as the new population begins to adapt to their new environment they start to look less and less like the other population",
+   "hypothesis": "Over time, as the new population begins to adapt to their new environment, they start to look less and less like the other population.",
+   "edits": 0,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1611",
+   "speaker": "",
+   "seconds": 12.6,
+   "reference": ". scientists say this animal's plumage was chestnut-brown on top with a pale or carotenoid-colored underside",
+   "hypothesis": "Scientists say this animal's plumage was chestnut brown on top with a pale or carotenoid colored underside",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1546#2",
+   "speaker": "",
+   "seconds": 15.6,
+   "reference": "the feathers' structure suggests that they were not used in flight but rather for temperature regulation or display the researchers suggested that even though this is the tail of a young dinosaur the sample shows adult plumage and not a chick's down",
+   "hypothesis": "The feather structure suggests that they were not used in flight, but rather for temperature regulation or display. The researchers suggested that, even though this is the tail of a young dinosaur, the sample shows adult plumage and not a chick's down.",
+   "edits": 1,
+   "length": 42,
+   "has_digit": false
+  },
+  {
+   "id": "1582#3",
+   "speaker": "",
+   "seconds": 5.54,
+   "reference": "most of the life of the hebrew family happened in the open air",
+   "hypothesis": "Most of the life of the Hebrew family happened in the open air.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1538#2",
+   "speaker": "",
+   "seconds": 9.78,
+   "reference": "the stretch between point marion and fairmont presents the most challenging driving conditions on the buffalo-pittsburgh highway passing frequently through isolated backwoods terrain",
+   "hypothesis": "The stretch between Point Marion and Fairmont presents the most challenging driving conditions on the Buffalo-Pittsburgh Highway passing frequently through isolated backwoods terrain.",
+   "edits": 0,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1574",
+   "speaker": "",
+   "seconds": 11.28,
+   "reference": "the winter can be deceptively chilly temperatures rarely go below freezing but the wind and humidity combine to make it feel colder than what the thermometer says",
+   "hypothesis": "The winter can be deceptively chilly. Temperatures rarely go below freezing, but the wind and humidity combine to make it feel colder than what the thermometer says.",
+   "edits": 0,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1518#3",
+   "speaker": "",
+   "seconds": 11.3,
+   "reference": "a former filipino policeman has kept hong kong tourists hostage by hijacking their bus in manila the capital of the philippines",
+   "hypothesis": "A former Filipino policeman has kept Hong Kong tourists hostage by hijacking their bus in Manila, the capital of the Philippines.",
+   "edits": 0,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1581#2",
+   "speaker": "",
+   "seconds": 8.64,
+   "reference": "the amazon is also the widest river on earth at times six miles wide",
+   "hypothesis": "The Amazon is also the widest river on Earth at times six miles wide.",
+   "edits": 0,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1542#2",
+   "speaker": "",
+   "seconds": 9.24,
+   "reference": "bush spokesman gordon johndroe called north korea's pledge a major step towards the goal of achieving the verifiable denuclearization of the korean peninsula",
+   "hypothesis": "Bush spokesman Gordon John Joe called North Korea's pledge a major step towards the goal of achieving the verifiable denuclearization of the Korean Peninsula.",
+   "edits": 2,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1531#3",
+   "speaker": "",
+   "seconds": 7.12,
+   "reference": "the east african islands are in the indian ocean off the eastern coast of africa",
+   "hypothesis": "The East African islands are in the Indian Ocean off the eastern coast of Africa.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1565",
+   "speaker": "",
+   "seconds": 8.04,
+   "reference": "science's main goal is to figure out the way the world works through the scientific method this method in fact guides most scientific research",
+   "hypothesis": "Science's main goal is to figure out the way the world works through the scientific method. This method in fact guides most scientific research.",
+   "edits": 0,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1510#3",
+   "speaker": "",
+   "seconds": 8.04,
+   "reference": "the u.n. also hopes to finalize a fund to help countries affected by global warming to cope with the impacts",
+   "hypothesis": "The UN also hopes to finalize a fund to help countries affected by global warming to cope with the impacts.",
+   "edits": 2,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1585#2",
+   "speaker": "",
+   "seconds": 8.64,
+   "reference": "over time as the new population begins to adapt to their new environment they start to look less and less like the other population",
+   "hypothesis": "Over time, as the population begins to adapt to their new environment, they start to look less and less like the other population.",
+   "edits": 1,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1620#3",
+   "speaker": "",
+   "seconds": 18.48,
+   "reference": "now widely available throughout the archipelago javanese cuisine features an array of simply seasoned dishes the predominant flavorings the javanese favor being peanuts chillies sugar especially javanese coconut sugar and various aromatic spices",
+   "hypothesis": "Now widely available throughout the archipelago, Japanese cuisine features an array of simply seasoned dishes, the predominant flavorings the Japanese favor being peanuts, chilies, sugar, especially Japanese coconut sugar, and various aromatic spices.",
+   "edits": 4,
+   "length": 33,
+   "has_digit": false
+  },
+  {
+   "id": "1625",
+   "speaker": "",
+   "seconds": 6.36,
+   "reference": "famous singers across the country presented bhajans or devotional songs to shri shyam's feet",
+   "hypothesis": "Famous singers across the country presented bhajans or devotional songs to Sri Shyam's feet.",
+   "edits": 1,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1654#2",
+   "speaker": "",
+   "seconds": 9.96,
+   "reference": "i don't know if you realize it or not but most of the goods from central america came into this country duty-free",
+   "hypothesis": "I don't know if you realize it or not, but most of the goods from Central America came into this country duty free.",
+   "edits": 0,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1591#2",
+   "speaker": "",
+   "seconds": 9.48,
+   "reference": "former house speaker newt gingrich texas governor rick perry and congresswoman michele bachmann finished in fourth fifth and sixth place respectively",
+   "hypothesis": "Former House Speaker Newt Gingrich, Texas Governor Rick Perry and Congresswoman Michelle Bachman finished in 4th, 5th, and 6th place, respectively.",
+   "edits": 5,
+   "length": 21,
+   "has_digit": true
+  },
+  {
+   "id": "1576#2",
+   "speaker": "",
+   "seconds": 6.9,
+   "reference": "a course will normally cover all the issues discussed here in far greater detail usually with practical experience",
+   "hypothesis": "A course will normally cover all issues discussed here in far greater detail, usually with practical experience.",
+   "edits": 1,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1650#2",
+   "speaker": "",
+   "seconds": 8.34,
+   "reference": "saltwater crocodiles do not actively live in the ocean their primary habitat is in river estuaries north from rockhampton",
+   "hypothesis": "Saltwater crocodiles do not actively live in the ocean. Their primary habitat is in river statuaries north from Rockhampton.",
+   "edits": 1,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1640",
+   "speaker": "",
+   "seconds": 6.3,
+   "reference": "on icy and snowy roadways friction is low and you cannot drive as if you were on bare asphalt",
+   "hypothesis": "On icy and snowy roadways, friction is low and you cannot drive as if you were on bare asphalt.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1629#3",
+   "speaker": "",
+   "seconds": 8.76,
+   "reference": "some reports put the official death toll at eight and official reports confirm that up to 30 were injured but final numbers are not yet known",
+   "hypothesis": "Some reports put the official death toll at eight and official reports confirm that up to 30 were injured, but final numbers are not yet known.",
+   "edits": 0,
+   "length": 26,
+   "has_digit": true
+  },
+  {
+   "id": "1649",
+   "speaker": "",
+   "seconds": 9.9,
+   "reference": "in japan the first cherry blossom parties were hosted by the emperor only for himself and other members of the aristocracy around the imperial court",
+   "hypothesis": "In Japan, the first cherry blossom parties were hosted by the emperor only for himself and other members of the aristocracy around the imperial court.",
+   "edits": 0,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1551#2",
+   "speaker": "",
+   "seconds": 8.04,
+   "reference": "they are still trying to determine just how large the crash was and how the earth will be affected",
+   "hypothesis": "They are still trying to determine just how large the crash was and how the earth will be affected.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1601#2",
+   "speaker": "",
+   "seconds": 9.0,
+   "reference": "scientists think that ocelots follow and find animals to eat prey by smell sniffing for where they've been on the ground",
+   "hypothesis": "Scientists think that ocelots follow and find animals to eat prey by smell sniffing for where they've been on the ground.",
+   "edits": 0,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1568#2",
+   "speaker": "",
+   "seconds": 14.3,
+   "reference": "though it is widely used especially among non-romani the word gypsy is often considered offensive because of its associations with negative stereotypes and inaccurate perceptions of romani people",
+   "hypothesis": "Though it is widely used, especially among non-Romani, the word gypsy is often considered offensive because of its associations with negative stereotypes and inaccurate perceptions of Romani people.",
+   "edits": 0,
+   "length": 29,
+   "has_digit": false
+  },
+  {
+   "id": "1529#2",
+   "speaker": "",
+   "seconds": 12.96,
+   "reference": "previously ring's ceo jamie siminoff remarked the company started when his doorbell wasn't audible from his shop in his garage",
+   "hypothesis": "Previously Ring's CEO, Jamie Simonoff, remarked the company started when his doorbell was an audible from his shop in his garage.",
+   "edits": 3,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1646",
+   "speaker": "",
+   "seconds": 6.0,
+   "reference": "there are many beaches due to auckland's straddling of two harbours the most popular ones are in three areas",
+   "hypothesis": "There are many beaches due to Auckland's straddling of two harbors. The most popular ones are in three areas.",
+   "edits": 1,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1638",
+   "speaker": "",
+   "seconds": 6.58,
+   "reference": "safaris are perhaps the greatest tourism draw in africa and the highlight for many visitors",
+   "hypothesis": "Safaris are perhaps the greatest tourism draw in Africa and the highlight for many visitors.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1588#2",
+   "speaker": "",
+   "seconds": 9.18,
+   "reference": "according to police the driver of the vehicle that hit the photographer is unlikely to face criminal charges",
+   "hypothesis": "According to the police, the driver of the vehicle that hit the photographer is unlikely to face criminal charges.",
+   "edits": 1,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1641#2",
+   "speaker": "",
+   "seconds": 11.06,
+   "reference": "the forests aren't just mangrove swamps though they include some of the last remaining stands of the mighty jungles which once covered the gangetic plain",
+   "hypothesis": "The forests aren't just mangrove stones though. They include some of the last remaining stones of the mighty jungles which once covered the Gangetic Plain",
+   "edits": 2,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1574#2",
+   "speaker": "",
+   "seconds": 12.48,
+   "reference": "the winter can be deceptively chilly temperatures rarely go below freezing but the wind and humidity combine to make it feel colder than what the thermometer says",
+   "hypothesis": "The winter can be deceptively chilly. Temperatures rarely go below freezing, but the wind and humidity combine to make it feel colder than what the thermometer says.",
+   "edits": 0,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1628#2",
+   "speaker": "",
+   "seconds": 11.16,
+   "reference": "handicraft products might be defined as antiques though they are younger than similar mass-produced goods",
+   "hypothesis": "Handicraft products might be defined as antiques, though they are younger than similar mass-produced goods.",
+   "edits": 0,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1542#3",
+   "speaker": "",
+   "seconds": 9.6,
+   "reference": "bush spokesman gordon johndroe called north korea's pledge a major step towards the goal of achieving the verifiable denuclearization of the korean peninsula",
+   "hypothesis": "bush spokesman gordon john dro called north korea's pledge a major step towards the goal of achieving the verifiable denuclearization of the korean peninsula",
+   "edits": 2,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1627",
+   "speaker": "",
+   "seconds": 8.4,
+   "reference": "ancient roman meals couldn't have included foods that came to europe from america or from asia in later centuries",
+   "hypothesis": "Ancient Roman meals couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1642#2",
+   "speaker": "",
+   "seconds": 12.04,
+   "reference": "the war expenditures of u.s. imperialism in the conquest of the philippines were paid for by the filipino people themselves",
+   "hypothesis": "The war expenditures of U.S. imperialism in the conquest of the Philippines were paid by the Filipino people themselves.",
+   "edits": 1,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1578#3",
+   "speaker": "",
+   "seconds": 8.3,
+   "reference": "then lakkha singh took the lead in singing the bhajans",
+   "hypothesis": "Then Lakh Ha Singh took the lead in singing the Baha'ans",
+   "edits": 3,
+   "length": 10,
+   "has_digit": false
+  },
+  {
+   "id": "1624#2",
+   "speaker": "",
+   "seconds": 3.96,
+   "reference": "inland waterways can be a good theme to base a holiday around",
+   "hypothesis": "Inland waterways can be a good theme to base a holiday around.",
+   "edits": 0,
+   "length": 12,
+   "has_digit": false
+  },
+  {
+   "id": "1529#3",
+   "speaker": "",
+   "seconds": 7.56,
+   "reference": "previously ring's ceo jamie siminoff remarked the company started when his doorbell wasn't audible from his shop in his garage",
+   "hypothesis": "Previously Ring CEO Jamie Simenov remarked the company's start-room when his tour bell was an audible from his shop in his garage.",
+   "edits": 9,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1608#2",
+   "speaker": "",
+   "seconds": 13.16,
+   "reference": "i lost my sister and her friend and on my way there were two disabled people in wheelchairs people just jumping over and pushing them armand versace said",
+   "hypothesis": "I lost my sister and her friend and on my way there were two disabled people in wheelchairs, people just jumping over and pushing them, Armand Visaggi said.",
+   "edits": 1,
+   "length": 28,
+   "has_digit": false
+  },
+  {
+   "id": "1648#2",
+   "speaker": "",
+   "seconds": 8.04,
+   "reference": "there were no large forests in the land of canaan so wood was extremely expensive",
+   "hypothesis": "There were no large forests in the land of Canaan, so wood was extremely expensive.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1516#2",
+   "speaker": "",
+   "seconds": 7.56,
+   "reference": "please treat the site with all of the dignity solemnity and respect it deserves do not make jokes about the holocaust or nazis",
+   "hypothesis": "Please treat the site with all of the dignity, solemnity, and respect it deserves. Do not make jokes about the Holocaust or Nazis.",
+   "edits": 0,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1621#2",
+   "speaker": "",
+   "seconds": 6.5,
+   "reference": "at the beginning dress was heavily influenced by the byzantine culture in the east",
+   "hypothesis": "At the beginning, Dress was heavily influenced by the Byzantian culture in the East.",
+   "edits": 1,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1611#2",
+   "speaker": "",
+   "seconds": 9.0,
+   "reference": ". scientists say this animal's plumage was chestnut-brown on top with a pale or carotenoid-colored underside",
+   "hypothesis": "Scientists say this animal's plumage was chestnut brown on top with a pale or carotenoid colored underside.",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1632#2",
+   "speaker": "",
+   "seconds": 7.98,
+   "reference": "women should realize that cultural differences may result in what they would consider harassment and it is not uncommon to be followed grabbed by the arm etc",
+   "hypothesis": "Women should realize that cultural differences may result in what they consider harassment, and it is not uncommon to be followed, grabbed by the arm, etc.",
+   "edits": 1,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1610",
+   "speaker": "",
+   "seconds": 8.4,
+   "reference": "such things have become separate disciplines which focus on providing solutions to real life problems",
+   "hypothesis": "Such things have become separate disciplines which focus on providing solutions to real life problems.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1655",
+   "speaker": "",
+   "seconds": 9.06,
+   "reference": "for example  learning” and  socialization” are suggested as important motivations for internet use james et al. 1995",
+   "hypothesis": "For example, learning and socialization are suggested as important motivations for Internet use. James Etal, 1995",
+   "edits": 2,
+   "length": 17,
+   "has_digit": true
+  },
+  {
+   "id": "1546#3",
+   "speaker": "",
+   "seconds": 12.24,
+   "reference": "the feathers' structure suggests that they were not used in flight but rather for temperature regulation or display the researchers suggested that even though this is the tail of a young dinosaur the sample shows adult plumage and not a chick's down",
+   "hypothesis": "The feather structures suggest that they were not used in flight but rather for temperature regulation or display. The researchers suggest that even though this is the tail of a young dinosaur, the samples show adult plumage and not a chick stone.",
+   "edits": 8,
+   "length": 42,
+   "has_digit": false
+  },
+  {
+   "id": "1602#2",
+   "speaker": "",
+   "seconds": 13.7,
+   "reference": "majorcan cuisine like that of similar zones in the mediterranean is based on bread vegetables and meat specially pork and uses olive oil throughout",
+   "hypothesis": "Majorcan cuisine like that of similar zones in the Mediterranean is based on bread vegetables and meat especially pork and uses olive oil for out",
+   "edits": 3,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1656#2",
+   "speaker": "",
+   "seconds": 3.6,
+   "reference": "police said that the body appeared to have been there for about a day",
+   "hypothesis": "Police says that the body appeared to have been there for about a day.",
+   "edits": 1,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1573#2",
+   "speaker": "",
+   "seconds": 12.38,
+   "reference": "a satellite phone is not generally a replacement for a mobile phone as you have to be outdoors with clear line of sight to the satellite to make a phone call",
+   "hypothesis": "A satellite phone is not generally a replacement for a mobile phone as you have to be outdoors with a clear line of sight to the satellite to make a phone call.",
+   "edits": 1,
+   "length": 31,
+   "has_digit": false
+  },
+  {
+   "id": "1532",
+   "speaker": "",
+   "seconds": 10.98,
+   "reference": "108 plates of chhappan bhog in hinduism 56 different edible items like sweets fruits nuts dishes etc. which are offered to deity were served to baba shyam",
+   "hypothesis": "108 plates of chapan, bog, and Hinduism. 56 different edible items like sweets, fruits, nuts, dishes, etc., which are offered to Deidee were served to Babashiyam.",
+   "edits": 6,
+   "length": 27,
+   "has_digit": true
+  },
+  {
+   "id": "1550#2",
+   "speaker": "",
+   "seconds": 8.76,
+   "reference": "skiing is a major travelling activity with many enthusiasts occasionally known as ski bums planning entire vacations around skiing at a particular location",
+   "hypothesis": "Skiing is a major activity with many enthusiasts occasionally known as ski bums planning entire vacations around skiing at a particular location.",
+   "edits": 1,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1574#3",
+   "speaker": "",
+   "seconds": 12.24,
+   "reference": "the winter can be deceptively chilly temperatures rarely go below freezing but the wind and humidity combine to make it feel colder than what the thermometer says",
+   "hypothesis": "The winter can be deceptively chilly. Temperatures rarely go below freezing, but the wind and humidity combine to make it feel colder than what the thermometer says.",
+   "edits": 0,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1610#2",
+   "speaker": "",
+   "seconds": 9.42,
+   "reference": "such things have become separate disciplines which focus on providing solutions to real life problems",
+   "hypothesis": "Such things have become separate disciplines which focus on providing solutions to real-life problems.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1640#2",
+   "speaker": "",
+   "seconds": 6.72,
+   "reference": "on icy and snowy roadways friction is low and you cannot drive as if you were on bare asphalt",
+   "hypothesis": "On icy and snowy roadways, friction is low and you cannot drive as if you were on bare asphalt.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1545",
+   "speaker": "",
+   "seconds": 7.66,
+   "reference": "a curry can be either dry or wet depending on the amount of liquid",
+   "hypothesis": "A curry can be either dry or wet depending on the amount of liquid.",
+   "edits": 0,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1545#2",
+   "speaker": "",
+   "seconds": 7.4,
+   "reference": "a curry can be either dry or wet depending on the amount of liquid",
+   "hypothesis": "A curry can be either dry or wet depending on the amount of liquid.",
+   "edits": 0,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1553#2",
+   "speaker": "",
+   "seconds": 8.28,
+   "reference": "christmas is one of the most important holidays of christianity and is celebrated as the birthday of jesus",
+   "hypothesis": "Christmas is one of the most important holidays to Christianity and is celebrated as the birthday of Jesus",
+   "edits": 1,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1552",
+   "speaker": "",
+   "seconds": 4.92,
+   "reference": "the result of plotting analysis will be posted to a public website",
+   "hypothesis": "The result of plotting analysis will be posted to a public website.",
+   "edits": 0,
+   "length": 12,
+   "has_digit": false
+  },
+  {
+   "id": "1571#3",
+   "speaker": "",
+   "seconds": 11.58,
+   "reference": "the arabs also brought islam to the lands and it took in a big way in the comoros and mayotte",
+   "hypothesis": "the arabs also brought islam to the lands and it took in a big way in comros in mayat",
+   "edits": 4,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1570",
+   "speaker": "",
+   "seconds": 7.32,
+   "reference": "it also had no authority to override tax laws and tariffs between states",
+   "hypothesis": "It also had no authority to override tax laws and tariffs between states.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1607#2",
+   "speaker": "",
+   "seconds": 4.44,
+   "reference": "it's worth half an hour to stroll about the intriguing village",
+   "hypothesis": "It's worth half an hour to stroll about the intriguing village.",
+   "edits": 0,
+   "length": 11,
+   "has_digit": false
+  },
+  {
+   "id": "1621#3",
+   "speaker": "",
+   "seconds": 7.98,
+   "reference": "at the beginning dress was heavily influenced by the byzantine culture in the east",
+   "hypothesis": "At the beginning, Dress was heavily influenced by the Byzantine culture in the East.",
+   "edits": 0,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1653#2",
+   "speaker": "",
+   "seconds": 11.52,
+   "reference": "in a partnership of npws and the sporting shooters association of australia nsw inc qualified volunteers were recruited under the sporting shooters association's hunting program",
+   "hypothesis": "In partnership with NPWS and the Sporting Shooters Association of Australia, NSW Inc., qualified volunteers were recruited under the Sporting Shooters Association's hunting program.",
+   "edits": 2,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1555#2",
+   "speaker": "",
+   "seconds": 7.68,
+   "reference": "in the churchyard there are interesting marble sculptures of doves over some tombs",
+   "hypothesis": "In the church yard there are interesting marble sculptures of doves over some tombs.",
+   "edits": 2,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1587#2",
+   "speaker": "",
+   "seconds": 4.56,
+   "reference": "the first cases of the disease this season were reported in late july",
+   "hypothesis": "The first cases of the disease this season were reported in late July.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1631#2",
+   "speaker": "",
+   "seconds": 9.0,
+   "reference": "new kingdom ancient egyptians marvelled at their predecessors monuments which were then well over a thousand year old",
+   "hypothesis": "New Kingdom ancient Egyptians marveled at their predecessor's moments when they were well over a thousand years old.",
+   "edits": 7,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1577#2",
+   "speaker": "",
+   "seconds": 7.78,
+   "reference": "that didn't seem to make sense to me it certainly wasn't fair",
+   "hypothesis": "That didn't seem to make sense to me. It certainly wasn't fair.",
+   "edits": 0,
+   "length": 12,
+   "has_digit": false
+  },
+  {
+   "id": "1627#2",
+   "speaker": "",
+   "seconds": 10.68,
+   "reference": "ancient roman meals couldn't have included foods that came to europe from america or from asia in later centuries",
+   "hypothesis": "Ancient Roman meals couldn't have included foods that came to Europe from America or from Asia in later centuries.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1603#3",
+   "speaker": "",
+   "seconds": 12.24,
+   "reference": "air accidents are common in iran which has an aging fleet that is poorly maintained both for civil and military operations",
+   "hypothesis": "Air accidents are common in Iran, which has an aging fleet that is poorly maintained for both civil and military operations.",
+   "edits": 2,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1537#2",
+   "speaker": "",
+   "seconds": 5.88,
+   "reference": "you can see the pyramids in the dark and you can see them in silence before the show begins",
+   "hypothesis": "You can see the pyramids in the dark and you can see them in silence before the show begins.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1585#3",
+   "speaker": "",
+   "seconds": 8.34,
+   "reference": "over time as the new population begins to adapt to their new environment they start to look less and less like the other population",
+   "hypothesis": "Over time, as the new population begins to adapt to their new environment, they start to look less and less like the other population.",
+   "edits": 0,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1577#3",
+   "speaker": "",
+   "seconds": 6.12,
+   "reference": "that didn't seem to make sense to me it certainly wasn't fair",
+   "hypothesis": "that didn't seem to make sense to me it certainly wasn't fair",
+   "edits": 0,
+   "length": 12,
+   "has_digit": false
+  },
+  {
+   "id": "1607#3",
+   "speaker": "",
+   "seconds": 3.84,
+   "reference": "it's worth half an hour to stroll about the intriguing village",
+   "hypothesis": "It's worth half an hour to stroll about the intriguing village.",
+   "edits": 0,
+   "length": 11,
+   "has_digit": false
+  },
+  {
+   "id": "1587#3",
+   "speaker": "",
+   "seconds": 5.1,
+   "reference": "the first cases of the disease this season were reported in late july",
+   "hypothesis": "The first cases of the disease this season were reported in late July.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1563#2",
+   "speaker": "",
+   "seconds": 10.2,
+   "reference": "the researchers suggested that even though this is the tail of a young dinosaur the sample shows adult plumage and not a chick's down",
+   "hypothesis": "The researchers suggested that even though this is the tail of a young dinosaur, this sample shows adult plumage and not a chick's gown.",
+   "edits": 2,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1644#2",
+   "speaker": "",
+   "seconds": 6.6,
+   "reference": "when asked for comment miller said mike talks a lot during the hearing...i was getting ready so i wasn't really hearing what he was saying.",
+   "hypothesis": "And as for comment, Miller said, Mike talks a lot during the hearing. I was getting ready, so I wasn't really hearing what he was saying.",
+   "edits": 2,
+   "length": 26,
+   "has_digit": false
+  },
+  {
+   "id": "1555#3",
+   "speaker": "",
+   "seconds": 9.54,
+   "reference": "in the churchyard there are interesting marble sculptures of doves over some tombs",
+   "hypothesis": "In the churchyard there are interesting marble sculptures of doves over some tombs.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1565#2",
+   "speaker": "",
+   "seconds": 10.16,
+   "reference": "science's main goal is to figure out the way the world works through the scientific method this method in fact guides most scientific research",
+   "hypothesis": "Science's main goal is to figure out the way the world works through the scientific method. This method, in fact, guides most scientific research.",
+   "edits": 0,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1609#3",
+   "speaker": "",
+   "seconds": 12.38,
+   "reference": "robin uthappa made the innings highest score 70 runs in just 41 balls by hitting 11 fours and 2 sixes",
+   "hypothesis": "Robin Yuhapa made the inning's highest score 70 runs in just 41 balls by hitting eleven fours and two sixes",
+   "edits": 4,
+   "length": 20,
+   "has_digit": true
+  },
+  {
+   "id": "1520#3",
+   "speaker": "",
+   "seconds": 14.94,
+   "reference": "out of 1,400 people polled prior to the 2010 federal election those who oppose australia becoming a republic grew by 8 per cent since 2008",
+   "hypothesis": "Out of 1400 people polled prior to the 2010 federal election, those who oppose Australia becoming a republic grew by 8 percent since 2008.",
+   "edits": 4,
+   "length": 26,
+   "has_digit": true
+  },
+  {
+   "id": "1594#2",
+   "speaker": "",
+   "seconds": 8.82,
+   "reference": "some animals such as elephants and giraffes tend to approach closely to cars and standard equipment will allow good viewing",
+   "hypothesis": "Some animals such as elephants and giraffes tend to approach closely to cars and standard equipment will allow good viewing.",
+   "edits": 0,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1569",
+   "speaker": "",
+   "seconds": 7.74,
+   "reference": "the report opens with plea for open debate and the formation of a consensus in the united states about the policy towards the middle east",
+   "hypothesis": "The report opens with plea for open debate and the formation of a consensus in the United States about the policy towards the Middle East.",
+   "edits": 0,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1576#3",
+   "speaker": "",
+   "seconds": 6.36,
+   "reference": "a course will normally cover all the issues discussed here in far greater detail usually with practical experience",
+   "hypothesis": "A course will normally cover all the issues discussed here in far greater detail usually with practical experience.",
+   "edits": 0,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1539#3",
+   "speaker": "",
+   "seconds": 13.68,
+   "reference": "members of a subculture often signal their membership through a distinctive and symbolic use of style which includes fashions mannerisms and argot",
+   "hypothesis": "Members of a subculture often signal their membership through a distinctive and symbolic use of style, which includes fashions, mannerisms, and argo.",
+   "edits": 1,
+   "length": 22,
+   "has_digit": false
+  },
+  {
+   "id": "1605#3",
+   "speaker": "",
+   "seconds": 12.66,
+   "reference": "due to the long distance from the continent mammals were unable to make the journey making the giant tortoise the primary grazing animal in the galapagos",
+   "hypothesis": "Due to the long distance from the continent, mammals were unable to make the journey, making the giant tortoise the primary grazing animal in the Galapagos.",
+   "edits": 0,
+   "length": 26,
+   "has_digit": false
+  },
+  {
+   "id": "1622#2",
+   "speaker": "",
+   "seconds": 5.82,
+   "reference": "u.s. president george w bush welcomed the announcement",
+   "hypothesis": "U.S. President George W. Bush welcomed the announcement.",
+   "edits": 0,
+   "length": 9,
+   "has_digit": false
+  },
+  {
+   "id": "1552#2",
+   "speaker": "",
+   "seconds": 4.38,
+   "reference": "the result of plotting analysis will be posted to a public website",
+   "hypothesis": "The results of plotting analysis will be posted to a public website.",
+   "edits": 1,
+   "length": 12,
+   "has_digit": false
+  },
+  {
+   "id": "1592#3",
+   "speaker": "",
+   "seconds": 8.28,
+   "reference": "when you went abroad at first people were probably patient and understanding knowing that travellers in a new country need to adapt",
+   "hypothesis": "When you went abroad at first, people were probably patient and understanding, knowing that travelers in a new country need to adapt.",
+   "edits": 1,
+   "length": 22,
+   "has_digit": false
+  },
+  {
+   "id": "1569#2",
+   "speaker": "",
+   "seconds": 7.26,
+   "reference": "the report opens with plea for open debate and the formation of a consensus in the united states about the policy towards the middle east",
+   "hypothesis": "The report opens with a plea for open debate and the formation of a consensus in the United States about the policy towards the Middle East.",
+   "edits": 1,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1625#2",
+   "speaker": "",
+   "seconds": 6.24,
+   "reference": "famous singers across the country presented bhajans or devotional songs to shri shyam's feet",
+   "hypothesis": "Famous singers across the country represent Pajan's or devotional songs to Sri Shisham's feet.",
+   "edits": 4,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1521#3",
+   "speaker": "",
+   "seconds": 5.7,
+   "reference": "the satellite in space gets the call and then reflects it back down almost instantly",
+   "hypothesis": "The satellite in space gets the call and then reflects it back down almost instantly.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1557#3",
+   "speaker": "",
+   "seconds": 7.5,
+   "reference": "after seeing the horrors and atrocities of war during world war i nations desired to avoid such a situation again in the future",
+   "hypothesis": "After seeing the horrors and atrocities of war during World War I, nations desire to avoid such a situation again in the future.",
+   "edits": 1,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1612#3",
+   "speaker": "",
+   "seconds": 6.28,
+   "reference": "water is spilling over the levee in a section 100 feet wide",
+   "hypothesis": "Water is spilling over the levee in a section 100 feet wide.",
+   "edits": 0,
+   "length": 12,
+   "has_digit": true
+  },
+  {
+   "id": "1516#3",
+   "speaker": "",
+   "seconds": 10.62,
+   "reference": "please treat the site with all of the dignity solemnity and respect it deserves do not make jokes about the holocaust or nazis",
+   "hypothesis": "Please treat this site with all the dignity, solemnity, and respect it deserves. Do not make jokes about the Holocaust or Nazis.",
+   "edits": 2,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1569#3",
+   "speaker": "",
+   "seconds": 9.66,
+   "reference": "the report opens with plea for open debate and the formation of a consensus in the united states about the policy towards the middle east",
+   "hypothesis": "The report opens with plea for open debate and the formation of a consensus in the United States about the policy towards the Middle East.",
+   "edits": 0,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1579#2",
+   "speaker": "",
+   "seconds": 9.48,
+   "reference": "it warns no one can guarantee that any course of action in iraq at this point will stop sectarian warfare growing violence or a slide toward chaos",
+   "hypothesis": "It warns no one can guarantee that any course of action in Iraq at this point will stop secretarian warfare, growing violence, or a slide towards chaos.",
+   "edits": 2,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1604",
+   "speaker": "",
+   "seconds": 21.12,
+   "reference": "as nsa he assisted carter in diplomatically handling world affairs such as the camp david accords 1978 normalizing us-china relations thought the late 1970s the iranian revolution which led to the iran hostage crisis 1979 and the soviet invasion in afghanistan 1979",
+   "hypothesis": "The NSA assisted Carter in a diplomatically hand-in-board affairs such as Camp David Accords 1978 Normalizing U.S.-China relations The Late 1970s The Iranian Revolution Which Led to the Iran Hostage Crisis 1979 And the Soviet Invasion in Afghanistan 1979",
+   "edits": 10,
+   "length": 43,
+   "has_digit": true
+  },
+  {
+   "id": "1537#3",
+   "speaker": "",
+   "seconds": 7.5,
+   "reference": "you can see the pyramids in the dark and you can see them in silence before the show begins",
+   "hypothesis": "You can see the pyramids in the dark and you can see them in silence before the show begins.",
+   "edits": 0,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1659#2",
+   "speaker": "",
+   "seconds": 5.46,
+   "reference": "scientists say the explosion caused by the collision was massive",
+   "hypothesis": "Scientists say the explosion caused by a collision was massive",
+   "edits": 1,
+   "length": 10,
+   "has_digit": false
+  },
+  {
+   "id": "1657",
+   "speaker": "",
+   "seconds": 10.2,
+   "reference": "any amendments or requests though should be coursed through the travel agent first and not directly with the hotel",
+   "hypothesis": "Any amendments or requests should be coursed through the travel agent first and not directly with the hotel.",
+   "edits": 1,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1608#3",
+   "speaker": "",
+   "seconds": 10.2,
+   "reference": "i lost my sister and her friend and on my way there were two disabled people in wheelchairs people just jumping over and pushing them armand versace said",
+   "hypothesis": "I lost my sister and her friend and on my way there were two disabled people in wheelchairs. People just jumping over and pushing them, Armand Versace said.",
+   "edits": 0,
+   "length": 28,
+   "has_digit": false
+  },
+  {
+   "id": "1528#2",
+   "speaker": "",
+   "seconds": 5.76,
+   "reference": "some festivals have special camping areas for families with young children",
+   "hypothesis": "Some festivals have special camping areas for families with young children.",
+   "edits": 0,
+   "length": 11,
+   "has_digit": false
+  },
+  {
+   "id": "1540#3",
+   "speaker": "",
+   "seconds": 13.2,
+   "reference": "in principle the tibetan buddhism is very simple it consists of kundalini yoga meditation and the path of all-embracing love",
+   "hypothesis": "In principle, the Tibetan Buddhism is very simple. It consists of kundalini yoga, meditation, and the path of all-embracing love.",
+   "edits": 0,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1517#3",
+   "speaker": "",
+   "seconds": 8.34,
+   "reference": "research in ai involves making machines to automate tasks that require intelligent behavior",
+   "hypothesis": "Research in AI involves making machines to automate tasks that require intelligent behavior.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1573#3",
+   "speaker": "",
+   "seconds": 9.54,
+   "reference": "a satellite phone is not generally a replacement for a mobile phone as you have to be outdoors with clear line of sight to the satellite to make a phone call",
+   "hypothesis": "A satellite phone is not generally a replacement for a mobile phone as you have to be outdoors with a clear line of sight to the satellite to make a phone call.",
+   "edits": 1,
+   "length": 31,
+   "has_digit": false
+  },
+  {
+   "id": "1651#2",
+   "speaker": "",
+   "seconds": 7.26,
+   "reference": "an increasingly more popular option for those planning a gap-year is to travel and learn",
+   "hypothesis": "An increasingly more popular option for those planning a gap year is to travel and learn",
+   "edits": 0,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1597#3",
+   "speaker": "",
+   "seconds": 8.46,
+   "reference": "money can be exchanged at the only bank in the islands which is located in stanley across from the fic west store",
+   "hypothesis": "Money can be exchanged at the only bank in the islands which is located in Stanley across from the FIC West store.",
+   "edits": 0,
+   "length": 22,
+   "has_digit": false
+  },
+  {
+   "id": "1525#2",
+   "speaker": "",
+   "seconds": 14.16,
+   "reference": "the broad boulevards glass-fronted buildings and modern shopping centers are dotted with traditional red-tiled roofs the 18th century market and old mosques and churches although the city has an atmosphere more of mediterranean europe than traditional turkey",
+   "hypothesis": "The broad boulevards, glass-fronted buildings, and modern shopping centers are dotted with traditional red-tilled roofs, the 18th century market, and old mosques and churches, although the city has an atmosphere more of Mediterranean Europe than traditional Turkey.",
+   "edits": 1,
+   "length": 39,
+   "has_digit": true
+  },
+  {
+   "id": "1584#3",
+   "speaker": "",
+   "seconds": 11.36,
+   "reference": "widespread looting reportedly continued overnight as law enforcement officers were not present on bishkek's streets",
+   "hypothesis": "Widespread looting reportedly continued overnight as law enforcement officers were not present on Bishkesh streets.",
+   "edits": 1,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1558#3",
+   "speaker": "",
+   "seconds": 12.38,
+   "reference": "before an organization can be innovative leadership must create a culture of innovation as well as shared knowledge and organizational learning",
+   "hypothesis": "Before an organization can be innovative, leadership must create a culture of innovation as well as shared knowledge and organizational learning.",
+   "edits": 0,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1526#2",
+   "speaker": "",
+   "seconds": 12.1,
+   "reference": "if you visit the arctic or antarctic areas in the winter you will experience the polar night which means that the sun doesn't rise above the horizon",
+   "hypothesis": "If you visit the Arctic or Antarctic areas in the winter, you will experience the polar night, which means the sun doesn't rise above the horizon.",
+   "edits": 1,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1625#3",
+   "speaker": "",
+   "seconds": 10.76,
+   "reference": "famous singers across the country presented bhajans or devotional songs to shri shyam's feet",
+   "hypothesis": "Famous singers across the country presented Baha'ajans or devotional songs to Shir Shiam's feet",
+   "edits": 3,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1564#3",
+   "speaker": "",
+   "seconds": 7.32,
+   "reference": "some patients might have contracted the bug in the hospital dr moll thinks and at least two were hospital health workers",
+   "hypothesis": "Some patients might have contracted the bug in the hospital Dr. Maltings and at least two were hospital health workers",
+   "edits": 2,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1626#3",
+   "speaker": "",
+   "seconds": 10.2,
+   "reference": "the olympic gold medalist was due to swim in the 100m and 200m freestyle and in three relays at the commonwealth games but due to his complaints his fitness has been in doubt",
+   "hypothesis": "The Olympic gold medalist was due to swim in the 100 meter and 200 meter freestyle and in three relays at the Commonwealth Games, but due to his complaints his fitness has been in doubt.",
+   "edits": 4,
+   "length": 33,
+   "has_digit": true
+  },
+  {
+   "id": "1534#2",
+   "speaker": "",
+   "seconds": 10.58,
+   "reference": "combined with its relative inaccessibility timbuktu has come to be used as a metaphor for exotic distant lands",
+   "hypothesis": "Combined with relative inaccessibility, Timbuktu has come to be used as a metaphor for exotic distant land.",
+   "edits": 2,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1579#3",
+   "speaker": "",
+   "seconds": 10.2,
+   "reference": "it warns no one can guarantee that any course of action in iraq at this point will stop sectarian warfare growing violence or a slide toward chaos",
+   "hypothesis": "It warns no one can guarantee that any course of action in Iraq at this point will stop secretarian warfare, growing violence, or a slide toward chaos.",
+   "edits": 1,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1649#2",
+   "speaker": "",
+   "seconds": 9.6,
+   "reference": "in japan the first cherry blossom parties were hosted by the emperor only for himself and other members of the aristocracy around the imperial court",
+   "hypothesis": "In Japan, the first cherry blossom parties were hosted by the emperor only for himself and other members of the aristocracy around the imperial court.",
+   "edits": 0,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1611#3",
+   "speaker": "",
+   "seconds": 11.5,
+   "reference": ". scientists say this animal's plumage was chestnut-brown on top with a pale or carotenoid-colored underside",
+   "hypothesis": "Scientists say this animal's plumage was chestnut brown on top with a pale or carotenoid colored underside",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1549#2",
+   "speaker": "",
+   "seconds": 8.4,
+   "reference": "these theories suggest that people have certain needs and/or desires which have been internalized as they mature to adulthood",
+   "hypothesis": "These theories suggest that people have certain needs and or desires which have been internalized as they mature to adulthood",
+   "edits": 0,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1614#3",
+   "speaker": "",
+   "seconds": 13.02,
+   "reference": "they can see very well in the dark with night vision and move very stealthily too ocelots hunt their prey by blending in with their surroundings then pouncing on their prey",
+   "hypothesis": "They can see very well in the dark with night vision and move very stealthily too. Ocelots hunt their prey by blending in with their surroundings then pouncing on their prey.",
+   "edits": 0,
+   "length": 31,
+   "has_digit": false
+  },
+  {
+   "id": "1523#2",
+   "speaker": "",
+   "seconds": 10.08,
+   "reference": "the final score was a one-point victory 21 to 20 ending the all blacks' 15 game winning streak",
+   "hypothesis": "The final score was a one-point victory, 21-20, ending the All Blacks 15-game winning streak.",
+   "edits": 2,
+   "length": 19,
+   "has_digit": true
+  },
+  {
+   "id": "1627#3",
+   "speaker": "",
+   "seconds": 12.76,
+   "reference": "ancient roman meals couldn't have included foods that came to europe from america or from asia in later centuries",
+   "hypothesis": "Ancient Rome meals couldn't have included foods that came to Europe from America or from Asia in later centuries",
+   "edits": 1,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1647#2",
+   "speaker": "",
+   "seconds": 7.98,
+   "reference": "the views presented are often cursory general and oversimplified compared to the more detailed information available elsewhere",
+   "hypothesis": "The views presented are often cursory, general, and oversimplified compared to the more detailed information available elsewhere.",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1570#2",
+   "speaker": "",
+   "seconds": 7.96,
+   "reference": "it also had no authority to override tax laws and tariffs between states",
+   "hypothesis": "It also had no authority to override tax laws and tariffs between states.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1604#2",
+   "speaker": "",
+   "seconds": 29.1,
+   "reference": "as nsa he assisted carter in diplomatically handling world affairs such as the camp david accords 1978 normalizing us-china relations thought the late 1970s the iranian revolution which led to the iran hostage crisis 1979 and the soviet invasion in afghanistan 1979",
+   "hypothesis": "As NSA, he assisted Carter in diplomatically handling world affairs such as the Camp David Accords, 1978, normalizing US-China relations through the late 1970s, the Iranian Revolution which led to the Iran Hostage Crisis, 1979, in the Soviet invasion in Afghanistan, 1979.",
+   "edits": 2,
+   "length": 43,
+   "has_digit": true
+  },
+  {
+   "id": "1536#2",
+   "speaker": "",
+   "seconds": 7.32,
+   "reference": "local authorities are warning residents in the vicinity of the plant to stay indoors turn off air-conditioners and not to drink tap water",
+   "hypothesis": "Liquid authorities are warning residents of the vicinity of the plan to stay indoors, turn off air conditioners, and not to drink tap water.",
+   "edits": 3,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1519#3",
+   "speaker": "",
+   "seconds": 7.8,
+   "reference": "in many cases enrolling on a gap-year course abroad can actually improve your chances of moving into higher education back in your home country",
+   "hypothesis": "In many cases, enrolling on a gap year course abroad can actually improve your chances of moving into higher education back in your home country.",
+   "edits": 0,
+   "length": 25,
+   "has_digit": false
+  },
+  {
+   "id": "1526#3",
+   "speaker": "",
+   "seconds": 9.3,
+   "reference": "if you visit the arctic or antarctic areas in the winter you will experience the polar night which means that the sun doesn't rise above the horizon",
+   "hypothesis": "If you visit the Arctic or Antarctic areas in the winter, you will experience the polar night, which means that the sun doesn't rise above the horizon.",
+   "edits": 0,
+   "length": 27,
+   "has_digit": false
+  },
+  {
+   "id": "1512#3",
+   "speaker": "",
+   "seconds": 13.3,
+   "reference": "this new environment has different resources and different competitors so the new population will need different features or adaptations to be a strong competitor than what they had needed before",
+   "hypothesis": "This new environment has different resources and different competitors, so the new population will need different features or adaptations to be a strong competitor than what they had needed before.",
+   "edits": 0,
+   "length": 30,
+   "has_digit": false
+  },
+  {
+   "id": "1646#2",
+   "speaker": "",
+   "seconds": 10.68,
+   "reference": "there are many beaches due to auckland's straddling of two harbours the most popular ones are in three areas",
+   "hypothesis": "There are many beaches due to Auckland's straddling of two harbors. The most popular ones are in three areas.",
+   "edits": 1,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1594#3",
+   "speaker": "",
+   "seconds": 12.36,
+   "reference": "some animals such as elephants and giraffes tend to approach closely to cars and standard equipment will allow good viewing",
+   "hypothesis": "Some animals such as elephants and giraffes tend to approach closely to cars and standard equipment will allow good viewing.",
+   "edits": 0,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1593#3",
+   "speaker": "",
+   "seconds": 12.18,
+   "reference": "eventually wooden wheels were replaced by iron wheels in 1767 the first full-iron rails were introduced",
+   "hypothesis": "Eventually, wooden wheels were replaced by iron wheels. In 1767, the first full iron rails were introduced.",
+   "edits": 0,
+   "length": 17,
+   "has_digit": true
+  },
+  {
+   "id": "1586#3",
+   "speaker": "",
+   "seconds": 11.76,
+   "reference": "her first was the slalom where she earned a did not finish in her first run 36 of the 116 competitors had the same result in that race",
+   "hypothesis": "her first was slalom regir dey did not finish in her first run thirty six of one hundred and six competitors had the same result in that race",
+   "edits": 11,
+   "length": 28,
+   "has_digit": false
+  },
+  {
+   "id": "1637",
+   "speaker": "",
+   "seconds": 31.74,
+   "reference": "the terrified king louis xvi queen marie antoinette their two young children 11 year old marie therese and four year old louis-charles and the king's sister madam elizabeth on the 6th october 1789 were forced back to paris from versailles by a mob of market women",
+   "hypothesis": "The Terrified Queen Louis XVI Queen Marie Antoinette, their two young children, 11-year-old Marie Farise and 4-year-old Louis Charles and the king's sister Madame Elizabeth, on 6 October 1789, were forced back to Paris from Versailles by a mob of market women.",
+   "edits": 6,
+   "length": 47,
+   "has_digit": true
+  },
+  {
+   "id": "1513#3",
+   "speaker": "",
+   "seconds": 7.38,
+   "reference": "argentina is well known for having one of the best polo teams and players in the world",
+   "hypothesis": "Argentina is well known for having one of the best polo teams and players in the world.",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1630#2",
+   "speaker": "",
+   "seconds": 8.64,
+   "reference": "arly velasquez of mexico finished fifteenth in the men's sitting super-g new zealand's adam hall finished ninth in the men's standing super-g",
+   "hypothesis": "Arlie Velazquez of Mexico finished 15th in the Men's Standing Super G. New Zealand's Adam Hall finished 9th in the Men's Standing Super G.",
+   "edits": 5,
+   "length": 24,
+   "has_digit": true
+  },
+  {
+   "id": "1532#2",
+   "speaker": "",
+   "seconds": 12.72,
+   "reference": "108 plates of chhappan bhog in hinduism 56 different edible items like sweets fruits nuts dishes etc. which are offered to deity were served to baba shyam",
+   "hypothesis": "108 plates of chap and bong in hinduism 56 different edible items like sweet fruits nuts dishes etc which are offered to deity were served to babashaya",
+   "edits": 6,
+   "length": 27,
+   "has_digit": true
+  },
+  {
+   "id": "1522#3",
+   "speaker": "",
+   "seconds": 13.38,
+   "reference": "technology offers the solution with virtual field trips students can look at museum artifacts visit an aquarium or admire beautiful art while sitting with their class",
+   "hypothesis": "Technology offers a solution with virtual field trips. Students can look at museum artifacts, visit an aquarium, or admire beautiful art while sitting with their class.",
+   "edits": 1,
+   "length": 26,
+   "has_digit": false
+  },
+  {
+   "id": "1554#3",
+   "speaker": "",
+   "seconds": 4.2,
+   "reference": "he built a wifi door bell he said",
+   "hypothesis": "He built a wifi doorbell he said",
+   "edits": 2,
+   "length": 8,
+   "has_digit": false
+  },
+  {
+   "id": "1527#2",
+   "speaker": "",
+   "seconds": 21.0,
+   "reference": "poland's men's visually impaired skier maciej krezel and guide anna ogarzynska finished thirteenth in the super-g south korea's jong seork park finished twenty-fourth in the men's sitting super-g",
+   "hypothesis": "Poland's men's visually impaired skier Makaej Krizel and guide Anna Organska finished 13th in the Super G South Korea's Jong Sarapar finished 24th in the men's sitting Super G",
+   "edits": 8,
+   "length": 31,
+   "has_digit": true
+  },
+  {
+   "id": "1572#3",
+   "speaker": "",
+   "seconds": 4.32,
+   "reference": "three more bombs exploded near government buildings in a period of two hours",
+   "hypothesis": "Three more bombs exploded near government buildings in a period of two hours.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1568#3",
+   "speaker": "",
+   "seconds": 12.36,
+   "reference": "though it is widely used especially among non-romani the word gypsy is often considered offensive because of its associations with negative stereotypes and inaccurate perceptions of romani people",
+   "hypothesis": "This is widely used especially among non-Romani the word gypsy is often considered offensive because of its association with negative stereotypes and inaccurate perceptions of Romani people.",
+   "edits": 3,
+   "length": 29,
+   "has_digit": false
+  },
+  {
+   "id": "1567",
+   "speaker": "",
+   "seconds": 6.9,
+   "reference": "the largest tournament of the year takes place in december at the polo fields in las cañitas",
+   "hypothesis": "The largest tournament of the year takes place in December at the Polo Fields in Las Caninas.",
+   "edits": 1,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1550#3",
+   "speaker": "",
+   "seconds": 13.9,
+   "reference": "skiing is a major travelling activity with many enthusiasts occasionally known as ski bums planning entire vacations around skiing at a particular location",
+   "hypothesis": "Skiing is a major traveling activity with many enthusiasts, occasionally known as ski-bones, planning entire vacations around skiing at a particular location.",
+   "edits": 2,
+   "length": 23,
+   "has_digit": false
+  },
+  {
+   "id": "1561#3",
+   "speaker": "",
+   "seconds": 6.12,
+   "reference": "most districts are served by small japanese coaster buses which are comfortable and sturdy",
+   "hypothesis": "Most districts are smoked by small Japanese coaster buses which are comfortable and sturdy.",
+   "edits": 1,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1523#3",
+   "speaker": "",
+   "seconds": 7.68,
+   "reference": "the final score was a one-point victory 21 to 20 ending the all blacks' 15 game winning streak",
+   "hypothesis": "The final score was a one-point victory, 21-20, ending the All Blacks' 15-game winning streak.",
+   "edits": 1,
+   "length": 19,
+   "has_digit": true
+  },
+  {
+   "id": "1534#3",
+   "speaker": "",
+   "seconds": 10.26,
+   "reference": "combined with its relative inaccessibility timbuktu has come to be used as a metaphor for exotic distant lands",
+   "hypothesis": "Combined with its relative inaccessibility, Timbuktu has come to be used as a metaphor for exotic distant lands.",
+   "edits": 0,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1556#3",
+   "speaker": "",
+   "seconds": 11.04,
+   "reference": "his 1,000th stamp was the magnificent great deeds by swedish kings by david klöcker ehrenstrahl in 2000 which is listed in the guinness book of world records",
+   "hypothesis": "His one thousandth stamp was The Magnificent Great Deeds by Swedish Kings by David Clonker Esdral in 2000, which is listed in the Guinness Book of World Records.",
+   "edits": 4,
+   "length": 28,
+   "has_digit": true
+  },
+  {
+   "id": "1549#3",
+   "speaker": "",
+   "seconds": 10.7,
+   "reference": "these theories suggest that people have certain needs and/or desires which have been internalized as they mature to adulthood",
+   "hypothesis": "These theories suggest that people have certain needs and or desires which have been internalized as they mature to adulthood.",
+   "edits": 0,
+   "length": 20,
+   "has_digit": false
+  },
+  {
+   "id": "1566#3",
+   "speaker": "",
+   "seconds": 8.46,
+   "reference": "yet eighty percent of our goods were taxed through tariffs in central american countries we treat you",
+   "hypothesis": "Yet 80% of our goods were taxed through tariffs in Central American countries. We treat you.",
+   "edits": 2,
+   "length": 17,
+   "has_digit": true
+  },
+  {
+   "id": "1628#3",
+   "speaker": "",
+   "seconds": 6.72,
+   "reference": "handicraft products might be defined as antiques though they are younger than similar mass-produced goods",
+   "hypothesis": "handicraft products might be defined as antiques though they are younger than similar mass-produced goods",
+   "edits": 0,
+   "length": 16,
+   "has_digit": false
+  },
+  {
+   "id": "1616#3",
+   "speaker": "",
+   "seconds": 11.04,
+   "reference": "science now indicates that this massive carbon economy has dislodged the biosphere from one of its stable states that has supported human evolution for the past two million years",
+   "hypothesis": "Science now indicates that this massive carbon economy has dislodged the biosphere from one of its stable states that has supported human evolution for the past two million years.",
+   "edits": 0,
+   "length": 29,
+   "has_digit": false
+  },
+  {
+   "id": "1570#3",
+   "speaker": "",
+   "seconds": 8.34,
+   "reference": "it also had no authority to override tax laws and tariffs between states",
+   "hypothesis": "It also had no authority to override tax laws and tariffs between states.",
+   "edits": 0,
+   "length": 13,
+   "has_digit": false
+  },
+  {
+   "id": "1623#2",
+   "speaker": "",
+   "seconds": 11.4,
+   "reference": "the articles required unanimous consent from all the states before they could be amended and states took the central government so lightly that their representatives were often absent",
+   "hypothesis": "The Articles required unanimous consent from all the states before they could be amended, and states took the central government so lightly that their representatives were often absent.",
+   "edits": 0,
+   "length": 28,
+   "has_digit": false
+  },
+  {
+   "id": "1636#2",
+   "speaker": "",
+   "seconds": 7.34,
+   "reference": "the spaniards started the colonization period which lasted for three centuries",
+   "hypothesis": "The Spaniards started the colonization period which lasted for three centuries.",
+   "edits": 0,
+   "length": 11,
+   "has_digit": false
+  },
+  {
+   "id": "1548#2",
+   "speaker": "",
+   "seconds": 7.16,
+   "reference": "when you call someone who is thousands of miles away you are using a satellite",
+   "hypothesis": "When you call someone who is thousands of miles away, you are using a satellite.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1567#2",
+   "speaker": "",
+   "seconds": 6.96,
+   "reference": "the largest tournament of the year takes place in december at the polo fields in las cañitas",
+   "hypothesis": "The largest tournament of the year takes place in December at the Polo Fields in Las Canitas.",
+   "edits": 1,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1532#3",
+   "speaker": "",
+   "seconds": 18.58,
+   "reference": "108 plates of chhappan bhog in hinduism 56 different edible items like sweets fruits nuts dishes etc. which are offered to deity were served to baba shyam",
+   "hypothesis": "100 plates of Chapan Bahag in Hinduism 56 different edible items like sweets fruits nuts dishes etc which are offered to deity were served to Baba Shai Ham",
+   "edits": 5,
+   "length": 27,
+   "has_digit": true
+  },
+  {
+   "id": "1565#3",
+   "speaker": "",
+   "seconds": 7.2,
+   "reference": "science's main goal is to figure out the way the world works through the scientific method this method in fact guides most scientific research",
+   "hypothesis": "Science's main goal is to figure out the way the world works through the scientific method. This method in fact guides most scientific research.",
+   "edits": 0,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1552#3",
+   "speaker": "",
+   "seconds": 5.4,
+   "reference": "the result of plotting analysis will be posted to a public website",
+   "hypothesis": "The result of plaiting analysis will be posted to a public website.",
+   "edits": 1,
+   "length": 12,
+   "has_digit": false
+  },
+  {
+   "id": "1602#3",
+   "speaker": "",
+   "seconds": 13.82,
+   "reference": "majorcan cuisine like that of similar zones in the mediterranean is based on bread vegetables and meat specially pork and uses olive oil throughout",
+   "hypothesis": "Major-con cuisine, like that of similar stones in the Mediterranean, is based on bread, vegetables, and meat, especially pork, and uses olive oil throughout.",
+   "edits": 4,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1606#3",
+   "speaker": "",
+   "seconds": 10.52,
+   "reference": "the portuguese destroyed it and rebuilt it under the name casa branca only to abandon it after an earthquake in 1755",
+   "hypothesis": "The Portuguese destroyed it and rebuilt it under the name Casabranca only to abandon it after the earthquake of 1755.",
+   "edits": 4,
+   "length": 21,
+   "has_digit": true
+  },
+  {
+   "id": "1638#2",
+   "speaker": "",
+   "seconds": 6.24,
+   "reference": "safaris are perhaps the greatest tourism draw in africa and the highlight for many visitors",
+   "hypothesis": "Safaris are perhaps the greatest tourism draw in Africa and the highlight for many visitors.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1615#3",
+   "speaker": "",
+   "seconds": 10.28,
+   "reference": "thousands of years ago a man called aristarchus said that the solar system moved around the sun",
+   "hypothesis": "Thousands of years ago a man called Aristarchus said that the solar system moved around the sun",
+   "edits": 0,
+   "length": 17,
+   "has_digit": false
+  },
+  {
+   "id": "1622#3",
+   "speaker": "",
+   "seconds": 3.6,
+   "reference": "u.s. president george w bush welcomed the announcement",
+   "hypothesis": "U.S. President George W. Booth, welcome to the announcement.",
+   "edits": 3,
+   "length": 9,
+   "has_digit": false
+  },
+  {
+   "id": "1538#3",
+   "speaker": "",
+   "seconds": 11.16,
+   "reference": "the stretch between point marion and fairmont presents the most challenging driving conditions on the buffalo-pittsburgh highway passing frequently through isolated backwoods terrain",
+   "hypothesis": "The stretch between Point Marion and Fairmont presents the most challenging driving conditions on the Buffalo-Pittsburgh Highway, passing frequently through isolated backwoods terrain.",
+   "edits": 0,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1545#3",
+   "speaker": "",
+   "seconds": 6.78,
+   "reference": "a curry can be either dry or wet depending on the amount of liquid",
+   "hypothesis": "A curry can either be dry or wet depending on the amount of liquid.",
+   "edits": 2,
+   "length": 14,
+   "has_digit": false
+  },
+  {
+   "id": "1601#3",
+   "speaker": "",
+   "seconds": 7.92,
+   "reference": "scientists think that ocelots follow and find animals to eat prey by smell sniffing for where they've been on the ground",
+   "hypothesis": "Scientists think that ocelots follow and find animals to eat prey by smell sniffing for where they've been on the ground.",
+   "edits": 0,
+   "length": 21,
+   "has_digit": false
+  },
+  {
+   "id": "1553#3",
+   "speaker": "",
+   "seconds": 8.54,
+   "reference": "christmas is one of the most important holidays of christianity and is celebrated as the birthday of jesus",
+   "hypothesis": "Christmas is one of the most important holidays of Christianity and is celebrated as the birth of Jesus.",
+   "edits": 1,
+   "length": 18,
+   "has_digit": false
+  },
+  {
+   "id": "1527#3",
+   "speaker": "",
+   "seconds": 23.66,
+   "reference": "poland's men's visually impaired skier maciej krezel and guide anna ogarzynska finished thirteenth in the super-g south korea's jong seork park finished twenty-fourth in the men's sitting super-g",
+   "hypothesis": "Poland's men's visually impaired skier Maciek Krajewski and guide Anna Oglarszinska finished 13th in the Super G South Korea's John Sierpark finished 24th in the men's sitting Super G",
+   "edits": 9,
+   "length": 31,
+   "has_digit": true
+  },
+  {
+   "id": "1599#3",
+   "speaker": "",
+   "seconds": 10.08,
+   "reference": "the original population hasn't changed at all they still need the same adaptations as before",
+   "hypothesis": "The original population hasn't changed at all. They still need the same adaptations as before.",
+   "edits": 0,
+   "length": 15,
+   "has_digit": false
+  },
+  {
+   "id": "1551#3",
+   "speaker": "",
+   "seconds": 5.34,
+   "reference": "they are still trying to determine just how large the crash was and how the earth will be affected",
+   "hypothesis": "They were still trying to determine just how large the crash was and how the earth will be affected.",
+   "edits": 1,
+   "length": 19,
+   "has_digit": false
+  },
+  {
+   "id": "1536#3",
+   "speaker": "",
+   "seconds": 11.8,
+   "reference": "local authorities are warning residents in the vicinity of the plant to stay indoors turn off air-conditioners and not to drink tap water",
+   "hypothesis": "Local authorities are warning residents in the vicinity of the plant to stay indoors, turn off air-conditioners, and not to drink tap water.",
+   "edits": 0,
+   "length": 24,
+   "has_digit": false
+  },
+  {
+   "id": "1639#2",
+   "speaker": "",
+   "seconds": 9.12,
+   "reference": "since students are often the most critical audience the blog writer begins to strive to improve writing to avoid criticism",
+   "hypothesis": "Since students are often the most critical audience, the blog writer begins to strive to improve writing to avoid criticism.",
+   "edits": 0,
+   "length": 20,
+   "has_digit": false
+  }
+ ]
+}

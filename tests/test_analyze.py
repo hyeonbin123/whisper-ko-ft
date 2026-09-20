@@ -88,3 +88,50 @@ def test_compare_can_split_by_digits_in_the_reference(reports):
 
     assert (with_digit["utterances"], round(with_digit["delta"], 3)) == (1, 0.5)
     assert (without["utterances"], without["delta"]) == (1, 0.0)
+
+
+def notation_rows(hypotheses):
+    return [
+        {"id": f"u{n}", "edits": 9, "length": 9, "reference": "이천 십 팔 년 오 월", "hypothesis": h}
+        for n, h in enumerate(hypotheses)
+    ]
+
+
+def test_harmonized_scoring_ignores_the_notation_of_numbers(reports):
+    write_report(reports, "cand", "zeroth-val", notation_rows(["2018년 5월", "이천 십 팔 년 오 월"]))
+    loaded = analyze.load_rows("cand", "zeroth-val", harmonized=True)
+    assert [row["edits"] for row in loaded.values()] == [0, 0]
+    assert analyze.load_rows("cand", "zeroth-val")["u0"]["edits"] == 9  # the stored score is untouched
+
+
+def prepare_verdict6(reports, candidate_edits, fleurs_candidate):
+    def spelled(edits):
+        return [{**row, "reference": "문장", "hypothesis": "문장"} for row in rows(edits, length=100)]
+
+    # harmonized scoring scores the texts again, so the texts carry the errors here
+    def with_errors(edits):
+        return [
+            {**row, "reference": "가" * 100, "hypothesis": "가" * (100 - e)}
+            for row, e in zip(spelled(edits), edits, strict=True)
+        ]
+
+    write_report(reports, "base", "zeroth-val", with_errors([10, 10]))
+    write_report(reports, "l2", "zeroth-val", with_errors([2, 2]))
+    write_report(reports, "cand", "zeroth-val", with_errors(candidate_edits))
+    write_report(reports, "base", "fleurs-ko-val", rows([1, 1], length=100))
+    write_report(reports, "cand", "fleurs-ko-val", rows(fleurs_candidate, length=100))
+
+
+def test_verdict6_general_when_both_rules_hold(reports):
+    prepare_verdict6(reports, candidate_edits=[2, 2], fleurs_candidate=[1, 2])
+    assert analyze.verdict6("base", "l2", "cand") == "표기를 바꿔 학습하면 범용으로 쓸 수 있다"
+
+
+def test_verdict6_notation_is_not_enough_when_the_other_domain_gets_worse(reports):
+    prepare_verdict6(reports, candidate_edits=[2, 2], fleurs_candidate=[3, 3])
+    assert analyze.verdict6("base", "l2", "cand") == "표기만으로는 해결되지 않는다"
+
+
+def test_verdict6_gain_lost_when_clearly_above_the_previous_model(reports):
+    prepare_verdict6(reports, candidate_edits=[3, 3], fleurs_candidate=[1, 1])  # +1.0%p above l2
+    assert analyze.verdict6("base", "l2", "cand") == "표기를 바꾸면 같은 도메인의 이득을 잃는다"

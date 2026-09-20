@@ -10,6 +10,8 @@ Usage:
 `digits` fixes the list of "digit utterances" of a set (docs/experiments.md, "숫자 표기"): utterances where
 either base model wrote an Arabic digit. It is written once and not overwritten without --force.
 `verdict` applies the verdict rules of stages 2 and 3 to validation reports.
+`verdict6` applies the stage 6 rules. `--harmonized` scores the stored references and hypotheses again after
+`itn.harmonize`, so that either notation of a number gets the same score (docs/experiments.md, stage 6).
 """
 
 from __future__ import annotations
@@ -20,7 +22,8 @@ import re
 
 import numpy as np
 
-from whisper_ko_ft.metrics import difference_interval, error_rate, interval
+from whisper_ko_ft.itn import harmonize
+from whisper_ko_ft.metrics import difference_interval, error_rate, interval, score
 from whisper_ko_ft.paths import REPORTS
 
 BASE_MODELS = ("whisper-small", "whisper-large-v3-turbo")
@@ -29,15 +32,25 @@ BASE_MODELS = ("whisper-small", "whisper-large-v3-turbo")
 IN_DOMAIN_RELATIVE = -0.20
 IN_DOMAIN_NO_DIGITS_RELATIVE = -0.10
 OUT_OF_DOMAIN_MAX_INCREASE = 0.010
+# Stage 6: the harmonized CER may be at most this much above the stage 3 model's.
+STAGE6_MAX_ABOVE_L2 = 0.003
 _DIGIT = re.compile(r"[0-9]")
 
 
-def load_rows(report: str, set_name: str) -> dict[str, dict]:
+def load_rows(report: str, set_name: str, harmonized: bool = False) -> dict[str, dict]:
     data = json.loads((REPORTS / report / f"{set_name}.json").read_text(encoding="utf-8"))
     rows = {row["id"]: row for row in data["utterances"] if row["length"]}
     if len(rows) != sum(1 for row in data["utterances"] if row["length"]):
         raise SystemExit(f"{report}/{set_name}: utterance ids are not unique; measure it again")
+    if harmonized:
+        rows = {i: rescored(row) for i, row in rows.items()}
     return rows
+
+
+def rescored(row: dict) -> dict:
+    """The row scored again (Korean CER) with one number notation on both sides."""
+    scored = score(harmonize(row["reference"]), harmonize(row["hypothesis"]), "ko")
+    return {**row, "edits": scored.edits, "length": scored.length}
 
 
 def digit_ids(set_name: str) -> set[str]:
@@ -72,8 +85,10 @@ def arrays(rows: dict[str, dict], ids: list[str]) -> tuple[np.ndarray, np.ndarra
     return np.array([rows[i]["edits"] for i in ids]), np.array([rows[i]["length"] for i in ids])
 
 
-def table(set_name: str, reports: list[str], baseline: str | None, split_digits: bool) -> None:
-    loaded = {name: load_rows(name, set_name) for name in reports}
+def table(
+    set_name: str, reports: list[str], baseline: str | None, split_digits: bool, harmonized: bool = False
+) -> None:
+    loaded = {name: load_rows(name, set_name, harmonized) for name in reports}
     shared = sorted(set.intersection(*(set(rows) for rows in loaded.values())))
     subsets = {"all": shared}
     if split_digits:
@@ -105,6 +120,7 @@ def compare(
     baseline: str,
     without_digits: bool = False,
     reference_digits: bool | None = None,
+    harmonized: bool = False,
 ) -> dict:
     """Rates of two reports over their shared utterances and the paired interval of the difference.
 
@@ -112,7 +128,8 @@ def compare(
     utterances whose reference has (True) or lacks (False) an Arabic digit, for sets like FLEURS whose
     references write numbers as digits.
     """
-    cand_rows, base_rows = load_rows(candidate, set_name), load_rows(baseline, set_name)
+    cand_rows = load_rows(candidate, set_name, harmonized)
+    base_rows = load_rows(baseline, set_name, harmonized)
     ids = sorted(set(cand_rows) & set(base_rows))
     if without_digits:
         digits = digit_ids(set_name)
@@ -169,6 +186,41 @@ def verdict(baseline: str, candidate: str) -> str:
     return label
 
 
+def show(label: str, result: dict) -> None:
+    low, high = result["delta_interval"]
+    print(
+        f"{label:26s} {result['baseline'] * 100:5.2f}% -> {result['candidate'] * 100:5.2f}%"
+        f"  {result['delta'] * 100:+.2f}%p [{low * 100:+.2f}, {high * 100:+.2f}]"
+        f"  relative {result['relative'] * 100:+.1f}%  ({result['utterances']} utterances)"
+    )
+
+
+def verdict6(baseline: str, previous: str, candidate: str) -> str:
+    """Stage 6: harmonized CER on Zeroth validation against the base model and the stage 3 model."""
+    overall = compare("zeroth-val", candidate, baseline, harmonized=True)
+    against_previous = compare("zeroth-val", candidate, previous, harmonized=True)
+    other = compare("fleurs-ko-val", candidate, baseline)
+    show("zeroth-val harmonized", overall)
+    show(f"  vs {previous}", against_previous)
+    show("fleurs-ko-val", other)
+    for label, flag in (("  reference has digit", True), ("  reference has none", False)):
+        part = compare("fleurs-ko-val", candidate, baseline, reference_digits=flag)
+        if part["utterances"]:
+            show(label, part)
+    in_domain = overall["relative"] <= IN_DOMAIN_RELATIVE and against_previous["delta"] <= STAGE6_MAX_ABOVE_L2
+    kept = other["delta"] <= OUT_OF_DOMAIN_MAX_INCREASE
+    if not in_domain:
+        label = "표기를 바꾸면 같은 도메인의 이득을 잃는다"
+    elif kept:
+        label = "표기를 바꿔 학습하면 범용으로 쓸 수 있다"
+    else:
+        label = "표기만으로는 해결되지 않는다"
+    print(f"1. 같은 도메인 개선 유지: {'만족' if in_domain else '불만족'}")
+    print(f"2. 다른 도메인 유지: {'만족' if kept else '불만족'}")
+    print(f"판정: {label}")
+    return label
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -180,17 +232,24 @@ def main() -> None:
     tab.add_argument("--reports", nargs="+", required=True)
     tab.add_argument("--baseline")
     tab.add_argument("--no-digit-split", action="store_true", help="FLEURS sets have no digit list")
+    tab.add_argument("--harmonized", action="store_true", help="score again after itn.harmonize (Korean)")
     ver = commands.add_parser("verdict")
     ver.add_argument("--baseline", required=True)
     ver.add_argument("--candidate", required=True)
+    ver6 = commands.add_parser("verdict6")
+    ver6.add_argument("--baseline", required=True)
+    ver6.add_argument("--previous", required=True, help="the stage 3 model trained on the original notation")
+    ver6.add_argument("--candidate", required=True)
     args = parser.parse_args()
 
     if args.command == "digits":
         write_digits(args.set_name, args.force)
     elif args.command == "verdict":
         verdict(args.baseline, args.candidate)
+    elif args.command == "verdict6":
+        verdict6(args.baseline, args.previous, args.candidate)
     else:
-        table(args.set_name, args.reports, args.baseline, not args.no_digit_split)
+        table(args.set_name, args.reports, args.baseline, not args.no_digit_split, args.harmonized)
 
 
 if __name__ == "__main__":
