@@ -191,6 +191,8 @@ def main() -> None:
         predict_with_generate=True,
         logging_steps=25,
         dataloader_num_workers=args.workers,
+        # Windows starts workers by spawning; keep them so a run spawns them once, not at every evaluation.
+        dataloader_persistent_workers=args.workers > 0,
         remove_unused_columns=False,
         label_names=["labels"],
         report_to=[],
