@@ -96,6 +96,9 @@ def main() -> None:
     parser.add_argument("--lora-dropout", type=float, default=0.05)
     parser.add_argument("--lora-targets", nargs="+", default=["q_proj", "v_proj"])
     parser.add_argument(
+        "--init-adapter", help="continue from this saved LoRA adapter (its own rank and targets are used)"
+    )
+    parser.add_argument(
         "--telephone-prob",
         type=float,
         default=0.0,
@@ -136,7 +139,12 @@ def main() -> None:
         model.config.apply_spec_augment = True
         model.config.mask_time_prob = 0.05
     decoder_start_token_id = model.config.decoder_start_token_id
-    if args.lora_r:
+    if args.lora_r and args.init_adapter:
+        from peft import PeftModel
+
+        model = PeftModel.from_pretrained(model, args.init_adapter, is_trainable=True)
+        model.print_trainable_parameters()
+    elif args.lora_r:
         from peft import LoraConfig, get_peft_model
 
         lora = LoraConfig(
