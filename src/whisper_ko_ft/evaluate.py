@@ -34,9 +34,23 @@ WINDOW_SECONDS = 30
 _DIGIT = re.compile(r"[0-9]")
 
 
-def git_commit() -> str:
-    out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True)
-    return out.stdout.strip() or "uncommitted"
+def git_commit(root: Path = ROOT) -> str:
+    """Short HEAD hash; '+dirty' when code or dependency files differ from HEAD (not reports or docs)."""
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True, text=True
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--", "src", "pyproject.toml", "uv.lock"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except OSError:
+        return "unknown"
+    if not head:
+        return "uncommitted"
+    return f"{head}+dirty" if dirty else head
 
 
 def load_model(path: str, adapter: str | None) -> tuple[WhisperForConditionalGeneration, WhisperProcessor]:
@@ -75,6 +89,7 @@ def main() -> None:
     target = REPORTS / (args.name or Path(args.model).name) / f"{args.set_name}{suffix}.json"
     if not args.no_report and target.exists() and not args.overwrite:
         parser.error(f"{target.relative_to(ROOT)} exists; pass --overwrite to measure it again")
+    commit = git_commit()  # the code that measures, before any of it can change
 
     language, utterances = load_set(args.set_name)
     if args.limit:
@@ -152,7 +167,7 @@ def main() -> None:
         "batch_size": args.batch_size,
         "peak_gpu_memory_mb": round(torch.cuda.max_memory_allocated() / 2**20),
         "limit": args.limit,
-        "commit": git_commit(),
+        "commit": commit,
         "measured_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "torch": torch.__version__,
         "gpu": torch.cuda.get_device_name(0),

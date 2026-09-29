@@ -56,6 +56,7 @@ def main() -> None:
     target = REPORTS / args.name / f"{args.set_name}.json"
     if target.exists() and not args.overwrite:
         parser.error(f"{target.relative_to(ROOT)} exists; pass --overwrite to measure it again")
+    commit = git_commit()
 
     language, utterances = load_set(args.set_name)
     if args.limit:
@@ -112,7 +113,7 @@ def main() -> None:
         "decoded_again": sum(r["temperature"] > 0 for r in rows),
         "audio_seconds_per_second": round(audio_seconds / wall, 1),
         "limit": args.limit,
-        "commit": git_commit(),
+        "commit": commit,
         "measured_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
