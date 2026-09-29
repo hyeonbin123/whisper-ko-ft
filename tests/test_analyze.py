@@ -81,6 +81,13 @@ def test_verdict_no_effect_when_the_gain_is_only_digit_notation(reports):
     assert analyze.verdict("whisper-small", "cand") == "효과 없음"
 
 
+def test_verdict_needs_the_no_digit_interval_to_exclude_zero(reports):
+    # No digits: relative -16.7%, but one utterance gets worse, so the paired interval includes 0.
+    prepare_verdict(reports, zeroth_candidate=[0, 0, 2, 3], fleurs_candidate=[1, 1])
+    assert analyze.verdict("whisper-small", "cand") == "효과 없음"
+    assert analyze.verdict("whisper-small", "cand", require_interval=False) == "범용 개선"  # stage 2 rules
+
+
 def test_compare_can_split_by_digits_in_the_reference(reports):
     base = [
         {"id": "a", "edits": 1, "length": 10, "reference": "1978년"},

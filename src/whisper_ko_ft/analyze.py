@@ -9,7 +9,8 @@ Usage:
 
 `digits` fixes the list of "digit utterances" of a set (docs/experiments.md, "숫자 표기"): utterances where
 either base model wrote an Arabic digit. It is written once and not overwritten without --force.
-`verdict` applies the verdict rules of stages 2 and 3 to validation reports.
+`verdict` applies the verdict rules of stages 2 and 3 to validation reports (the stage 3 interval condition is
+on unless --no-interval-rule).
 `verdict6` applies the stage 6 rules. `--harmonized` scores the stored references and hypotheses again after
 `itn.harmonize`, so that either notation of a number gets the same score (docs/experiments.md, stage 6).
 """
@@ -153,7 +154,7 @@ def compare(
     }
 
 
-def verdict(baseline: str, candidate: str) -> str:
+def verdict(baseline: str, candidate: str, require_interval: bool = True) -> str:
     overall = compare("zeroth-val", candidate, baseline)
     no_digits = compare("zeroth-val", candidate, baseline, without_digits=True)
     other = compare("fleurs-ko-val", candidate, baseline)
@@ -175,7 +176,10 @@ def verdict(baseline: str, candidate: str) -> str:
             f"  relative {result['relative'] * 100:+.1f}%  ({result['utterances']} utterances)"
         )
     in_domain = (
-        overall["relative"] <= IN_DOMAIN_RELATIVE and no_digits["relative"] <= IN_DOMAIN_NO_DIGITS_RELATIVE
+        overall["relative"] <= IN_DOMAIN_RELATIVE
+        and no_digits["relative"] <= IN_DOMAIN_NO_DIGITS_RELATIVE
+        # Stage 3: not an improvement when the paired interval of the no-digit difference includes 0.
+        and (not require_interval or no_digits["delta_interval"][1] < 0)
     )
     kept = other["delta"] <= OUT_OF_DOMAIN_MAX_INCREASE
     if not in_domain:
@@ -238,6 +242,7 @@ def main() -> None:
     ver = commands.add_parser("verdict")
     ver.add_argument("--baseline", required=True)
     ver.add_argument("--candidate", required=True)
+    ver.add_argument("--no-interval-rule", action="store_true", help="stage 2 rules (no interval condition)")
     ver6 = commands.add_parser("verdict6")
     ver6.add_argument("--baseline", required=True)
     ver6.add_argument("--previous", required=True, help="the stage 3 model trained on the original notation")
@@ -247,7 +252,7 @@ def main() -> None:
     if args.command == "digits":
         write_digits(args.set_name, args.force)
     elif args.command == "verdict":
-        verdict(args.baseline, args.candidate)
+        verdict(args.baseline, args.candidate, not args.no_interval_rule)
     elif args.command == "verdict6":
         verdict6(args.baseline, args.previous, args.candidate)
     else:
