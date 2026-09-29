@@ -39,6 +39,8 @@ _DIGIT = re.compile(r"[0-9]")
 
 def load_rows(report: str, set_name: str, harmonized: bool = False) -> dict[str, dict]:
     data = json.loads((REPORTS / report / f"{set_name}.json").read_text(encoding="utf-8"))
+    if data["summary"].get("limit"):
+        raise SystemExit(f"{report}/{set_name}: measured with --limit, not the whole set; measure it again")
     rows = {row["id"]: row for row in data["utterances"] if row["length"]}
     if len(rows) != sum(1 for row in data["utterances"] if row["length"]):
         raise SystemExit(f"{report}/{set_name}: utterance ids are not unique; measure it again")

@@ -6,7 +6,8 @@ Usage:
 
 Decoding settings are fixed in docs/experiments.md ("디코딩"). Test sets need --allow-test, because they
 are measured once per stage. The report keeps every reference and hypothesis so rates can be recomputed.
-With --channel telephone the report is written as <set>@telephone.json.
+With --channel telephone the report is written as <set>@telephone.json. Reports are committed records: an
+existing one is replaced only with --overwrite, and --adapter needs --name.
 """
 
 from __future__ import annotations
@@ -53,7 +54,9 @@ def main() -> None:
     parser.add_argument("--model", required=True, help="Hugging Face model ID or a local checkpoint folder")
     parser.add_argument("--adapter", help="LoRA adapter folder to merge into --model")
     parser.add_argument("--set", required=True, dest="set_name")
-    parser.add_argument("--name", help="report name; defaults to the last part of --model")
+    parser.add_argument(
+        "--name", help="report name; defaults to the last part of --model (required with --adapter)"
+    )
     parser.add_argument(
         "--channel", choices=list(CHANNELS), help="pass the audio through a channel simulation"
     )
@@ -61,10 +64,17 @@ def main() -> None:
     parser.add_argument("--limit", type=int, help="only the first N utterances (smoke runs, speed checks)")
     parser.add_argument("--allow-test", action="store_true", help="required for *-test sets")
     parser.add_argument("--no-report", action="store_true", help="print the summary only")
+    parser.add_argument("--overwrite", action="store_true", help="replace an existing report")
     args = parser.parse_args()
 
     if args.set_name.endswith("-test") and not args.allow_test:
         parser.error("test sets are measured once per stage; pass --allow-test when the stage is done")
+    if args.adapter and not args.name:
+        parser.error("--adapter needs --name (the default is the base model's report folder)")
+    suffix = f"@{args.channel}" if args.channel else ""
+    target = REPORTS / (args.name or Path(args.model).name) / f"{args.set_name}{suffix}.json"
+    if not args.no_report and target.exists() and not args.overwrite:
+        parser.error(f"{target.relative_to(ROOT)} exists; pass --overwrite to measure it again")
 
     language, utterances = load_set(args.set_name)
     if args.limit:
@@ -150,9 +160,6 @@ def main() -> None:
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
     if not args.no_report:
-        name = args.name or Path(args.model).name
-        suffix = f"@{args.channel}" if args.channel else ""
-        target = REPORTS / name / f"{args.set_name}{suffix}.json"
         target.parent.mkdir(parents=True, exist_ok=True)
         payload = {"summary": summary, "utterances": rows}
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")

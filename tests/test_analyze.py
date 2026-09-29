@@ -33,6 +33,16 @@ def test_duplicate_ids_are_refused(reports):
         analyze.load_rows("m", "fleurs-ko-val")
 
 
+def test_a_limit_run_is_refused(reports):
+    folder = reports / "m"
+    folder.mkdir()
+    (folder / "zeroth-val.json").write_text(
+        json.dumps({"summary": {"limit": 100}, "utterances": rows([1, 1])}), encoding="utf-8"
+    )
+    with pytest.raises(SystemExit, match="--limit"):
+        analyze.load_rows("m", "zeroth-val")
+
+
 def test_digit_list_is_the_union_of_both_base_models_and_is_not_overwritten(reports):
     write_report(reports, "whisper-small", "zeroth-val", rows([1, 1, 1], [True, False, False]))
     write_report(reports, "whisper-large-v3-turbo", "zeroth-val", rows([1, 1, 1], [False, True, False]))

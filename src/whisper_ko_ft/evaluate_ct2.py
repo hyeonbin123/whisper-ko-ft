@@ -49,9 +49,13 @@ def main() -> None:
     parser.add_argument("--fallback", action="store_true")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--allow-test", action="store_true")
+    parser.add_argument("--overwrite", action="store_true", help="replace an existing report")
     args = parser.parse_args()
     if args.set_name.endswith("-test") and not args.allow_test:
         parser.error("test sets are measured once per stage; pass --allow-test when the stage is done")
+    target = REPORTS / args.name / f"{args.set_name}.json"
+    if target.exists() and not args.overwrite:
+        parser.error(f"{target.relative_to(ROOT)} exists; pass --overwrite to measure it again")
 
     language, utterances = load_set(args.set_name)
     if args.limit:
@@ -112,7 +116,6 @@ def main() -> None:
         "measured_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
-    target = REPORTS / args.name / f"{args.set_name}.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     payload = {"summary": summary, "utterances": rows}
     target.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")

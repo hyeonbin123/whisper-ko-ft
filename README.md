@@ -92,6 +92,7 @@ uv run python -m whisper_ko_ft.train --run-name small-a --learning-rate 1e-5   #
 
 - `prepare`는 Zeroth-Korean train에서 화자 10명을 validation으로 떼어 낸다 (화자 ID의 SHA-256 순, 규칙은 experiments.md)
 - `evaluate`는 `reports/<이름>/<묶음>.json`에 요약과 발화별 정답·가설·오류 수를 남긴다. test 묶음은 `--allow-test`를 줘야 잰다 (단계마다 한 번만 재기 위한 장치)
+- 리포트는 커밋된 기록이라 이미 있으면 `--overwrite`를 줘야 다시 잰다(`evaluate_ct2`도 같다). `--adapter`로 잴 때는 `--name`이 필수다 (기본 이름이 기준 모델의 리포트 폴더가 되므로). `--limit`으로 일부만 잰 리포트는 `analyze`가 받지 않는다
 
 faster-whisper로 재기 (5단계):
 
