@@ -6,7 +6,8 @@ Usage:
 
 Settings that candidates share are the defaults here and are fixed in docs/experiments.md.
 Writes outputs/<run-name>/: checkpoints, `best/` (lowest val-500 CER: the model, or the LoRA adapter when
---lora-r is set, plus the processor) and `run.json`.
+--lora-r or --init-adapter is set, plus the processor) and `run.json`.
+--init-adapter takes rank, alpha, dropout and targets from the saved adapter; --lora-* are ignored.
 """
 
 from __future__ import annotations
@@ -85,6 +86,19 @@ class Collator:
         }
 
 
+def resolve_lora_args(args: argparse.Namespace) -> None:
+    """Fill the LoRA settings actually used, so run.json records them and --init-adapter implies LoRA."""
+    if args.init_adapter:
+        from peft import PeftConfig
+
+        saved = PeftConfig.from_pretrained(args.init_adapter)
+        targets = saved.target_modules
+        args.lora_r, args.lora_alpha, args.lora_dropout = saved.r, saved.lora_alpha, saved.lora_dropout
+        args.lora_targets = sorted(targets) if isinstance(targets, (set, list, tuple)) else targets
+    elif args.lora_r and args.lora_alpha is None:
+        args.lora_alpha = 2 * args.lora_r
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-name", required=True)
@@ -96,7 +110,9 @@ def main() -> None:
     parser.add_argument("--lora-dropout", type=float, default=0.05)
     parser.add_argument("--lora-targets", nargs="+", default=["q_proj", "v_proj"])
     parser.add_argument(
-        "--init-adapter", help="continue from this saved LoRA adapter (its own rank and targets are used)"
+        "--init-adapter",
+        help="continue from this saved LoRA adapter (implies LoRA; its own rank, alpha, dropout and targets "
+        "are used, --lora-* are ignored)",
     )
     parser.add_argument(
         "--telephone-prob",
@@ -115,6 +131,7 @@ def main() -> None:
     parser.add_argument("--limit-train", type=int, help="smoke runs only")
     parser.add_argument("--limit-eval", type=int, help="smoke runs only")
     args = parser.parse_args()
+    resolve_lora_args(args)
 
     language, train_utterances = load_set(args.train_set)
     _, eval_utterances = load_set(args.eval_set)
@@ -139,7 +156,7 @@ def main() -> None:
         model.config.apply_spec_augment = True
         model.config.mask_time_prob = 0.05
     decoder_start_token_id = model.config.decoder_start_token_id
-    if args.lora_r and args.init_adapter:
+    if args.init_adapter:
         from peft import PeftModel
 
         model = PeftModel.from_pretrained(model, args.init_adapter, is_trainable=True)
@@ -149,7 +166,7 @@ def main() -> None:
 
         lora = LoraConfig(
             r=args.lora_r,
-            lora_alpha=args.lora_alpha or 2 * args.lora_r,
+            lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
             target_modules=args.lora_targets,
             bias="none",
