@@ -12,12 +12,19 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
-      # The project pins torch to the CUDA 12.8 index for training. The tests need no GPU, so CI installs
-      # the CPU build first and then the project without touching torch again.
+      # uv.lock pins torch to the CUDA 12.8 build for training. The tests need no GPU, so CI installs the CPU
+      # build of the locked torch version, then every other locked package except the linux-only CUDA wheels
+      # (nvidia-*, triton, cuda-*) that only the CUDA build needs. --locked fails when uv.lock is stale.
       - name: Install
+        shell: bash
         run: |
-          uv pip install torch --index-url https://download.pytorch.org/whl/cpu
-          uv pip install -e . pytest ruff
+          uv export --locked --no-hashes --no-annotate --no-emit-project --group dev -o "$RUNNER_TEMP/locked.txt"
+          grep -E '^torch==' "$RUNNER_TEMP/locked.txt" | sed -E 's/\+cu[0-9]+//; s/ *;.*//' > "$RUNNER_TEMP/torch.txt"
+          test -s "$RUNNER_TEMP/torch.txt"
+          grep -vE '^(torch==|nvidia-|triton==|cuda-)' "$RUNNER_TEMP/locked.txt" > "$RUNNER_TEMP/rest.txt"
+          uv pip install -r "$RUNNER_TEMP/torch.txt" --index-url https://download.pytorch.org/whl/cpu
+          uv pip install -r "$RUNNER_TEMP/rest.txt"
+          uv pip install --no-deps -e .
       - name: Lint
         run: |
           uv run --no-sync ruff check .
