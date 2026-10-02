@@ -102,6 +102,13 @@ uv run ct2-transformers-converter --model outputs/small-a/best --output_dir outp
 uv run python -m whisper_ko_ft.evaluate_ct2 --model outputs/small-a/ct2 --name small-a-ct2-fallback --set zeroth-val --fallback
 ```
 
+LoRA 어댑터는 기본 모델에 합친 뒤 바꾼다. large-v3·turbo는 멜 필터가 128개라서 faster-whisper가 읽는 `preprocessor_config.json`을 함께 복사한다(`merge_adapter`가 만든다. transformers 5는 이 설정을 `processor_config.json` 안에 저장해서, 없으면 faster-whisper가 80개로 계산한다). `evaluate_ct2`는 변환된 모델의 멜 필터 수를 따른다.
+
+```bash
+uv run python -m whisper_ko_ft.merge_adapter --model openai/whisper-large-v3-turbo --adapter outputs/turbo-n/best --output outputs/turbo-n/merged
+uv run ct2-transformers-converter --model outputs/turbo-n/merged --output_dir outputs/turbo-n/ct2 --quantization float16 --copy_files tokenizer.json preprocessor_config.json
+```
+
 LoRA 후보와 전화 음질 조건의 명령은 [docs/experiments.md](docs/experiments.md)의 각 단계 설정과 `train.py`, `evaluate.py`의 도움말(`--lora-r`, `--lora-targets`, `--telephone-prob`, `--adapter`, `--channel telephone`)을 따른다.
 
 6단계: `uv run python -m whisper_ko_ft.prepare_itn`이 숫자를 바꾼 학습·validation 목록(`zeroth-train-itn`, `zeroth-val500-itn`)을 만들고, `train`에 `--train-set`, `--eval-set`으로 준다. 맞춘 CER은 `analyze table --harmonized`, 판정은 `analyze verdict6`.

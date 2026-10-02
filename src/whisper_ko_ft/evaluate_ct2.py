@@ -7,6 +7,8 @@ Usage (needs `uv sync --group ct2` and a model converted with ct2-transformers-c
 One utterance at a time, greedy, fixed language, no timestamps, no VAD (docs/experiments.md, "5단계").
 --fallback turns on faster-whisper's defaults: when the text compresses too well (a repeated phrase) or the
 average log probability is low, it decodes again at a higher temperature.
+The number of mel bins comes from the converted model (128 for large-v3 and turbo, see `ct2_features`), and
+the model is loaded before any audio of the set is read.
 """
 
 from __future__ import annotations
@@ -16,10 +18,12 @@ import json
 import os
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 
 import numpy as np
 import torch
 
+from whisper_ko_ft.ct2_features import feature_kwargs
 from whisper_ko_ft.evaluate import git_commit
 from whisper_ko_ft.metrics import error_rate, interval, score
 from whisper_ko_ft.paths import REPORTS, ROOT
@@ -31,7 +35,10 @@ if os.name == "nt":
     os.add_dll_directory(_TORCH_LIB)
     os.environ["PATH"] = _TORCH_LIB + os.pathsep + os.environ["PATH"]
 
+import ctranslate2  # noqa: E402
+import faster_whisper  # noqa: E402
 from faster_whisper import WhisperModel  # noqa: E402
+from faster_whisper.feature_extractor import FeatureExtractor  # noqa: E402
 
 NO_FALLBACK = {"temperature": 0.0, "compression_ratio_threshold": None, "log_prob_threshold": None}
 FALLBACK = {
@@ -58,10 +65,12 @@ def main() -> None:
         parser.error(f"{target.relative_to(ROOT)} exists; pass --overwrite to measure it again")
     commit = git_commit()
 
+    model = WhisperModel(args.model, device="cuda", compute_type="float16")
+    # faster-whisper makes 80 mel bins unless the folder has a preprocessor_config.json (ct2_features).
+    model.feature_extractor = FeatureExtractor(**feature_kwargs(Path(args.model), model.model.n_mels))
     language, utterances = load_set(args.set_name)
     if args.limit:
         utterances = utterances[: args.limit]
-    model = WhisperModel(args.model, device="cuda", compute_type="float16")
     options = FALLBACK if args.fallback else NO_FALLBACK
     stores: dict[str, AudioStore] = {}
 
@@ -111,10 +120,16 @@ def main() -> None:
         "interval_95": [round(low, 5), round(high, 5)],
         "more_edits_than_characters": sum(r["edits"] > r["length"] for r in kept),
         "decoded_again": sum(r["temperature"] > 0 for r in rows),
+        "empty_hypotheses": sum(not r["hypothesis"] for r in rows),
+        "mel_bins": model.feature_extractor.mel_filters.shape[0],
+        "audio_seconds": round(audio_seconds, 1),
+        "wall_seconds": round(wall, 1),
         "audio_seconds_per_second": round(audio_seconds / wall, 1),
         "limit": args.limit,
         "commit": commit,
         "measured_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "faster_whisper": faster_whisper.__version__,
+        "ctranslate2": ctranslate2.__version__,
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     target.parent.mkdir(parents=True, exist_ok=True)
