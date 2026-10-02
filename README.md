@@ -32,6 +32,8 @@ RTX 2080 Ti, 대괄호는 95% 부트스트랩 구간. 전체 표와 규칙은 [d
 | 배치 1 속도 (음성 초 ÷ 걸린 초) | 12.1 | 21.3 | 12.0 | turbo와 같은 구조 |
 | 배치 1 GPU 메모리 | 551MB | 1,599MB | 550MB | 〃 |
 
+**추가 측정 (2026-10-02): 6단계 모델을 CTranslate2로.** 같은 가중치를 CTranslate2(fp16)로 바꾸면 한 발화씩 처리할 때 Transformers보다 1.46배 빨랐고(val-500에서 26.9 대 18.4배속, 배경화면 프로그램이 GPU를 쓰는 중에 번갈아 잼) 오류율은 같았다. faster-whisper에서는 재시도를 꺼도 2,671발화 중 되풀이가 하나도 없어 재시도가 막는지는 판정하지 못했다(Transformers에서 되풀이한 test 발화가 이 엔진에서는 멀쩡했다). 새로 클론해 README대로 whisper-small 기준선을 다시 재자 2,214발화의 가설이 모두 커밋된 리포트와 같았다.
+
 **7단계(더 오래 학습)의 판정: 1,500스텝으로 충분하다.** 6단계 모델에서 이어서 학습하자 validation의 맞춘 CER은 1.25% → 1.41%였다(차이의 구간이 0을 포함). 더 학습한 모델이 한 발화에서 같은 구절을 되풀이해 오류의 17%를 냈고, 그 발화를 빼면 0.07%p 나았다. test에서는 거꾸로 6단계 모델이 되풀이해 순서가 뒤집혔다(2.68%와 2.01%). 추가 학습의 이득은 0.1%p 안쪽이고, 되풀이 오류 한 번이 그보다 크다. FLEURS 한국어는 더 학습할수록 조금씩 나빠졌다(test +0.18%p).
 
 **6단계(숫자 표기)의 판정: 표기를 바꿔 학습하면 범용으로 쓸 수 있다.** 2·3단계의 "도메인 전용" 판정은 대부분 표기에서 나왔다. 학습 정답의 숫자를 규칙으로 아라비아 숫자로 바꾸고(20,049문장 중 4,703문장) 3단계와 같은 설정으로 다시 학습했다. Zeroth는 정답과 가설의 숫자 표기를 같은 규칙으로 맞춘 뒤 잰 "맞춘 CER"이다.
@@ -85,7 +87,7 @@ validation에서 맞춘 CER은 3.60% → 1.25%(3단계 모델 1.28%)로 같은 �
 uv sync                                       # torch는 CUDA 12.8 빌드를 받는다 (약 2.5GB)
 uv run python -m whisper_ko_ft.download       # Zeroth-Korean, FLEURS 한국어·영어 (약 4GB)
 uv run python -m whisper_ko_ft.prepare        # 16kHz 오디오 저장소와 학습·validation·test 목록 (약 6.5GB)
-uv run python -m whisper_ko_ft.evaluate --model openai/whisper-small --set zeroth-val
+uv run python -m whisper_ko_ft.evaluate --model openai/whisper-small --set zeroth-val --overwrite   # 리포트가 커밋되어 있어 다시 재려면 --overwrite
 uv run python -m whisper_ko_ft.analyze table --set zeroth-val --reports whisper-small whisper-large-v3-turbo
 uv run python -m whisper_ko_ft.train --run-name small-a --learning-rate 1e-5   # 3,000스텝, 이 PC에서 몇 시간
 ```

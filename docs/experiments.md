@@ -555,6 +555,23 @@
 - 재는 때: 다른 프로그램의 GPU 사용률이 10% 이하이고 CPU 사용률이 1분 동안 15% 아래일 때. 5분마다 확인하며 최대 60분 기다리고, 그래도 안 되면 그 상태로 재고 조건을 수치 옆에 적는다. GPU·드라이버·CPU와, 실행 직전의 GPU 메모리·사용률·CPU 사용률을 적는다
 - 판정은 없다. 5단계의 small에서는 faster-whisper가 배치 1에서 1.5배 빨랐다(18~19 대 12배속)
 
+### 결과: 추론 속도 (2026-10-02 23:48 ~ 10-03 00:03, 측정 코드 `3420aa8`, torch 2.11.0+cu128, transformers 5.17.0, faster-whisper 1.2.1, CTranslate2 4.8.2)
+
+**조건: 쉬는 상태가 되지 않아 60분을 기다린 뒤 그대로 쟀다.** 22:51부터 5분마다 12번 확인하는 동안 배경화면 프로그램(Wallpaper Engine)이 GPU를 계속 35% 안팎(최대 39%) 쓰고 GPU 메모리 약 1,000MiB를 차지했다. CPU 사용률은 1분 평균 15.6~26.0%였다. 실행 직전의 GPU는 991~1,000MiB, 사용률 29~47%. 끝난 뒤 1분은 CPU 평균 26.8%, GPU 평균 37.8%. Ollama에 올라간 모델은 없었다. RTX 2080 Ti(드라이버 610.88, WDDM), Ryzen 5 3600(6코어 12스레드), RAM 32GB.
+
+| Zeroth val-500 440발화 (1.07시간) | Transformers 배치 1 | CTranslate2 한 발화씩 | Transformers 배치 16 (참고) |
+|---|---|---|---|
+| 속도 (음성 초 ÷ 걸린 초), 1회 / 2회 | 18.0 / 18.7 | 26.8 / 26.9 | 61.5 (1회) |
+| 평균 | 18.4 | **26.9 (1.46배)** | |
+| GPU 메모리 증가, nvidia-smi 최대 | 1,981 / 1,990MiB | 2,392 / 2,392MiB | 3,216MiB |
+| GPU 메모리, torch 최대 할당 | 1,599MB | - | 2,525MB |
+| 맞춘 CER (같은 발화) | 1.75% [1.47, 2.05] | 1.72% [1.45, 2.03] | |
+
+- 두 번의 차이는 Transformers 3.9%, CTranslate2 0.4%로 규칙의 10% 안이다. 두 엔진을 같은 조건에서 번갈아 쟀으므로 **비율(1.46배)이 이 측정의 주된 결과다.** 5단계의 small(1.5배)과 같은 크기다. 쉬는 상태가 아니어서 절대값은 낮게 나왔을 수 있다(README의 기본 turbo 배치 1은 21.3배속, 다른 때에 잰 값)
+- GPU 메모리는 nvidia-smi로 보면 CTranslate2가 약 400MiB 더 썼다. 가중치는 둘 다 fp16이므로 엔진이 잡아 두는 메모리의 차이로 보지만 확인하지 않았다. torch 최대 할당 1,599MB는 기본 turbo의 배치 1 값과 같다(LoRA를 합친 모델은 구조가 같다)
+- 정확도는 같다: 맞춘 CER 차이 −0.02%p [−0.14, +0.08], 가설이 같은 발화 396/440, 두 엔진 모두 되풀이 0
+- 리포트는 첫 실행의 것(`reports/turbo-n-b1/zeroth-val500.json`, `reports/turbo-n-ct2/zeroth-val500.json`)이다. 실행마다의 nvidia-smi 표본은 저장소 밖 작업 파일에 남겼다
+
 ### 새로 클론해서 재현 (5단계의 끝 조건, 규칙 2026-10-02, 재기 전)
 - `origin/main`을 새 폴더에 클론하고 README의 "실행" 순서대로 한다: `uv sync`(uv 캐시에 있는 패키지를 쓴다), `download`, `prepare`, `evaluate --model openai/whisper-small --set zeroth-val`. 클론에서 `uv run pytest`도 돌린다
 - 내려받기: `download`는 있는 파일을 건너뛴다. 4GB를 다시 받지 않으려고 원래 작업 폴더의 `data/raw` parquet을 클론의 `data/raw`에 하드 링크로 넣고 `download`를 돌린다(건너뛰는지 확인). `download --dry-run`으로 파일마다 원격 크기와 같은지 확인한다. 모델은 Hugging Face 캐시에 있는 것을 쓴다
@@ -562,3 +579,14 @@
 - 비교 대상: 커밋된 `reports/whisper-small/zeroth-val.json`(2026-09-18, 측정 코드 `96cee32`, torch 2.11.0+cu128, transformers 5.17.0. 지금 `uv.lock`과 같은 버전)
 - **재현됨**: `prepare`가 만든 zeroth-val 목록(발화 ID·화자·정답)이 같고, 묶음 전체의 오류 수(편집 거리 합)와 CER이 같다. 가설이 다른 발화가 있으면 그 수와 발화별 오류 수 차이를 함께 적는다. 오류 수가 다르면 "재현되지 않음"으로 적고 차이를 적는다
 - 클론에서 만든 큰 파일(`.venv`, `data/`)은 확인한 뒤 지운다
+
+### 결과: 새 클론에서 재현 (2026-10-02 22:12 ~ 10-03 00:09)
+
+- `origin/main`(`fa99dca`)을 새 폴더에 클론했다. `uv sync`는 uv 캐시에서 33초 만에 설치했다(torch 2.11.0+cu128, transformers 5.17.0)
+- `download`: 하드 링크로 넣은 parquet 11개를 모두 건너뛰었고, `--dry-run`에서 11개 모두 원격 크기와 같았다
+- `uv run pytest`: 143개 통과, 2개 건너뜀(faster-whisper가 필요한 테스트. README의 `uv sync`는 ct2 묶음을 설치하지 않는다). `ruff check .` 통과
+- `prepare`: 묶음 목록(`sets/*.json`), 저장소 색인, 오디오 저장소(`*.int16`, 6개)가 원래 작업 폴더의 것과 바이트 단위로 같았다. validation 화자 10명도 같다. 6단계의 숫자를 바꾼 목록은 README의 순서에 없어 만들지 않았다
+- `evaluate --model openai/whisper-small --set zeroth-val --overwrite`: **2,214발화 모두 가설과 오류 수가 커밋된 리포트와 같았다.** 오류 9,022개 / 93,751글자, CER 9.62% [9.19, 10.11], 가설에 숫자가 든 발화 690개. `git diff`에서 바뀐 것은 요약의 걸린 시간·속도·커밋·측정 시각뿐이다(83.6배속, 커밋된 리포트는 103배속. 배경화면 프로그램이 GPU를 쓰는 중이었다). README의 `analyze table` 명령도 같은 표(9.62%, 4.15%)를 냈다
+- **판정: 재현됨.** 5단계의 끝 조건을 채웠다
+- README의 `evaluate` 예시는 커밋된 리포트가 있어 그대로는 멈춘다. 다시 재려면 `--overwrite`가 필요하다고 README 명령 옆에 적었다
+- 클론의 `.venv`(4.6GB)와 `data/`(10GB, 그중 parquet 3.8GB는 하드 링크)는 확인 뒤 지웠다. 원래 작업 폴더의 parquet은 그대로다
