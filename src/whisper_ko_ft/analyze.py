@@ -13,6 +13,7 @@ either base model wrote an Arabic digit. It is written once and not overwritten 
 on unless --no-interval-rule).
 `verdict6` applies the stage 6 rules. `--harmonized` scores the stored references and hypotheses again after
 `itn.harmonize`, so that either notation of a number gets the same score (docs/experiments.md, stage 6).
+`loops` lists the utterances with more edits than reference characters (repetition loops), per report.
 """
 
 from __future__ import annotations
@@ -192,6 +193,18 @@ def verdict(baseline: str, candidate: str, require_interval: bool = True) -> str
     return label
 
 
+def loops(set_name: str, reports: list[str], harmonized: bool = False) -> dict[str, list[str]]:
+    """Utterances with more edits than reference characters (a phrase repeated to the end), per report."""
+    found: dict[str, list[str]] = {}
+    for name in reports:
+        rows = load_rows(name, set_name, harmonized)
+        ids = sorted(i for i, row in rows.items() if row["edits"] > row["length"])
+        found[name] = ids
+        detail = ", ".join(f"{i} ({rows[i]['edits']} edits, {rows[i]['length']} characters)" for i in ids)
+        print(f"{name:28s} {len(ids)} of {len(rows)}" + (f": {detail}" if ids else ""))
+    return found
+
+
 def show(label: str, result: dict) -> None:
     low, high = result["delta_interval"]
     print(
@@ -247,6 +260,10 @@ def main() -> None:
     ver6.add_argument("--baseline", required=True)
     ver6.add_argument("--previous", required=True, help="the stage 3 model trained on the original notation")
     ver6.add_argument("--candidate", required=True)
+    loop = commands.add_parser("loops")
+    loop.add_argument("--set", required=True, dest="set_name")
+    loop.add_argument("--reports", nargs="+", required=True)
+    loop.add_argument("--harmonized", action="store_true", help="score again after itn.harmonize (Korean)")
     args = parser.parse_args()
 
     if args.command == "digits":
@@ -255,6 +272,8 @@ def main() -> None:
         verdict(args.baseline, args.candidate, not args.no_interval_rule)
     elif args.command == "verdict6":
         verdict6(args.baseline, args.previous, args.candidate)
+    elif args.command == "loops":
+        loops(args.set_name, args.reports, args.harmonized)
     else:
         table(args.set_name, args.reports, args.baseline, not args.no_digit_split, args.harmonized)
 

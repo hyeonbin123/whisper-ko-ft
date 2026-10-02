@@ -79,3 +79,28 @@ def test_evaluate_ct2_uses_128_mel_bins_for_turbo_before_reading_audio(tmp_path,
     with pytest.raises(Reached):
         evaluate_ct2.main()
     assert FakeWhisperModel.last.feature_extractor.mel_filters.shape[0] == TURBO_MEL_BINS
+
+
+def test_evaluate_ct2_no_report_skips_the_existing_report_check(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("faster_whisper")
+    from whisper_ko_ft import evaluate_ct2
+
+    def stop(*args, **kwargs):
+        raise Reached
+
+    (tmp_path / "n").mkdir()
+    (tmp_path / "n" / "x.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(evaluate_ct2, "REPORTS", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "ROOT", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "git_commit", lambda: "test")
+    monkeypatch.setattr(evaluate_ct2, "WhisperModel", FakeWhisperModel)
+    monkeypatch.setattr(evaluate_ct2, "load_set", stop)
+    args = ["evaluate_ct2", "--model", str(tmp_path), "--name", "n", "--set", "x"]
+
+    monkeypatch.setattr(sys, "argv", args)
+    with pytest.raises(SystemExit):
+        evaluate_ct2.main()
+    assert "--overwrite" in capsys.readouterr().err
+    monkeypatch.setattr(sys, "argv", [*args, "--no-report"])  # speed runs: the report is not replaced
+    with pytest.raises(Reached):
+        evaluate_ct2.main()

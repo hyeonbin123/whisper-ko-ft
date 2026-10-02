@@ -152,3 +152,17 @@ def test_verdict6_notation_is_not_enough_when_the_other_domain_gets_worse(report
 def test_verdict6_gain_lost_when_clearly_above_the_previous_model(reports):
     prepare_verdict6(reports, candidate_edits=[3, 3], fleurs_candidate=[1, 1])  # +1.0%p above l2
     assert analyze.verdict6("base", "l2", "cand") == "표기를 바꾸면 같은 도메인의 이득을 잃는다"
+
+
+def test_loops_counts_utterances_with_more_edits_than_reference_characters(reports, capsys):
+    looped = "가나다" + "라니" * 40  # a repeated syllable pair, as in 105_003_0478
+    utterances = [
+        {"id": "a", "edits": 80, "length": 9, "reference": "이천 십 팔 년 오 월", "hypothesis": looped},
+        {"id": "b", "edits": 9, "length": 9, "reference": "이천 십 팔 년 오 월", "hypothesis": "2018년 5월"},
+        {"id": "c", "edits": 0, "length": 2, "reference": "문장", "hypothesis": "문장"},
+    ]
+    write_report(reports, "m", "zeroth-val", utterances)
+
+    assert analyze.loops("zeroth-val", ["m"]) == {"m": ["a"]}
+    assert analyze.loops("zeroth-val", ["m"], harmonized=True) == {"m": ["a"]}  # b is notation only
+    assert "1 of 3" in capsys.readouterr().out
