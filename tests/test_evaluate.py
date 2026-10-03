@@ -80,3 +80,34 @@ def test_commit_without_git(tmp_path, monkeypatch):
 
     monkeypatch.setattr(evaluate.subprocess, "run", missing)
     assert evaluate.git_commit(tmp_path) == "unknown"
+
+
+SMOKE = ["--model", "m", "--set", "zeroth-val", "--fallback", "ratio"]
+
+
+def test_threshold_overrides_are_for_smoke_runs_only(reports, monkeypatch, capsys):
+    # A lowered threshold is not a registered candidate, so it must not leave a report behind.
+    with pytest.raises(SystemExit):
+        run(monkeypatch, *SMOKE, "--compression-ratio-threshold", "1.0")
+    assert "--no-report" in capsys.readouterr().err
+    with pytest.raises(Reached):
+        run(monkeypatch, *SMOKE, "--compression-ratio-threshold", "1.0", "--no-report", "--limit", "16")
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--model", "m", "--set", "zeroth-val", "--compression-ratio-threshold", "1.0"],  # no fallback
+        [*SMOKE, "--logprob-threshold", "-0.5"],  # D1a has no log-probability threshold
+    ],
+)
+def test_threshold_overrides_need_the_matching_fallback(reports, monkeypatch, args):
+    with pytest.raises(SystemExit):
+        run(monkeypatch, *args, "--no-report")
+
+
+def test_fallback_runs_reach_the_measurement(reports, monkeypatch):
+    with pytest.raises(Reached):
+        run(monkeypatch, *SMOKE)
+    with pytest.raises(Reached):
+        run(monkeypatch, "--model", "m", "--set", "zeroth-val", "--fallback", "ratio-logprob", "--seed", "3")

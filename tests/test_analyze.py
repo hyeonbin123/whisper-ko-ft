@@ -3,6 +3,7 @@ import json
 import pytest
 
 from whisper_ko_ft import analyze
+from whisper_ko_ft.metrics import score
 
 
 def write_report(root, name, set_name, rows):
@@ -166,3 +167,172 @@ def test_loops_counts_utterances_with_more_edits_than_reference_characters(repor
     assert analyze.loops("zeroth-val", ["m"]) == {"m": ["a"]}
     assert analyze.loops("zeroth-val", ["m"], harmonized=True) == {"m": ["a"]}  # b is notation only
     assert "1 of 3" in capsys.readouterr().out
+
+
+def scored_rows(pairs, **extra):
+    """Rows whose stored edits are the original scoring of their texts, as evaluate writes them."""
+    out = []
+    for n, (reference, hypothesis) in enumerate(pairs):
+        scored = score(reference, hypothesis, "ko")
+        out.append(
+            {
+                "id": f"u{n}",
+                "reference": reference,
+                "hypothesis": hypothesis,
+                "edits": scored.edits,
+                "length": scored.length,
+                **extra,
+            }
+        )
+    return out
+
+
+def test_output_itn_rewrites_the_hypothesis_only(reports):
+    pairs = [
+        ("1978년 5월에 열렸다", "천 구백 칠십 팔 년 오 월에 열렸다"),  # FLEURS writes digits
+        ("천 구백 칠십 팔 년", "1978년"),  # a spelled-out reference stays spelled out
+    ]
+    write_report(reports, "m", "fleurs-ko-val", scored_rows(pairs))
+
+    itn = analyze.load_rows("m", "fleurs-ko-val", scoring="itn")
+    assert itn["u0"]["edits"] == 0
+    assert itn["u1"]["edits"] == analyze.load_rows("m", "fleurs-ko-val")["u1"]["edits"] > 0
+    both = analyze.load_rows("m", "fleurs-ko-val", scoring="itn-harmonized")
+    assert [row["edits"] for row in both.values()] == [0, 0]
+
+
+def test_notation_agnostic_scoring_also_reads_letter_names(reports):
+    pairs = [("faa는 50%를 줄였다", "에프 에이에이는 오십 퍼센트를 줄였다")]
+    write_report(reports, "m", "fleurs-ko-val", scored_rows(pairs))
+    assert analyze.load_rows("m", "fleurs-ko-val", scoring="harmonized")["u0"]["edits"] > 0
+    assert analyze.load_rows("m", "fleurs-ko-val", scoring="agnostic")["u0"]["edits"] == 0
+    latin = analyze.load_rows("m", "fleurs-ko-val", scoring="itn-latin")["u0"]
+    assert latin["hypothesis"] == pairs[0][1]  # the stored text is never changed
+    assert latin["edits"] < analyze.load_rows("m", "fleurs-ko-val")["u0"]["edits"]
+
+
+def test_korean_rescoring_is_refused_for_english_sets(reports):
+    write_report(reports, "m", "fleurs-en-val", rows([1]))
+    with pytest.raises(SystemExit, match="Korean"):
+        analyze.load_rows("m", "fleurs-en-val", scoring="itn")
+
+
+def test_compare_refuses_different_reference_lengths(reports):
+    write_report(reports, "m", "fleurs-ko-val", scored_rows([("faa는 50%를", "faa는 50%를")]))
+    with pytest.raises(SystemExit, match="reference"):
+        analyze.compare("fleurs-ko-val", "m", "m", scoring="agnostic", baseline_scoring=None)
+
+
+def loop_rows(edits, temperatures=None):
+    """Zeroth rows scored again from their texts: `e` inserted characters after a 100-character reference."""
+    temperatures = temperatures or [None] * len(edits)
+    out = []
+    for n, (e, t) in enumerate(zip(edits, temperatures, strict=True)):
+        row = {"id": f"u{n}", "reference": "가" * 100, "hypothesis": "가" * 100 + "나" * e, "edits": e}
+        row["length"] = 100
+        if t is not None:
+            row["temperature"], row["fallback_exhausted"] = t, False
+        out.append(row)
+    return out
+
+
+def fleurs_rows(edits, temperatures=None):
+    temperatures = temperatures or [None] * len(edits)
+    out = []
+    for n, (e, t) in enumerate(zip(edits, temperatures, strict=True)):
+        row = {"id": f"u{n}", "reference": "문장", "hypothesis": f"가설 {e}", "edits": e, "length": 100}
+        if t is not None:
+            row["temperature"], row["fallback_exhausted"] = t, False
+        out.append(row)
+    return out
+
+
+def prepare_stage8(reports, arms):
+    """Recorded greedy reports of models n and n2 (n2 loops on u3 of zeroth-val) and the arms' reports.
+
+    `arms` maps an arm to {(model, set): (edits, temperatures)}; sets not given repeat the greedy report.
+    """
+    (reports / "digit_utterances").mkdir()
+    (reports / "digit_utterances" / "zeroth-val.json").write_text(
+        json.dumps({"ids": ["u0"]}), encoding="utf-8"
+    )
+    greedy = {
+        ("n", "zeroth-val"): [1, 1, 1, 1],
+        ("n2", "zeroth-val"): [1, 1, 1, 150],
+        ("n", "fleurs-ko-val"): [1, 1, 1, 1],
+        ("n2", "fleurs-ko-val"): [1, 1, 1, 1],
+        ("n", "fleurs-en-val"): [1, 1],
+        ("n2", "fleurs-en-val"): [1, 1],
+    }
+    for (model, set_name), edits in greedy.items():
+        make = loop_rows if set_name == "zeroth-val" else fleurs_rows
+        write_report(reports, model, set_name, make(edits))
+    for arm, changed in arms.items():
+        for (model, set_name), edits in greedy.items():
+            make = loop_rows if set_name == "zeroth-val" else fleurs_rows
+            edits, temperatures = changed.get((model, set_name), (edits, [0.0] * len(edits)))
+            write_report(reports, f"{model}-{arm}", set_name, make(edits, temperatures))
+
+
+STOPPED = ([1, 1, 1, 2], [0.0, 0.0, 0.0, 0.2])  # n2's loop decoded again at 0.2 and gone
+
+
+def test_verdict8_picks_the_simpler_arm_when_it_passes(reports):
+    stopped = {("n2", "zeroth-val"): STOPPED}
+    prepare_stage8(reports, {"d1a": stopped, "d1": stopped})
+    assert analyze.verdict8(["n", "n2"], ["d1a", "d1"]) == "d1a"
+
+
+def test_verdict8_takes_the_next_arm_when_the_first_costs_accuracy(reports):
+    worse = {("n2", "zeroth-val"): STOPPED, ("n", "fleurs-ko-val"): ([1, 3, 1, 3], [0.0, 0.4, 0.0, 0.4])}
+    prepare_stage8(reports, {"d1a": worse, "d1": {("n2", "zeroth-val"): STOPPED}})
+    assert analyze.verdict8(["n", "n2"], ["d1a", "d1"]) == "d1"
+
+
+def test_verdict8_keeps_greedy_when_a_loop_is_left(reports):
+    still = {("n2", "zeroth-val"): ([1, 1, 1, 150], [0.0, 0.0, 0.0, 1.0])}  # decoded again, looped every time
+    new_loop = {("n2", "zeroth-val"): STOPPED, ("n", "fleurs-en-val"): ([1, 150], [0.0, 0.0])}
+    prepare_stage8(reports, {"d1a": still, "d1": new_loop})
+    assert analyze.verdict8(["n", "n2"], ["d1a", "d1"]) is None
+
+
+def test_verdict8_makes_no_verdict_when_the_recorded_loop_is_not_decoded_again(reports):
+    # The first (greedy) pass did not loop on u3 this time, so the fallback was never put to the test.
+    gone = {("n2", "zeroth-val"): ([1, 1, 1, 2], [0.0, 0.0, 0.0, 0.0])}
+    prepare_stage8(reports, {"d1a": gone, "d1": gone})
+    with pytest.raises(SystemExit, match="no verdict"):
+        analyze.verdict8(["n", "n2"], ["d1a", "d1"])
+
+
+def test_changes_separates_decoding_again_from_other_changes(reports, capsys):
+    write_report(reports, "base", "fleurs-ko-val", fleurs_rows([1, 150, 1]))
+    changed = fleurs_rows([1, 2, 3], [0.0, 0.2, 0.0])  # u1 decoded again, u2 changed without it
+    changed[0]["hypothesis"] = "가설 1"
+    write_report(reports, "arm", "fleurs-ko-val", changed)
+    found = analyze.changes("fleurs-ko-val", "base", ["arm"])["arm"]
+    assert found["redecoded"] == ["u1"]
+    assert found["changed_not_redecoded"] == ["u2"]
+    assert found["changed_outside_loops"] == ["u2"]
+    assert (found["loops_before"], found["loops_after"]) == (["u1"], [])
+
+
+@pytest.mark.parametrize(
+    ("fleurs_upper", "zeroth_delta", "label"),
+    [
+        (-0.001, 0.0, "출력 숫자 변환을 쓴다"),
+        (0.0, 0.0, "출력 숫자 변환은 이득이 없다"),
+        (-0.001, 0.0006, "출력 숫자 변환은 같은 도메인을 해친다"),
+    ],
+)
+def test_itn8_label(fleurs_upper, zeroth_delta, label):
+    assert analyze.itn8_label(fleurs_upper, zeroth_delta) == label
+
+
+def test_itn8_on_reports(reports):
+    words = ["이", "삼", "사", "오", "육"]
+    fleurs = [(f"{1972 + n}년 {n + 3}월", f"천 구백 칠십 {words[n]} 년 {words[n + 1]} 월") for n in range(4)]
+    zeroth = [("천 구백 칠십 팔 년 오 월", "1978년 5월")] * 4
+    for name in ("n", "base"):
+        write_report(reports, name, "fleurs-ko-val", scored_rows(fleurs))
+        write_report(reports, name, "zeroth-val", scored_rows(zeroth))
+    assert analyze.itn8("n", "base") == "출력 숫자 변환을 쓴다"

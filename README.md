@@ -16,6 +16,7 @@
 | 5. 되풀이 오류와 추론 엔진 | faster-whisper의 재시도가 되풀이 오류를 막는지 | 완료 (막는다) |
 | 6. 정답의 숫자 표기를 바꿔 학습 | 학습 정답의 "이천 십 팔 년"을 "2018년"으로 바꾸면 다른 도메인의 악화가 없어지는지 (처음 계획에 없던 단계) | 완료 (범용으로 쓸 수 있다) |
 | 7. 더 오래 학습 | 6단계 모델에서 이어서 1,500스텝을 더 학습하면 나아지는지 (처음 계획에 없던 단계) | 완료 (1,500스텝으로 충분하다) |
+| 8. 재시도 디코딩과 출력 숫자 변환 | 가중치는 그대로 두고 Transformers의 재시도 디코딩이 되풀이 오류를 막는지, 출력의 숫자 표기만 바꾸는 후처리가 다른 도메인의 격차를 줄이는지 (처음 계획에 없던 단계) | 규칙 등록 (2026-10-03), 측정 전 |
 
 ## 지금까지의 결과
 
@@ -114,6 +115,8 @@ uv run ct2-transformers-converter --model outputs/turbo-n/merged --output_dir ou
 LoRA 후보와 전화 음질 조건의 명령은 [docs/experiments.md](docs/experiments.md)의 각 단계 설정과 `train.py`, `evaluate.py`의 도움말(`--lora-r`, `--lora-targets`, `--telephone-prob`, `--adapter`, `--channel telephone`)을 따른다.
 
 6단계: `uv run python -m whisper_ko_ft.prepare_itn`이 숫자를 바꾼 학습·validation 목록(`zeroth-train-itn`, `zeroth-val500-itn`)을 만들고, `train`에 `--train-set`, `--eval-set`으로 준다. 맞춘 CER은 `analyze table --harmonized`, 판정은 `analyze verdict6`.
+
+8단계: `evaluate --fallback ratio`(압축비 기준) 또는 `--fallback ratio-logprob`(압축비와 로그확률)가 재시도 디코딩을 켜고, 리포트에 발화마다 마지막 temperature를 남긴다. `analyze changes`는 기록된 greedy 리포트와 비교해 다시 디코딩한 발화·바뀐 발화·되풀이를 세고, 판정은 `analyze verdict8 --models turbo-n turbo-n2 --arms d1a d1`(디코딩)과 `analyze itn8 --model turbo-n --baseline whisper-large-v3-turbo`(출력 숫자 변환). `table`·`loops`의 `--scoring itn|itn-latin|agnostic`은 저장된 가설을 바꾸지 않고 채점할 때만 후처리를 적용한다.
 
 테스트: `uv run pytest`, `uv run ruff check .`
 
