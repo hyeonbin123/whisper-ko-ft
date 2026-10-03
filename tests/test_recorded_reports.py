@@ -33,8 +33,9 @@ def test_stored_scores_are_reproduced(path):
     assert round(rate, 5) == data["summary"]["error_rate"]
 
 
-# Harmonized CER (stages 6 and 7) is not stored; it is scored again on every call. Pinned as totals, so
-# that a change too small to move the rounded rate still fails. The comment is the rate in the docs.
+# Harmonized CER (stages 6 and 7, and the 2026-10-02 checks of N) is not stored; it is scored again on
+# every call. Pinned as totals, so that a change too small to move the rounded rate still fails. The
+# comment is the rate in the docs.
 @pytest.mark.parametrize(
     ("report", "set_name", "edits", "length"),
     [
@@ -46,6 +47,14 @@ def test_stored_scores_are_reproduced(path):
         ("turbo-l2", "zeroth-test", 394, 19272),  # 2.04%
         ("turbo-n", "zeroth-test", 517, 19272),  # 2.68%
         ("turbo-n2", "zeroth-test", 387, 19272),  # 2.01%
+        # 2026-10-02: N in CTranslate2, fallback off and on
+        ("turbo-n-ct2", "zeroth-val", 1203, 93621),  # 1.28%
+        ("turbo-n-ct2-fallback", "zeroth-val", 1203, 93621),  # 1.28%
+        ("turbo-n-ct2", "zeroth-test", 373, 19272),  # 1.94%
+        ("turbo-n-ct2-fallback", "zeroth-test", 373, 19272),  # 1.94%
+        # 2026-10-02: the speed check on val-500, transformers batch 1 and CTranslate2
+        ("turbo-n-b1", "zeroth-val500", 320, 18321),  # 1.75%
+        ("turbo-n-ct2", "zeroth-val500", 316, 18321),  # 1.72%
     ],
 )
 def test_recorded_harmonized_totals(report, set_name, edits, length):
