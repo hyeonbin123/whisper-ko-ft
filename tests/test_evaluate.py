@@ -111,3 +111,25 @@ def test_fallback_runs_reach_the_measurement(reports, monkeypatch):
         run(monkeypatch, *SMOKE)
     with pytest.raises(Reached):
         run(monkeypatch, "--model", "m", "--set", "zeroth-val", "--fallback", "ratio-logprob", "--seed", "3")
+
+
+def test_rows_are_scored_as_before():
+    # Moved out of main for the Qwen3-ASR harness (stage 9); rows must come out as recorded reports have them.
+    rows = [
+        {"id": "a", "reference": "오는 오 월", "hypothesis": "오는 5월"},
+        {"id": "b", "reference": "...", "hypothesis": "아무 말"},  # empty after normalization: skipped
+        {"id": "c", "reference": "문장", "hypothesis": "문장"},
+    ]
+    assert evaluate.score_rows(rows, "ko") == 1
+    assert (rows[0]["edits"], rows[0]["length"], rows[0]["has_digit"]) == (1, 4, True)
+    assert (rows[1]["edits"], rows[1]["length"]) == (0, 0) and "has_digit" not in rows[1]
+    assert (rows[2]["edits"], rows[2]["length"], rows[2]["has_digit"]) == (0, 2, False)
+
+
+def test_batch_times_in_the_summary():
+    # Per-utterance latency at batch size 1 (stage 9 speed check).
+    assert evaluate.batch_seconds_summary([0.1, 0.2, 0.3, 0.4, 1.0]) == {
+        "batch_seconds_median": 0.3,
+        "batch_seconds_p90": 0.76,
+    }
+    assert evaluate.batch_seconds_summary([]) == {"batch_seconds_median": None, "batch_seconds_p90": None}

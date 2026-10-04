@@ -18,6 +18,9 @@ on unless --no-interval-rule).
 Stage 8: `--scoring` scores the stored texts again in other ways (SCORINGS; the reports are never changed).
 `changes` shows what a fallback decoding changed against the recorded greedy report, `verdict8` applies the
 decoding rules and `itn8` the rules of the output post-processing.
+
+Stage 9 (another base model, Qwen3-ASR): `gate9` decides fp16 or fp32 from two runs on the first 100
+utterances of zeroth-val500, `verdict9` applies the other-domain rule and prints what is reported with it.
 """
 
 from __future__ import annotations
@@ -47,6 +50,9 @@ STAGE8_MAX_INCREASE = 0.001
 STAGE8_ITN_MAX_INCREASE = 0.0005
 # The sets of the stage 8 decoding rules, each with the scoring its loops and rates are counted in.
 STAGE8_SETS = {"zeroth-val": "harmonized", "fleurs-ko-val": None, "fleurs-en-val": None}
+# Stage 9: fp16 is used when its raw CER on the first 100 utterances of zeroth-val500 is within this of the
+# fp32 run's (either direction), with no empty hypothesis and no utterance with non-finite logits.
+STAGE9_FP16_MAX_GAP = 0.002
 _DIGIT = re.compile(r"[0-9]")
 
 
@@ -449,6 +455,92 @@ def itn8(model: str, baseline: str, fleurs: str = "fleurs-ko-val", zeroth: str =
     return label
 
 
+def _check_rows(path: str) -> tuple[dict, dict[str, dict]]:
+    """Summary and rows (by id) of a stage 9 fp16-check file, a raw report of a --limit run."""
+    with open(path, encoding="utf-8") as file:
+        data = json.load(file)
+    return data["summary"], {row["id"]: row for row in data["utterances"]}
+
+
+def gate9(fp16: str, fp32: str) -> bool:
+    """Stage 9: True when fp16 may be used (docs/experiments.md, 9단계 "fp16 점검")."""
+    (half_summary, half), (full_summary, full) = _check_rows(fp16), _check_rows(fp32)
+    if (half_summary.get("precision"), full_summary.get("precision")) != ("fp16", "fp32"):
+        raise SystemExit("gate9 needs an fp16 file and an fp32 file (summary precision)")
+    if list(half) != list(full):
+        raise SystemExit("the two runs did not decode the same utterances in the same order")
+    ids = [i for i, row in full.items() if row["length"]]
+    half_edits, lengths = arrays(half, ids)
+    full_edits, _ = arrays(full, ids)
+    half_rate, full_rate = error_rate(half_edits, lengths), error_rate(full_edits, lengths)
+    gap = half_rate - full_rate
+    empty = sum(not half[i]["hypothesis"].strip() for i in ids)
+    nonfinite = sum(bool(half[i].get("nonfinite_logits")) for i in ids)
+    differ = sum(half[i]["hypothesis"] != full[i]["hypothesis"] for i in ids)
+    print(
+        f"{len(ids)} utterances: fp16 ({half_summary.get('device')}) {half_rate * 100:.2f}%"
+        f", fp32 ({full_summary.get('device')}) {full_rate * 100:.2f}%"
+        f", difference {gap * 100:+.2f}%p; hypotheses that differ {differ}"
+    )
+    print(f"fp16: empty hypotheses {empty}, utterances with non-finite logits {nonfinite}")
+    close = abs(gap) <= STAGE9_FP16_MAX_GAP
+    clean = empty == 0 and nonfinite == 0
+    print(f"1. CER 차이 {STAGE9_FP16_MAX_GAP * 100:.1f}%p 이하: {'만족' if close else '불만족'}")
+    print(f"2. fp16 빈 가설 0, 넘침 0: {'만족' if clean else '불만족'}")
+    print(f"판정: {'fp16을 쓴다' if close and clean else 'fp32로 잰다'}")
+    return close and clean
+
+
+def verdict9_label(low: float, high: float) -> str:
+    """Stage 9 rule on the paired 95% interval of (candidate - base turbo) on FLEURS Korean validation."""
+    if high < 0:
+        return "다른 도메인에서 더 나은 기준 모델이다"
+    if low > 0:
+        return "다른 도메인에서 기준선보다 나쁘다"
+    return "다른 도메인에서 차이를 가리지 못했다"
+
+
+def verdict9(candidate: str, baseline: str, others: list[str]) -> str:
+    """Stage 9: the candidate's raw output against the base turbo on FLEURS Korean validation (original CER).
+
+    Everything else is reported: the Zeroth numbers next to the base turbo and the fine-tuned models, other
+    scorings, English, loops, and what the official repetition fix (`<candidate>-fixed`) changes.
+    """
+    fixed = f"{candidate}-fixed"
+    rule = compare("fleurs-ko-val", candidate, baseline)
+    show(f"fleurs-ko-val {candidate} vs {baseline}", rule)
+    print("reported, no verdict:")
+    for label, flag in (("  reference has digit", True), ("  reference has none", False)):
+        part = compare("fleurs-ko-val", candidate, baseline, reference_digits=flag)
+        if part["utterances"]:
+            show(label, part)
+    for scoring in ("harmonized", "agnostic"):
+        show(f"fleurs-ko-val {scoring}", compare("fleurs-ko-val", candidate, baseline, scoring=scoring))
+    for other in others:
+        show(f"fleurs-ko-val vs {other}", compare("fleurs-ko-val", candidate, other))
+    for reference in (baseline, *others):
+        overall = compare("zeroth-val", candidate, reference, harmonized=True)
+        show(f"zeroth-val harmonized vs {reference}", overall)
+        no_digits = compare("zeroth-val", candidate, reference, without_digits=True, harmonized=True)
+        show("  no digit utterances", no_digits)
+    show(f"zeroth-val original CER vs {baseline}", compare("zeroth-val", candidate, baseline))
+    show(f"fleurs-en-val (WER) vs {baseline}", compare("fleurs-en-val", candidate, baseline))
+    print(f"official repetition fix ({fixed} vs {candidate}):")
+    for label, set_name, scoring in (
+        ("zeroth-val harmonized", "zeroth-val", "harmonized"),
+        ("fleurs-ko-val", "fleurs-ko-val", None),
+        ("fleurs-en-val (WER)", "fleurs-en-val", None),
+    ):
+        show(f"  {label}", compare(set_name, fixed, candidate, scoring=scoring))
+    print("loops (more edits than reference length):")
+    for set_name, scoring in STAGE8_SETS.items():
+        loops(set_name, [baseline, candidate, fixed], scoring=scoring)
+    label = verdict9_label(*rule["delta_interval"])
+    print("규칙: fleurs-ko-val CER 차이(후보 raw - 기준선)의 짝지은 95% 구간 상한 < 0")
+    print(f"판정: {label}")
+    return label
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -490,6 +582,13 @@ def main() -> None:
     itn.add_argument("--baseline", required=True)
     itn.add_argument("--fleurs", default="fleurs-ko-val")
     itn.add_argument("--zeroth", default="zeroth-val")
+    gate = commands.add_parser("gate9")
+    gate.add_argument("--fp16", required=True, help="raw report file of the fp16 run")
+    gate.add_argument("--fp32", required=True, help="raw report file of the fp32 run")
+    ver9 = commands.add_parser("verdict9")
+    ver9.add_argument("--candidate", required=True, help="raw output; <candidate>-fixed is reported")
+    ver9.add_argument("--baseline", required=True)
+    ver9.add_argument("--others", nargs="*", default=[], help="fine-tuned models shown next to it")
     args = parser.parse_args()
 
     if args.command == "digits":
@@ -506,6 +605,10 @@ def main() -> None:
         verdict8(args.models, args.arms)
     elif args.command == "itn8":
         itn8(args.model, args.baseline, args.fleurs, args.zeroth)
+    elif args.command == "gate9":
+        gate9(args.fp16, args.fp32)
+    elif args.command == "verdict9":
+        verdict9(args.candidate, args.baseline, args.others)
     else:
         table(
             args.set_name, args.reports, args.baseline, not args.no_digit_split, args.harmonized, args.scoring

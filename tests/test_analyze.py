@@ -336,3 +336,90 @@ def test_itn8_on_reports(reports):
         write_report(reports, name, "fleurs-ko-val", scored_rows(fleurs))
         write_report(reports, name, "zeroth-val", scored_rows(zeroth))
     assert analyze.itn8("n", "base") == "출력 숫자 변환을 쓴다"
+
+
+def gate_file(path, precision, edits, hypotheses=None, nonfinite=None, device="cuda"):
+    """A stage 9 fp16-check file: a raw report of the first utterances of zeroth-val500 (limit 100)."""
+    hypotheses = hypotheses or ["가설"] * len(edits)
+    nonfinite = nonfinite or [False] * len(edits)
+    utterances = [
+        {"id": f"u{n}", "reference": "문장", "hypothesis": h, "edits": e, "length": 250}
+        | {"nonfinite_logits": bad}
+        for n, (e, h, bad) in enumerate(zip(edits, hypotheses, nonfinite, strict=True))
+    ]
+    summary = {"precision": precision, "device": device, "set": "zeroth-val500", "limit": len(edits)}
+    path.write_text(json.dumps({"summary": summary, "utterances": utterances}), encoding="utf-8")
+    return str(path)
+
+
+def test_gate9_keeps_fp16_when_it_matches_fp32(tmp_path):
+    fp32 = gate_file(tmp_path / "fp32.json", "fp32", [2, 2, 2, 2], device="cpu")
+    assert analyze.gate9(gate_file(tmp_path / "a.json", "fp16", [2, 2, 2, 2]), fp32)
+    # 1,000 reference characters: one edit is 0.1%p, in either direction.
+    assert analyze.gate9(gate_file(tmp_path / "b.json", "fp16", [3, 2, 2, 2]), fp32)
+    assert analyze.gate9(gate_file(tmp_path / "c.json", "fp16", [1, 2, 2, 2]), fp32)
+    assert not analyze.gate9(gate_file(tmp_path / "d.json", "fp16", [5, 2, 2, 2]), fp32)  # +0.3%p
+    assert not analyze.gate9(gate_file(tmp_path / "e.json", "fp16", [0, 1, 2, 2]), fp32)  # -0.3%p
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        {"hypotheses": ["가설", "", "가설", "가설"]},  # an empty output
+        {"nonfinite": [False, False, True, False]},  # overflowing logits
+    ],
+)
+def test_gate9_falls_back_to_fp32_on_empty_outputs_or_overflow(tmp_path, broken):
+    fp32 = gate_file(tmp_path / "fp32.json", "fp32", [2, 2, 2, 2], device="cpu")
+    assert not analyze.gate9(gate_file(tmp_path / "fp16.json", "fp16", [2, 2, 2, 2], **broken), fp32)
+
+
+def test_gate9_refuses_files_it_cannot_pair(tmp_path):
+    fp32 = gate_file(tmp_path / "fp32.json", "fp32", [2, 2, 2, 2], device="cpu")
+    with pytest.raises(SystemExit, match="precision"):
+        analyze.gate9(fp32, fp32)
+    with pytest.raises(SystemExit, match="utterances"):
+        analyze.gate9(gate_file(tmp_path / "fp16.json", "fp16", [2, 2, 2]), fp32)
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "label"),
+    [
+        (-0.012, -0.001, "다른 도메인에서 더 나은 기준 모델이다"),
+        (-0.012, 0.0, "다른 도메인에서 차이를 가리지 못했다"),
+        (0.0, 0.004, "다른 도메인에서 차이를 가리지 못했다"),
+        (0.001, 0.009, "다른 도메인에서 기준선보다 나쁘다"),
+    ],
+)
+def test_verdict9_label(low, high, label):
+    assert analyze.verdict9_label(low, high) == label
+
+
+def prepare_stage9(reports, fleurs_candidate):
+    """Base turbo, N and the candidate's two outputs on the three validation sets."""
+    (reports / "digit_utterances").mkdir()
+    (reports / "digit_utterances" / "zeroth-val.json").write_text(
+        json.dumps({"ids": ["u0"]}), encoding="utf-8"
+    )
+    zeroth = {"turbo": [4, 4, 4, 4], "n": [1, 1, 1, 1], "cand": [2, 2, 2, 150], "cand-fixed": [2, 2, 2, 20]}
+    fleurs = {"turbo": [5] * 4, "n": [6] * 4, "cand": fleurs_candidate, "cand-fixed": fleurs_candidate}
+    for name in zeroth:
+        write_report(reports, name, "zeroth-val", loop_rows(zeroth[name]))
+        write_report(reports, name, "fleurs-ko-val", fleurs_rows(fleurs[name]))
+        write_report(reports, name, "fleurs-en-val", fleurs_rows([1, 1]))
+
+
+@pytest.mark.parametrize(
+    ("fleurs_candidate", "label"),
+    [
+        ([3, 3, 3, 3], "다른 도메인에서 더 나은 기준 모델이다"),
+        ([5, 5, 5, 5], "다른 도메인에서 차이를 가리지 못했다"),
+        ([3, 7, 3, 7], "다른 도메인에서 차이를 가리지 못했다"),
+        ([7, 7, 7, 7], "다른 도메인에서 기준선보다 나쁘다"),
+    ],
+)
+def test_verdict9_on_reports(reports, capsys, fleurs_candidate, label):
+    prepare_stage9(reports, fleurs_candidate)
+    assert analyze.verdict9("cand", "turbo", ["n"]) == label
+    out = capsys.readouterr().out
+    assert "cand-fixed" in out and "zeroth-val harmonized" in out and "fleurs-en-val" in out

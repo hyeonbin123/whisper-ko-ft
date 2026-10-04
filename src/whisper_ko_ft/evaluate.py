@@ -154,6 +154,31 @@ def transcribe(
     return texts, trace.take(len(texts)) if trace else None
 
 
+def score_rows(rows: list[dict], language: str) -> int:
+    """Edits and reference length of each row (0 and 0 when the normalized reference is empty).
+
+    Returns the number of rows skipped for an empty reference.
+    """
+    skipped = 0
+    for row in rows:
+        scored = score(row["reference"], row["hypothesis"], language)
+        if scored is None:
+            skipped += 1
+            row["edits"] = row["length"] = 0
+            continue
+        row["edits"], row["length"] = scored.edits, scored.length
+        row["has_digit"] = bool(_DIGIT.search(row["hypothesis"]))
+    return skipped
+
+
+def batch_seconds_summary(seconds: list[float]) -> dict:
+    """Median and 90th percentile of the time per batch: the latency of one utterance at batch size 1."""
+    if not seconds:
+        return {"batch_seconds_median": None, "batch_seconds_p90": None}
+    median, p90 = np.percentile(seconds, [50, 90])
+    return {"batch_seconds_median": round(float(median), 3), "batch_seconds_p90": round(float(p90), 3)}
+
+
 def decoding_counts(rows: list[dict], fallback: bool) -> dict:
     """Summary counts over the scored utterances: decoded again, loops (more edits than reference), empty."""
     kept = [row for row in rows if row["length"]]
@@ -243,9 +268,11 @@ def main() -> None:
     trace = FallbackTrace(model, settings) if args.fallback else None
 
     rows: list[dict] = []
+    batch_seconds: list[float] = []
     torch.cuda.reset_peak_memory_stats()
     started = time.perf_counter()
     for begin in range(0, len(utterances), args.batch_size):
+        batch_started = time.perf_counter()
         batch = utterances[begin : begin + args.batch_size]
         audio = [stores.setdefault(u.store, AudioStore(u.store)).read(u) for u in batch]
         if args.channel:
@@ -264,6 +291,7 @@ def main() -> None:
             settings,
             trace,
         )
+        batch_seconds.append(time.perf_counter() - batch_started)  # decoding the text waits for the GPU
         for index, (utterance, text) in enumerate(zip(batch, texts, strict=True)):
             row = {
                 "id": utterance.id,
@@ -280,16 +308,7 @@ def main() -> None:
     torch.cuda.synchronize()
     wall = time.perf_counter() - started
 
-    skipped = 0
-    for row in rows:
-        scored = score(row["reference"], row["hypothesis"], language)
-        if scored is None:
-            skipped += 1
-            row["edits"] = row["length"] = 0
-            continue
-        row["edits"], row["length"] = scored.edits, scored.length
-        row["has_digit"] = bool(_DIGIT.search(row["hypothesis"]))
-
+    skipped = score_rows(rows, language)
     kept = [r for r in rows if r["length"]]
     edits = np.array([r["edits"] for r in kept])
     lengths = np.array([r["length"] for r in kept])
@@ -314,6 +333,7 @@ def main() -> None:
         "audio_seconds": round(audio_seconds, 1),
         "wall_seconds": round(wall, 1),
         "audio_seconds_per_second": round(audio_seconds / wall, 1),
+        **batch_seconds_summary(batch_seconds),
         "batch_size": args.batch_size,
         "peak_gpu_memory_mb": round(torch.cuda.max_memory_allocated() / 2**20),
         "limit": args.limit,

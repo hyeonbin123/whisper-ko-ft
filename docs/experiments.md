@@ -760,3 +760,71 @@
 - (2026-10-04 정정) 위 정리의 둘째 줄("다시 디코딩한 두 발화는 정답에 없는 말을 지어냈다")은 `152_003_1752`에만 맞다. 수치와 판정은 그대로다
   - `152_003_1752`(N2, validation): 끝의 "도대체 적용으로 인한의 지적을 받았다"는 이 발화가 든 다른 리포트 20개(기준선 두 모델, 2~7단계 모델, CTranslate2 실행, 8단계의 N 실행, 전화 음질 판 3개) 어디에도 없는 말이다. 지어낸 말로 본다
   - `105_003_0478`(N, test): D1a 가설의 맞춘 채점 오류 31개 중, 정답 문장을 받아 적은 앞부분만 채점하면 10개이고 나머지 21개는 뒤에 붙은 21글자("또 말씀하셔가지고 네 계속 지금 녹음되고 있는거야")의 삽입이다(가설을 둘로 나눠 같은 채점으로 계산). 이 말은 정답에 없지만, 기준선 turbo(깨끗한 판 "또 말씀하셔가지고.. 아직 있지지가 않아요 계속 지금 녹음되고 있는거에요 조용히 하면", 전화 음질 판도 거의 같음), 기준선 small, 3단계 L2("또 말씀하셔가지고 네 계속 지금 녹음되고 있는거에요")도 이 발화에 거의 같은 말을 적었다. 반대로 4단계 T, 5단계 A의 faster-whisper 재시도 실행, 2026-10-02의 N CTranslate2 실행은 정답 문장을 받아 적었다. 그래서 이 말은 지어낸 것이 아니라 녹음에 정답 문장과 함께 들어 있는 다른 말일 가능성이 높고, D1a는 두 말을 모두 받아 적은 것으로 보인다. 오디오를 들어 확인하지는 않았다. 2단계 test 결과에서 이 발화를 "정답과 녹음이 맞지 않는 데이터 오류로 보인다"고 적은 것과 같은 방향이다
+
+## 9단계: 다른 기준 모델 Qwen3-ASR-1.7B를 학습 없이 (규칙 2026-10-04, 재기 전. 처음 계획에 없던 단계)
+
+지금까지 기준 모델은 Whisper(small, large-v3-turbo)뿐이었다. 파인튜닝한 turbo는 다른 도메인(FLEURS 한국어)에서 기준선을 넘지 못했다(6단계 N validation 5.28%, 8단계 출력 숫자 변환 뒤 4.91%, 기준선 turbo 4.75%). 계열이 다른 공개 모델 Qwen3-ASR-1.7B(Apache 2.0)를 학습 없이 같은 묶음·같은 채점으로 재서, 다른 도메인에서 기준선 turbo보다 나은지 본다. 같은 단계에서 속도와 GPU 메모리도 잰다.
+
+### 재기 전에 아는 것 (2026-10-04에 적음)
+- 모델: `Qwen/Qwen3-ASR-1.7B-hf`(Transformers 판, revision `bcd2b5b7f32b480ab5790554cfa8347f246a14f3`, Apache 2.0). 오디오 인코더(24층)와 Qwen3 언어 모델(28층)로 된 모델이고, 파라미터는 약 20억 개(bf16 가중치 4.08GB)다. 설치된 transformers 5.17.0에 모델 클래스(`Qwen3ASRForConditionalGeneration`, 5.13부터)가 있어 새 의존성은 없다. 가중치는 2026-10-04에 Hugging Face 캐시로 받았다(0.6B는 revision `7f1569a48a89f3e3f4dc3a5c9d28bddd903bc76c`, 1.56GB)
+- 외부 수치 (개선 검토의 조사, 2026-10-02. 이 단계에서 다시 확인하지 않음): FLEURS 한국어 test CER은 여러 모델을 같은 방식으로 잰 공개 표(Handy, Q8_0 양자화)에서 Qwen3-ASR-1.7B 4.60%, whisper-large-v3-turbo 5.24%(이 저장소의 5.21%와 비슷하다), 약 150문장으로 잰 다른 비교(whispernotes)에서 3.54% 대 4.25%다. 한 한국어 파인튜닝 모델 카드(TeamUNIVA)는 기본 Qwen3-ASR-1.7B를 FLEURS 한국어 1.42%, Zeroth 2.64%로 적었다(정규화는 모름)
+- **오염 가능성**: Qwen3-ASR의 학습 데이터는 공개되지 않았다. FLEURS와 Zeroth-Korean은 공개 데이터라 학습에 들어 있을 수 있다. 위 1.42%가 같은 조건의 수치라면 FLEURS가 들어 있을 가능성이 있다. 그래서 이 단계의 FLEURS 한국어 결과를 "학습하지 않은 다른 도메인의 성능"이라고 단정하지 않는다. Zeroth 수치는 "학습 없이 잰 수치, 학습 데이터에 들어 있는지 모름"으로 적는다. Whisper도 학습 데이터가 공개되지 않은 것은 같다(README 한계 절). 결과를 적을 때 README 한계 절에도 적는다
+- 공식 파서(`processor.extract_transcription`, `decode(return_format="transcription_only")`)는 원래 구현의 반복 제거 후처리(`_detect_and_fix_repetitions`: 같은 글자가 20번 넘게, 또는 20글자 이하의 패턴이 20번 넘게 이어지면 하나만 남긴다)를 자동으로 적용한다. Whisper 하네스에는 이런 후처리가 없다. 기준선 turbo의 기록된 리포트는 greedy 그대로다(8단계의 재시도 디코딩은 디코딩을 바꾸는 것이고 기준선에는 적용하지 않았다)
+- CPU 스모크 (측정 아님, 리포트 없음): fp32 CPU로 zeroth-val500 앞 4발화와 fleurs-en-val 앞 4발화를 디코딩했다. 우리 오디오 배열을 공식 입력 함수(`apply_transcription_request`)에 그대로 넣어 돌아간다. 언어를 고정하면 프롬프트가 "language Korean<asr_text>"로 끝나고, 생성된 부분에는 받아 적은 글만 있다. 한국어 숫자를 "3월"처럼 아라비아 숫자로 적고, 영어는 대소문자와 문장부호를 붙여 적는다(정규화가 지운다). 새 하네스(`evaluate_qwen`)로 zeroth-val500 앞 4발화를 오프라인(`HF_HUB_OFFLINE=1`)으로 돌려 정상 종료, 빈 가설·넘침 0을 확인했다(배치 4, 4발화에 50초)
+
+### 후보와 비교 대상
+- **후보**: Qwen3-ASR-1.7B, 학습 없이. 후보는 하나다
+- **참고 (판정 없음, 1.7B의 측정이 모두 끝난 뒤 같은 GPU 단계에서 시간이 남을 때만)**: Qwen3-ASR-0.6B, validation 세 묶음만. test는 재지 않는다
+- 넣지 않는 것: Cohere Transcribe(내려받기 전에 연락처 공유 동의가 필요하고, 위 공개 표에서 turbo보다 나쁘다), 한국어로 파인튜닝한 Qwen3-ASR(학습 데이터 미공개. 학습 없이 재는 기준 모델이 아니다)
+- **비교 대상 (다시 재지 않음)**: 기준선 turbo의 기록된 리포트(`reports/whisper-large-v3-turbo/`, 1단계 규칙의 greedy, 배치 16). 같은 하네스의 greedy 디코딩은 다시 재도 발화 단위로 같았다(2026-10-02 새 클론의 whisper-small, 8단계 첫 디코딩의 N·N2). 함께 보이는 것: 6단계 N(`turbo-n`), 8단계에서 고른 N2 + 재시도 디코딩 D1a(`turbo-n2-d1a`, validation만 있음)
+
+### 디코딩 (`whisper_ko_ft.evaluate_qwen`)
+- Transformers의 `Qwen3ASRForConditionalGeneration`, 위 revision 고정, 어텐션 SDPA(FA2 없음), fp16(아래 점검을 통과하면)
+- 입력: 공식 입력 함수 `processor.apply_transcription_request(audio, language="Korean" 또는 "English")`. 언어는 프롬프트 끝에 "language <언어 이름><asr_text>"를 미리 채워 고정한다(Whisper의 언어 고정에 해당). 맥락 프롬프트(system)는 비운다
+- greedy(`do_sample=False`, `num_beams=1`), `max_new_tokens=256`(Whisper 하네스와 같다. 모델의 기본값은 512), 반복 벌점 없음(모델의 generation_config에도 없다), 배치 16, 왼쪽 패딩(공식 기본값)
+- 음성: 16kHz 모노, **앞 30초만** 넣는다. Qwen3-ASR은 더 긴 입력도 받지만, Whisper 하네스가 앞 30초만 듣기 때문에 같은 소리를 듣게 한다. 30초를 넘는 발화는 validation에서 FLEURS 영어 1개다. 0.5초보다 짧은 발화는 모델의 처리기가 0으로 채운다(공식 동작)
+- 멜 특징은 처리기 기본값대로 CPU에서 계산한다(Whisper 하네스는 GPU). 속도에 포함된다
+- **하나의 디코딩에서 출력 두 가지를 만든다** (미리 등록):
+  - **raw** (`reports/qwen3-asr-1.7b/`): 생성된 토큰을 특수 토큰을 빼고 글로 바꾼 뒤 `<asr_text>` 뒤만 자른 것(언어를 고정하면 생성된 부분에 이 표시가 없어 전체가 된다). 그 밖에는 아무것도 하지 않는다. 반복을 지우지 않고, `<non_speech>` 같은 남은 태그도 지우지 않는다(그 수를 센다)
+  - **fixed** (`reports/qwen3-asr-1.7b-fixed/`): 공식 파서 `processor.extract_transcription`의 결과. 반복 제거 후처리가 들어간다
+  - **판정은 raw로 한다.** Whisper 하네스에 반복 방지가 없으므로 같은 조건에서 비교하려는 것이다. fixed는 보고만 한다
+- 발화마다 생성한 토큰 수, 256개에 닿았는지(`hit_token_limit`), 그 발화의 로짓에 유한하지 않은 값이 있었는지(`nonfinite_logits`, fp16 넘침. 언어 모델 출력층에 훅을 걸어 디코딩 단계마다 본다)를 리포트에 남긴다
+- 채점은 지금까지와 같다(정규화, CER·WER, 맞춘 CER, 부트스트랩 1,000번 seed 0)
+
+### fp16 점검 (측정 전 관문, `analyze gate9`)
+- Turing(RTX 2080 Ti)에는 bf16이 없다. bf16으로 배포된 모델을 fp16으로 돌리면 넘칠 수 있다
+- zeroth-val500 앞 100발화를 fp16과 fp32로 각각 같은 디코딩(배치 16)으로 디코딩한다. 결과 파일은 `reports/qwen3-asr-1.7b-gate/zeroth-val500-first100-fp16.json`과 `...-fp32-cpu.json`(raw 리포트 형식. `limit`이 100이라 `analyze`의 다른 명령은 받지 않는다)
+- **브리프에서 바꾼 것 (재기 전)**: fp32 쪽은 GPU가 아니라 **CPU**에서 잰다(이 규칙을 커밋한 뒤, GPU 단계 전에). fp32 가중치는 약 8.2GB라 다른 프로그램과 나눠 쓰는 11GB GPU에 올리기 어렵고, 기준이 되는 쪽은 fp32라는 것이 중요하지 장치는 상관없다. CPU와 GPU의 계산 차이도 fp16 쪽의 차이로 세게 되므로 점검이 그만큼 엄격해질 뿐이다. fp16 쪽은 GPU에서 잰다
+- **통과**: raw 출력의 원래 CER 차이(fp16 − fp32)가 ±0.20%p 안이고, fp16 쪽 빈 가설 0개, 넘침 발화 0개 → fp16으로 잰다
+- 통과하지 못하면 fp32로 GPU에서 잰다: 배치 4(메모리가 모자라면 2), 다른 프로그램이 GPU 메모리를 1GB 넘게 쓰지 않을 때만(5분마다 확인, 최대 60분). 배치를 바꾸면 적는다. fp32로도 잴 수 없으면 이 단계를 멈추고 그 사실을 적는다
+- 0.6B를 잴 때도 같은 점검을 한다(`reports/qwen3-asr-0.6b-gate/`)
+
+### 묶음과 지표 (validation)
+- Zeroth validation 2,214발화: 맞춘 CER(전체, 1단계에서 정한 숫자 발화 705개 제외), 원래 CER(참고)
+- FLEURS 한국어 validation 226발화: 원래 CER(판정), 정답에 숫자가 있는 발화와 없는 발화, 맞춘 CER과 표기 무관 CER(8단계 `--scoring agnostic`, 보고만)
+- FLEURS 영어 validation 394발화: WER
+- raw와 fixed 각각: 되풀이 발화(오류 수 > 정답 길이. Zeroth는 맞춘 채점), 256토큰에 닿은 발화, 빈 가설, 넘침, 남은 태그, fixed가 바꾼 발화(`analyze changes --base qwen3-asr-1.7b --reports qwen3-asr-1.7b-fixed`)
+- Zeroth 수치는 기준선 turbo(맞춘 CER 3.60%), N(1.25%), N2 + D1a(1.20%) 옆에 "학습 없이, 학습 데이터에 들어 있는지 모름"으로 적는다
+
+### 판정 규칙 (validation, `analyze verdict9 --candidate qwen3-asr-1.7b --baseline whisper-large-v3-turbo --others turbo-n turbo-n2-d1a`)
+- FLEURS 한국어 validation CER(원래 채점)에서 후보 raw − 기준선 turbo의 짝지은 차이(같은 발화, 부트스트랩 1,000번, seed 0)의 95% 구간:
+  - 상한 < 0: **"다른 도메인에서 더 나은 기준 모델이다"**
+  - 하한 > 0: "다른 도메인에서 기준선보다 나쁘다"
+  - 구간이 0을 포함: "다른 도메인에서 차이를 가리지 못했다"
+- Zeroth와 FLEURS 영어는 판정에 넣지 않고 보고만 한다. 이 단계의 질문은 다른 도메인이고, Zeroth는 학습 데이터에 들어 있을 수 있다
+- "더 나은 기준 모델"이어도 이 단계에서는 학습하지 않는다. Qwen3-ASR의 공식 학습 방식은 bf16 전체 학습이라, 이 GPU에서 LoRA로 학습하려면 fp16 autocast, fp32 마스터 가중치, GradScaler로 넘침이 없는지 스모크로 먼저 확인해야 한다. 그 단계는 따로 규칙을 적는다(이번 단계 밖)
+- 기대 (재기 전): 외부 수치대로라면 FLEURS 한국어 validation에서 turbo(4.75%)보다 0.4~0.7%p 낮다. 226발화에서는 그 크기의 차이라도 구간이 0을 포함할 수 있다(6단계 N의 +0.53%p는 구간 폭이 약 1.1%p였다). Zeroth 맞춘 CER은 2.6~3.6%로 짐작한다. 언어 모델 디코더라 되풀이나 지어낸 말이 나올 수 있다
+
+### test (한 번, 참고용)
+- 1.7B를 Zeroth test(맞춘 CER), FLEURS 한국어 test(CER), FLEURS 영어 test(WER)에서 한 번 잰다(`--allow-test`, 같은 디코딩에서 raw와 fixed). 후보가 하나라 판정과 관계없이 잰다. 기준선 turbo, N, N + D1a(8단계)의 기록된 test 리포트와 함께 적는다. test 수치를 보고 규칙이나 선택을 바꾸지 않는다
+
+### 속도와 GPU 메모리 (판정 없음)
+- Zeroth val-500(440발화, 1.07시간), `--no-report`. Qwen3-ASR-1.7B(점검에서 정한 정밀도)와 기준선 turbo(Transformers fp16, `evaluate`), 배치 1과 16
+- 순서: 묶음의 오디오를 한 번 읽어 둔 뒤 turbo 배치 1 → Qwen 배치 1 → turbo 배치 16 → Qwen 배치 16 → 같은 순서로 한 번 더. 보고는 두 번의 평균이고, 두 번이 10% 넘게 다르면 적는다
+- 지표: 음성 초 ÷ 걸린 초(모델을 띄우는 시간 제외), 배치마다 걸린 시간의 중앙값과 90번째 백분위(배치 1에서는 한 발화의 지연. 두 하네스의 요약에 이번에 더함), torch 최대 할당, nvidia-smi 사용량의 최댓값 − 실행 직전 값(0.5초 간격), 그 실행의 원래 CER
+- 재는 때: 2026-10-02 속도 절과 같다(다른 프로그램의 GPU 사용률 10% 이하, CPU 1분 평균 15% 미만. 5분마다 확인하며 최대 60분 기다리고, 안 되면 그대로 재고 조건을 수치 옆에 적는다)
+- 이 비교는 Transformers끼리다. faster-whisper(CTranslate2)는 2026-10-02 측정에서 배치 1에 Transformers보다 1.46배 빨랐다(N, 쉬는 상태 아님). Qwen3-ASR에는 CTranslate2 판이 없다
+
+### 스모크 (측정 아님) 와 비용
+- GPU 단계의 첫 일: fp16 GPU로 zeroth-val500 앞 16발화 `--no-report`(정상 종료, 넘침 0, 상식적인 오류율). 실패하면 측정하지 않고 고친 뒤 이 절에 날짜를 붙여 적는다
+- 비용 추정: GPU 약 1.2~1.5시간(스모크와 fp16 점검 약 5분, validation 세 묶음 15~25분, test 세 묶음 10~15분, 속도 8번 약 40분, 0.6B 점검과 validation 약 10분). 쉬는 상태를 기다리는 시간(최대 60분)은 따로. CPU: fp32 점검 1.7B 약 15분, 0.6B 약 6분. 내려받기 5.7GB(끝남)
