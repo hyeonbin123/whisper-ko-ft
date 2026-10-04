@@ -55,9 +55,30 @@ def test_stored_scores_are_reproduced(path):
         # 2026-10-02: the speed check on val-500, transformers batch 1 and CTranslate2
         ("turbo-n-b1", "zeroth-val500", 320, 18321),  # 1.75%
         ("turbo-n-ct2", "zeroth-val500", 316, 18321),  # 1.72%
+        # 2026-10-04, stage 8: the fallback decodings (D1a picked; D1 gave the same hypotheses)
+        ("turbo-n-d1a", "zeroth-val", 1172, 93621),  # 1.25%
+        ("turbo-n-d1", "zeroth-val", 1172, 93621),  # 1.25%
+        ("turbo-n2-d1a", "zeroth-val", 1119, 93621),  # 1.20%
+        ("turbo-n2-d1", "zeroth-val", 1119, 93621),  # 1.20%
+        ("turbo-n-d1a", "zeroth-test", 381, 19272),  # 1.98%
     ],
 )
 def test_recorded_harmonized_totals(report, set_name, edits, length):
     rows = analyze.load_rows(report, set_name, harmonized=True)
+    got_edits, got_lengths = analyze.arrays(rows, sorted(rows))
+    assert (int(got_edits.sum()), int(got_lengths.sum())) == (edits, length)
+
+
+# Stage 8 output post-processing (2026-10-04): the totals behind the `itn8` verdict, scored on every call.
+@pytest.mark.parametrize(
+    ("report", "set_name", "scoring", "edits", "length"),
+    [
+        ("turbo-n", "fleurs-ko-val", "itn", 512, 10419),  # 4.91% (5.28% as is)
+        ("whisper-large-v3-turbo", "fleurs-ko-val", "itn", 492, 10419),  # 4.72% (4.75% as is)
+        ("turbo-n", "zeroth-val", "itn-harmonized", 1172, 93621),  # 1.25%, as harmonized
+    ],
+)
+def test_recorded_post_processed_totals(report, set_name, scoring, edits, length):
+    rows = analyze.load_rows(report, set_name, scoring=scoring)
     got_edits, got_lengths = analyze.arrays(rows, sorted(rows))
     assert (int(got_edits.sum()), int(got_lengths.sum())) == (edits, length)
