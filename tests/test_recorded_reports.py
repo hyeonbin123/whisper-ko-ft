@@ -61,6 +61,11 @@ def test_stored_scores_are_reproduced(path):
         ("turbo-n2-d1a", "zeroth-val", 1119, 93621),  # 1.20%
         ("turbo-n2-d1", "zeroth-val", 1119, 93621),  # 1.20%
         ("turbo-n-d1a", "zeroth-test", 381, 19272),  # 1.98%
+        # 2026-10-04, stage 9: Qwen3-ASR-1.7B untrained, raw and the official repetition fix (no change)
+        ("qwen3-asr-1.7b", "zeroth-val", 3231, 93621),  # 3.45%
+        ("qwen3-asr-1.7b-fixed", "zeroth-val", 3231, 93621),  # 3.45%
+        ("qwen3-asr-1.7b", "zeroth-test", 817, 19272),  # 4.24%
+        ("qwen3-asr-1.7b-fixed", "zeroth-test", 817, 19272),  # 4.24%
     ],
 )
 def test_recorded_harmonized_totals(report, set_name, edits, length):
