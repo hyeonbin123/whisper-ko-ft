@@ -6,12 +6,16 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned rather than ubuntu-latest, which moves to Ubuntu 26 from 2026-10-19.
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      # setup-uv publishes no floating major tag since v8, so pin the exact release. Since v6 python-version
+      # no longer activates a venv on its own; the uv pip installs below need one, and uv run uses the same .venv.
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.11"
+          activate-environment: true
       # uv.lock pins torch to the CUDA 12.8 build for training. The tests need no GPU, so CI installs the CPU
       # build of the locked torch version, then every other locked package except the linux-only CUDA wheels
       # (nvidia-*, triton, cuda-*) that only the CUDA build needs. --locked fails when uv.lock is stale.
