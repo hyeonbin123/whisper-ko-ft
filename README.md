@@ -18,6 +18,7 @@
 | 7. 더 오래 학습 | 6단계 모델에서 이어서 1,500스텝을 더 학습하면 나아지는지 (처음 계획에 없던 단계) | 완료 (1,500스텝으로 충분하다) |
 | 8. 재시도 디코딩과 출력 숫자 변환 | 가중치는 그대로 두고 Transformers의 재시도 디코딩이 되풀이 오류를 막는지, 출력의 숫자 표기만 바꾸는 후처리가 다른 도메인의 격차를 줄이는지 (처음 계획에 없던 단계) | 완료 (재시도 디코딩을 쓴다, 출력 숫자 변환을 쓴다) |
 | 9. 다른 기준 모델 | 계열이 다른 공개 모델 Qwen3-ASR-1.7B(Apache 2.0)를 학습 없이 같은 묶음·채점으로 재서, 다른 도메인(FLEURS 한국어)에서 기준선 turbo보다 나은지와 속도·GPU 메모리 (처음 계획에 없던 단계) | 완료 (다른 도메인에서 더 나은 기준 모델이다. 학습 데이터에 FLEURS가 들어 있었을 수 있음) |
+| 10. 다른 기준 모델에 LoRA | 9단계의 Qwen3-ASR-1.7B에 6단계와 같은 데이터·같은 방식(fp16, 숫자를 바꾼 정답)으로 LoRA를 학습해, 같은 도메인에서는 6단계 모델만큼, 다른 도메인에서는 그보다 나은 범용 모델이 되는지 (처음 계획에 없던 단계) | 규칙 등록, 측정 전 |
 
 ## 지금까지의 결과
 
@@ -138,6 +139,8 @@ LoRA 후보와 전화 음질 조건의 명령은 [docs/experiments.md](docs/expe
 
 9단계: `uv run python -m whisper_ko_ft.evaluate_qwen --set zeroth-val`이 Qwen3-ASR-1.7B(고정한 revision, fp16, greedy, 언어 고정)로 디코딩해 한 번에 두 리포트를 남긴다. `reports/qwen3-asr-1.7b/`는 받아 적은 글 그대로(raw), `reports/qwen3-asr-1.7b-fixed/`는 공식 파서의 반복 제거를 거친 것이다. fp16 점검은 `--limit 100 --out <파일>`(fp32는 `--device cpu --precision fp32`)과 `analyze gate9`, 판정은 `analyze verdict9 --candidate qwen3-asr-1.7b --baseline whisper-large-v3-turbo`.
 
+10단계: `uv run python -m whisper_ko_ft.train_qwen --run-name qwen-qn`이 Qwen3-ASR-1.7B에 LoRA를 학습한다(fp16 기본 가중치, fp32 어댑터, GradScaler, 장치당 2 × 누적 16, 1,500스텝). 스텝마다 `outputs/<run>/steps.jsonl`에 손실·기울기 크기·배율·건너뜀·GPU 메모리를 남기고, `outputs/<run>/PAUSE`가 있는 동안은 다음 스텝을 시작하지 않으며, `--resume`으로 이어 한다. 평가는 `evaluate_qwen --adapter outputs/qwen-qn/checkpoint-<스텝> --name qwen3-asr-1.7b-qn`(어댑터를 병합, `--channel telephone` 가능), 관문은 `analyze gate10`·`smoke10`, 체크포인트 고르기는 `analyze pick10`, 판정은 `analyze verdict10 --candidate qwen3-asr-1.7b-qn --n turbo-n --untrained qwen3-asr-1.7b`.
+
 테스트: `uv run pytest`, `uv run ruff check .`
 
 ## 데이터와 모델
@@ -147,6 +150,6 @@ LoRA 후보와 전화 음질 조건의 명령은 [docs/experiments.md](docs/expe
 | 학습·평가 | Zeroth-Korean | CC BY 4.0 | [openslr.org/40](https://openslr.org/40/), [kresnik/zeroth_korean](https://huggingface.co/datasets/kresnik/zeroth_korean) |
 | 평가 | FLEURS (한국어, 영어) | CC BY 4.0 | [google/fleurs](https://huggingface.co/datasets/google/fleurs) |
 | 모델 | Whisper small, large-v3-turbo | MIT | [openai/whisper-small](https://huggingface.co/openai/whisper-small), [openai/whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo) |
-| 모델 (9단계, 학습 없이 평가) | Qwen3-ASR-1.7B, 0.6B (Transformers 판) | Apache 2.0 | [Qwen/Qwen3-ASR-1.7B-hf](https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf), [Qwen/Qwen3-ASR-0.6B-hf](https://huggingface.co/Qwen/Qwen3-ASR-0.6B-hf) |
+| 모델 (9단계 학습 없이 평가, 10단계 LoRA) | Qwen3-ASR-1.7B, 0.6B (Transformers 판) | Apache 2.0 | [Qwen/Qwen3-ASR-1.7B-hf](https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf), [Qwen/Qwen3-ASR-0.6B-hf](https://huggingface.co/Qwen/Qwen3-ASR-0.6B-hf) |
 
 데이터와 학습 결과물은 저장소에 넣지 않는다.

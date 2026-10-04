@@ -21,13 +21,20 @@ decoding rules and `itn8` the rules of the output post-processing.
 
 Stage 9 (another base model, Qwen3-ASR): `gate9` decides fp16 or fp32 from two runs on the first 100
 utterances of zeroth-val500, `verdict9` applies the other-domain rule and prints what is reported with it.
+
+Stage 10 (LoRA on Qwen3-ASR): `gate10` checks that a fresh adapter (B=0) reproduces the stage 9 fp16 check,
+`smoke10` reads a smoke run's step log and GPU memory samples against the gates, `pick10` picks the checkpoint
+by harmonized CER on zeroth-val500, and `verdict10` applies the rules against N.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import math
 import re
+import statistics
 
 import numpy as np
 
@@ -53,6 +60,20 @@ STAGE8_SETS = {"zeroth-val": "harmonized", "fleurs-ko-val": None, "fleurs-en-val
 # Stage 9: fp16 is used when its raw CER on the first 100 utterances of zeroth-val500 is within this of the
 # fp32 run's (either direction), with no empty hypothesis and no utterance with non-finite logits.
 STAGE9_FP16_MAX_GAP = 0.002
+# Stage 10. Smoke gates: GradScaler skips after the first STAGE10_SKIP_GRACE steps, the Windows "GPU Process
+# Memory" shared usage of the training process (stage 9 decoding sat at ~230 MB until it spilled to 3.4 GB),
+# nvidia-smi memory.used of the whole card, torch's peak allocation, and the time budget of the full run.
+STAGE10_SKIP_GRACE = 20
+STAGE10_MAX_SKIPS = 5
+STAGE10_MAX_SHARED_MB = 512
+STAGE10_MAX_GPU_MB = 10_752  # 10.5 GiB, as nvidia-smi counts (MiB)
+STAGE10_MAX_ALLOCATED_MB = 7_168  # 7 GiB
+STAGE10_HOURS = 8.0
+STAGE10_STEPS, STAGE10_FEWER_STEPS = 1_500, 1_000
+# Verdict: QN may be at most this much above N on Zeroth (upper end of the paired 95% interval of the
+# harmonized CER); the reported forgetting line allows this much above the untrained Qwen on FLEURS Korean.
+STAGE10_ZEROTH_MAX_ABOVE_N = 0.001
+STAGE10_FORGETTING_MAX = 0.010
 _DIGIT = re.compile(r"[0-9]")
 
 
@@ -541,6 +562,216 @@ def verdict9(candidate: str, baseline: str, others: list[str]) -> str:
     return label
 
 
+def gate10(path: str, recorded: str) -> bool:
+    """Stage 10 gate (a): a fresh adapter merged into the base decodes what the stage 9 fp16 check did."""
+    (summary, rows), (base_summary, base_rows) = _check_rows(path), _check_rows(recorded)
+    if not summary.get("adapter") or base_summary.get("adapter"):
+        raise SystemExit("gate10 compares a run with an adapter against the recorded run without one")
+    for key in ("precision", "set", "limit"):
+        if summary.get(key) != base_summary.get(key):
+            raise SystemExit(f"the two runs differ in {key}: {summary.get(key)} and {base_summary.get(key)}")
+    if list(rows) != list(base_rows):
+        raise SystemExit("the two runs did not decode the same utterances in the same order")
+    differ = [i for i in rows if rows[i]["hypothesis"] != base_rows[i]["hypothesis"]]
+    ids = [i for i, row in base_rows.items() if row["length"]]
+    edits, lengths = arrays(rows, ids)
+    base_edits, _ = arrays(base_rows, ids)
+    shown = f" ({', '.join(differ[:5])})" if differ else ""
+    print(
+        f"{len(rows)} utterances: with {summary['adapter']} {error_rate(edits, lengths) * 100:.2f}%"
+        f", recorded {error_rate(base_edits, lengths) * 100:.2f}%"
+        f"; hypotheses that differ {len(differ)}{shown}"
+    )
+    print(f"판정: {'통과 (발화 단위로 같다)' if not differ else '실패'}")
+    return not differ
+
+
+def read_steps(path: str) -> dict[int, dict]:
+    """Step entries of a train_qwen log by step; a resumed run logs some steps twice, the later one counts."""
+    steps = {}
+    with open(path, encoding="utf-8") as file:
+        for line in file:
+            entry = json.loads(line)
+            if "event" not in entry:
+                steps[entry["step"]] = entry
+    return steps
+
+
+def read_memwatch(path: str) -> list[dict]:
+    """GPU memory samples (work/stage10/memwatch.ps1): MiB as numbers, None where a counter was missing."""
+    with open(path, encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+    keys = ("shared_mb", "dedicated_mb", "smi_used_mb", "smi_util")
+    return [
+        {**row, **{k: float(row[k]) if row.get(k) not in (None, "") else None for k in keys}} for row in rows
+    ]
+
+
+def smoke10(steps_path: str, mem_path: str, expected_steps: int = 50) -> dict:
+    """Stage 10 gate (c): the smoke run against the registered limits, and the number of steps to train."""
+    steps = read_steps(steps_path)
+    samples = read_memwatch(mem_path)
+    shared = [row["shared_mb"] for row in samples if row["shared_mb"] is not None]
+    used = [row["smi_used_mb"] for row in samples if row["smi_used_mb"] is not None]
+    if not steps or not shared or not used:
+        raise SystemExit("smoke10 needs the step log and GPU memory samples with both counters")
+    late_skips = sorted(s for s, e in steps.items() if e["skipped"] and s > STAGE10_SKIP_GRACE)
+    nonfinite = sorted(s for s, e in steps.items() if not math.isfinite(e["loss"]))
+    longest = [s for s, e in steps.items() if e["longest"]]
+    peak = max(e["peak_allocated_mb"] or 0 for e in steps.values())  # None on the CPU
+    times = [e["seconds"] for s, e in steps.items() if s > STAGE10_SKIP_GRACE and not e["longest"]]
+    median = statistics.median(times) if times else float("nan")
+    hours = median * STAGE10_STEPS / 3600
+    all_skips = sum(e["skipped"] for e in steps.values())
+    checks = [
+        (f"1. 모든 손실이 유한 (유한하지 않은 스텝 {nonfinite or '없음'})", not nonfinite),
+        (
+            f"2. GradScaler 건너뜀이 {STAGE10_SKIP_GRACE}스텝 뒤에 {STAGE10_MAX_SKIPS}개 이하"
+            f" ({len(late_skips)}개, 전체 {all_skips}개)",
+            len(late_skips) <= STAGE10_MAX_SKIPS,
+        ),
+        (f"3. 가장 긴 발화의 스텝을 돌았다 ({longest or '없음'})", bool(longest)),
+        (
+            f"4. {expected_steps}스텝을 모두 돌았다 ({len(steps)}스텝)",
+            sorted(steps) == list(range(1, expected_steps + 1)),
+        ),
+        (
+            f"5. 공유 GPU 메모리 최대 {max(shared):,.0f} MiB <= {STAGE10_MAX_SHARED_MB}",
+            max(shared) <= STAGE10_MAX_SHARED_MB,
+        ),
+        (f"6. nvidia-smi 최대 {max(used):,.0f} MiB < {STAGE10_MAX_GPU_MB:,}", max(used) < STAGE10_MAX_GPU_MB),
+        (
+            f"7. torch 최대 할당 {peak:,} MiB <= {STAGE10_MAX_ALLOCATED_MB:,}",
+            peak <= STAGE10_MAX_ALLOCATED_MB,
+        ),
+    ]
+    for label, ok in checks:
+        print(f"{label}: {'만족' if ok else '불만족'}")
+    passed = all(ok for _, ok in checks)
+    max_steps = STAGE10_STEPS if hours <= STAGE10_HOURS else STAGE10_FEWER_STEPS
+    print(
+        f"스텝 시간 중앙값 ({STAGE10_SKIP_GRACE + 1}스텝부터, 가장 긴 스텝 제외) {median:.2f}초"
+        f" x {STAGE10_STEPS:,} = {hours:.2f}시간 -> {max_steps:,}스텝"
+    )
+    print(f"판정: {'통과' if passed else '실패'}")
+    return {"passed": passed, "max_steps": max_steps, "median_step_seconds": median, "hours": hours}
+
+
+def pick10(paths: list[str]) -> str:
+    """Stage 10: the checkpoint whose zeroth-val500 run has the lowest harmonized CER; on a tie the earliest
+    (the files are given in step order)."""
+    loaded = []
+    for path in paths:
+        summary, rows = _check_rows(path)
+        if summary.get("limit"):
+            raise SystemExit(f"{path}: measured with --limit, not the whole set")
+        loaded.append((path, summary, {i: rescored(row) for i, row in rows.items() if row["length"]}))
+    ids = sorted(loaded[0][2])
+    if any(sorted(rows) != ids for _, _, rows in loaded):
+        raise SystemExit("the checkpoint runs did not decode the same utterances")
+    best, best_rate = paths[0], float("inf")
+    for path, summary, rows in loaded:
+        edits, lengths = arrays(rows, ids)
+        rate = error_rate(edits, lengths)
+        low, high = interval(edits, lengths)
+        print(f"  {summary.get('adapter')}: {rate * 100:.2f}% [{low * 100:.2f}, {high * 100:.2f}] ({path})")
+        if rate < best_rate:
+            best, best_rate = path, rate
+    print(f"고른 체크포인트: {best}")
+    return best
+
+
+def verdict10_label(zeroth_ok: bool, fleurs_ok: bool) -> str:
+    """Stage 10 verdict from condition 1 (Zeroth against N) and condition 2 (FLEURS Korean against N)."""
+    if zeroth_ok and fleurs_ok:
+        return "정확도 기준으로 N을 대신하는 범용 모델이다"
+    if zeroth_ok:
+        return "N을 유지한다 (다른 도메인 이득 없음)"
+    if fleurs_ok:
+        return "다른 도메인용 기준 모델로만 쓴다"
+    return "N을 유지한다"
+
+
+def _summary(report: str, set_name: str) -> dict:
+    return json.loads((REPORTS / report / f"{set_name}.json").read_text(encoding="utf-8"))["summary"]
+
+
+def verdict10(candidate: str, n: str, untrained: str, others: list[str]) -> str:
+    """Stage 10: the LoRA-trained Qwen (raw output) against N on Zeroth (harmonized) and FLEURS Korean.
+
+    Reported with it: the forgetting line against the untrained Qwen, the other models, digit splits, the
+    notation-agnostic scoring, English, the telephone channel, the official repetition fix and loops.
+    """
+    zeroth = compare("zeroth-val", candidate, n, harmonized=True)
+    fleurs = compare("fleurs-ko-val", candidate, n)
+    forgetting = compare("fleurs-ko-val", candidate, untrained)
+    show(f"zeroth-val harmonized {candidate} vs {n}", zeroth)
+    show(f"fleurs-ko-val {candidate} vs {n}", fleurs)
+    show(f"fleurs-ko-val {candidate} vs {untrained} (forgetting)", forgetting)
+    print("reported, no verdict:")
+    show(
+        f"zeroth-val harmonized vs {untrained}", compare("zeroth-val", candidate, untrained, harmonized=True)
+    )
+    for reference in (n, untrained, *others):
+        part = compare("zeroth-val", candidate, reference, without_digits=True, harmonized=True)
+        show(f"zeroth-val harmonized, no digit utterances, vs {reference}", part)
+    for reference in others:
+        show(
+            f"zeroth-val harmonized vs {reference}",
+            compare("zeroth-val", candidate, reference, harmonized=True),
+        )
+        show(f"fleurs-ko-val vs {reference}", compare("fleurs-ko-val", candidate, reference))
+    for label, flag in (("reference has digit", True), ("reference has none", False)):
+        for reference in (n, untrained):
+            part = compare("fleurs-ko-val", candidate, reference, reference_digits=flag)
+            if part["utterances"]:
+                show(f"fleurs-ko-val {label} vs {reference}", part)
+    for reference in (n, untrained):
+        agnostic = compare("fleurs-ko-val", candidate, reference, scoring="agnostic")
+        show(f"fleurs-ko-val agnostic vs {reference}", agnostic)
+        show(f"fleurs-en-val (WER) vs {reference}", compare("fleurs-en-val", candidate, reference))
+    phone = "zeroth-val@telephone"
+    if all((REPORTS / r / f"{phone}.json").exists() for r in (candidate, untrained)):
+        show(f"{phone} harmonized vs {untrained}", compare(phone, candidate, untrained, harmonized=True))
+    else:
+        print(f"{phone}: not measured")
+    fixed = f"{candidate}-fixed"
+    print(f"official repetition fix ({fixed} vs {candidate}):")
+    for label, set_name, scoring in (
+        ("zeroth-val harmonized", "zeroth-val", "harmonized"),
+        ("fleurs-ko-val", "fleurs-ko-val", None),
+        ("fleurs-en-val (WER)", "fleurs-en-val", None),
+    ):
+        show(f"  {label}", compare(set_name, fixed, candidate, scoring=scoring))
+    print("loops (more edits than reference length):")
+    for set_name, scoring in STAGE8_SETS.items():
+        loops(set_name, [n, untrained, candidate], scoring=scoring)
+    print("summaries (hypotheses with a digit, token limit reached, non-finite logits):")
+    for set_name in STAGE8_SETS:
+        for report in (untrained, candidate):
+            summary = _summary(report, set_name)
+            counts = [
+                summary.get(k) for k in ("hypotheses_with_digit", "hit_token_limit", "nonfinite_utterances")
+            ]
+            print(f"  {set_name} {report}: {counts}")
+    zeroth_ok = zeroth["delta_interval"][1] < STAGE10_ZEROTH_MAX_ABOVE_N
+    fleurs_ok = fleurs["delta_interval"][1] < 0
+    forgetting_high = forgetting["delta_interval"][1]
+    within = forgetting_high <= STAGE10_FORGETTING_MAX
+    limit = STAGE10_ZEROTH_MAX_ABOVE_N * 100
+    print(
+        f"1. zeroth-val 맞춘 CER {candidate} - {n} 상한 < +{limit:.1f}%p: {'만족' if zeroth_ok else '불만족'}"
+    )
+    print(f"2. fleurs-ko-val CER {candidate} - {n} 상한 < 0: {'만족' if fleurs_ok else '불만족'}")
+    print(
+        f"보고: fleurs-ko-val CER {candidate} - {untrained} 상한 {forgetting_high * 100:+.2f}%p"
+        f", 망각 상한 +{STAGE10_FORGETTING_MAX * 100:.1f}%p {'안' if within else '밖'}"
+    )
+    label = verdict10_label(zeroth_ok, fleurs_ok)
+    print(f"판정: {label}")
+    return label
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -589,6 +820,22 @@ def main() -> None:
     ver9.add_argument("--candidate", required=True, help="raw output; <candidate>-fixed is reported")
     ver9.add_argument("--baseline", required=True)
     ver9.add_argument("--others", nargs="*", default=[], help="fine-tuned models shown next to it")
+    gate_a = commands.add_parser("gate10")
+    gate_a.add_argument("--file", required=True, help="raw report file of the fresh-adapter run")
+    gate_a.add_argument("--recorded", required=True, help="the stage 9 fp16 check file")
+    smoke = commands.add_parser("smoke10")
+    smoke.add_argument("--steps", required=True, help="outputs/<smoke run>/steps.jsonl")
+    smoke.add_argument("--mem", required=True, help="the memwatch CSV of the smoke run")
+    smoke.add_argument("--expected-steps", type=int, default=50)
+    pick = commands.add_parser("pick10")
+    pick.add_argument(
+        "--files", nargs="+", required=True, help="zeroth-val500 raw report files, in step order"
+    )
+    ver10 = commands.add_parser("verdict10")
+    ver10.add_argument("--candidate", required=True, help="raw output; <candidate>-fixed is reported")
+    ver10.add_argument("--n", required=True, help="the model it would replace")
+    ver10.add_argument("--untrained", required=True, help="the base model before training")
+    ver10.add_argument("--others", nargs="*", default=[])
     args = parser.parse_args()
 
     if args.command == "digits":
@@ -609,6 +856,14 @@ def main() -> None:
         gate9(args.fp16, args.fp32)
     elif args.command == "verdict9":
         verdict9(args.candidate, args.baseline, args.others)
+    elif args.command == "gate10":
+        gate10(args.file, args.recorded)
+    elif args.command == "smoke10":
+        smoke10(args.steps, args.mem, args.expected_steps)
+    elif args.command == "pick10":
+        pick10(args.files)
+    elif args.command == "verdict10":
+        verdict10(args.candidate, args.n, args.untrained, args.others)
     else:
         table(
             args.set_name, args.reports, args.baseline, not args.no_digit_split, args.harmonized, args.scoring

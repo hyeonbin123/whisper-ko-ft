@@ -4,6 +4,8 @@ Usage:
     uv run python -m whisper_ko_ft.evaluate_qwen --set zeroth-val
     uv run python -m whisper_ko_ft.evaluate_qwen --model Qwen/Qwen3-ASR-0.6B-hf --set zeroth-val
     uv run python -m whisper_ko_ft.evaluate_qwen --set zeroth-val500 --limit 100 --out <file>  (fp16 check)
+    uv run python -m whisper_ko_ft.evaluate_qwen --adapter outputs/qwen-qn/checkpoint-1000 --name <name>
+        --set zeroth-val [--channel telephone]  (stage 10)
 
 Decoding is fixed in docs/experiments.md (9단계): the model's own Transformers classes (transformers >= 5.13)
 at a pinned revision, fp16 (or fp32), SDPA attention, greedy, the language forced through the official prompt
@@ -18,11 +20,17 @@ reports/<name>-fixed/. The Whisper harness has no such fix, so the verdict uses 
 Rows also keep the number of generated tokens, whether the decoding ran into the token limit, and whether any
 logits of that utterance were not finite (an fp16 overflow). A CPU run is never a measurement: it needs --out
 (the fp32 half of the fp16 check) or --no-report.
+
+Stage 10: --adapter merges a LoRA adapter (`train_qwen`) into the fp16 base before decoding, as `evaluate`
+does for Whisper; it needs --name, and the reports record the adapter folder and the SHA-256 of its weights.
+--out also takes the checkpoint runs on zeroth-val500. --channel telephone passes the audio through the
+telephone channel of stage 4 before the first 30 seconds are kept, and the reports go to <set>@telephone.json.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import time
 from datetime import UTC, datetime
@@ -32,6 +40,7 @@ import numpy as np
 import torch
 import transformers
 
+from whisper_ko_ft.channel import CHANNELS
 from whisper_ko_ft.evaluate import (
     MAX_NEW_TOKENS,
     WINDOW_SECONDS,
@@ -70,6 +79,11 @@ def raw_transcription(text: str) -> str:
 def first_window(audio: np.ndarray) -> np.ndarray:
     """The first 30 seconds: what the Whisper harness hears of a longer utterance."""
     return audio[:WINDOW_SAMPLES] if audio.shape[0] > WINDOW_SAMPLES else audio
+
+
+def prepare_audio(audio: np.ndarray, channel: str | None) -> np.ndarray:
+    """The channel (if any) on the whole utterance, then the first 30 seconds, as the Whisper harness does."""
+    return first_window(CHANNELS[channel](audio) if channel else audio)
 
 
 def generated_lengths(generated: torch.Tensor, eos_token_id) -> list[tuple[int, bool]]:
@@ -159,13 +173,30 @@ def report_payloads(rows: list[dict], language: str, meta: dict) -> dict[str, di
     return payloads
 
 
-def load_model(model_id: str, revision: str, dtype, device: str):
+def merge_adapter(model, adapter: str):
+    """The base model with a LoRA adapter merged into its weights (in the base model's dtype)."""
+    from peft import PeftModel
+
+    return PeftModel.from_pretrained(model, adapter).merge_and_unload()
+
+
+def adapter_info(adapter: str | None) -> dict:
+    """The adapter folder and the SHA-256 of its weights, for the report summary."""
+    if adapter is None:
+        return {"adapter": None, "adapter_sha256": None}
+    weights = (Path(adapter) / "adapter_model.safetensors").read_bytes()
+    return {"adapter": Path(adapter).as_posix(), "adapter_sha256": hashlib.sha256(weights).hexdigest()}
+
+
+def load_model(model_id: str, revision: str, dtype, device: str, adapter: str | None = None):
     from transformers import AutoProcessor, Qwen3ASRForConditionalGeneration
 
     processor = AutoProcessor.from_pretrained(model_id, revision=revision)
     model = Qwen3ASRForConditionalGeneration.from_pretrained(
         model_id, revision=revision, dtype=dtype, attn_implementation="sdpa"
     )
+    if adapter:
+        model = merge_adapter(model, adapter)
     return model.to(device).eval(), processor
 
 
@@ -175,6 +206,12 @@ def main() -> None:
     parser.add_argument("--revision", help="defaults to the pinned revision of a registered model")
     parser.add_argument("--set", required=True, dest="set_name")
     parser.add_argument("--name", help="report name of the raw output; the fixed one goes to <name>-fixed")
+    parser.add_argument(
+        "--adapter", help="LoRA adapter folder to merge into --model (stage 10; needs --name)"
+    )
+    parser.add_argument(
+        "--channel", choices=list(CHANNELS), help="pass the audio through a channel simulation"
+    )
     parser.add_argument("--precision", choices=list(DTYPES), default="fp16")
     parser.add_argument("--device", choices=["cuda", "cpu"], default="cuda")
     parser.add_argument("--batch-size", type=int, default=16)
@@ -187,6 +224,8 @@ def main() -> None:
 
     if args.set_name.endswith("-test") and not args.allow_test:
         parser.error("test sets are measured once per stage; pass --allow-test when the stage is done")
+    if args.adapter and not args.name:
+        parser.error("--adapter needs --name (the default is the base model's report folder)")
     revision, name = REGISTERED.get(args.model, (args.revision, args.name))
     revision, name = args.revision or revision, args.name or name
     if not revision or not name:
@@ -200,8 +239,9 @@ def main() -> None:
     elif args.no_report:
         targets = {}
     else:
-        targets = {"raw": REPORTS / name / f"{args.set_name}.json"}
-        targets["fixed"] = REPORTS / f"{name}-fixed" / f"{args.set_name}.json"
+        suffix = f"@{args.channel}" if args.channel else ""
+        targets = {"raw": REPORTS / name / f"{args.set_name}{suffix}.json"}
+        targets["fixed"] = REPORTS / f"{name}-fixed" / f"{args.set_name}{suffix}.json"
     for target in targets.values():
         if target.exists() and not args.overwrite:
             parser.error(f"{target} exists; pass --overwrite to measure it again")
@@ -211,7 +251,8 @@ def main() -> None:
     if args.limit:
         utterances = utterances[: args.limit]
     dtype, cuda = DTYPES[args.precision], args.device == "cuda"
-    model, processor = load_model(args.model, revision, dtype, args.device)
+    adapter = adapter_info(args.adapter)  # read before decoding, like the commit
+    model, processor = load_model(args.model, revision, dtype, args.device, args.adapter)
     watch = NonFiniteWatch(model.lm_head)
     stores: dict[str, AudioStore] = {}
 
@@ -223,7 +264,10 @@ def main() -> None:
     for begin in range(0, len(utterances), args.batch_size):
         batch_started = time.perf_counter()
         batch = utterances[begin : begin + args.batch_size]
-        audio = [first_window(stores.setdefault(u.store, AudioStore(u.store)).read(u)) for u in batch]
+        audio = [
+            prepare_audio(stores.setdefault(u.store, AudioStore(u.store)).read(u), args.channel)
+            for u in batch
+        ]
         outputs = transcribe(model, processor, audio, language, args.device, dtype, watch)
         batch_seconds.append(time.perf_counter() - batch_started)  # decoding the text waits for the GPU
         for utterance, out in zip(batch, outputs, strict=True):
@@ -246,8 +290,10 @@ def main() -> None:
     meta = {
         "model": args.model,
         "revision": revision,
+        **adapter,
         "engine": "transformers qwen3_asr",
         "set": args.set_name,
+        "channel": args.channel,
         "language": language,
         "precision": args.precision,
         "device": args.device,

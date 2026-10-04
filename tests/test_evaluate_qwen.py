@@ -1,11 +1,13 @@
 """Stage 9: the Qwen3-ASR harness (docs/experiments.md, 9단계). No weights: stubs and tiny modules."""
 
+import hashlib
 import json
 import sys
 
 import numpy as np
 import pytest
 import torch
+from tiny_qwen import tiny_model
 from transformers.models.qwen3_asr.processing_qwen3_asr import _parse_single_output
 
 from whisper_ko_ft import evaluate_qwen
@@ -229,3 +231,79 @@ def test_registered_models_have_a_pinned_revision_and_a_report_name(reports, mon
     with pytest.raises(Reached):
         other = ["--model", "someone/other-asr", "--revision", "abc", "--name", "x"]
         run(monkeypatch, *other, "--set", "zeroth-val")
+
+
+# --- stage 10: a LoRA adapter merged into the base, and the telephone channel ---
+
+
+def test_an_adapter_needs_a_name(reports, monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        run(monkeypatch, "--set", "zeroth-val", "--adapter", "outputs/qwen-qn/checkpoint-500")
+    assert "--name" in capsys.readouterr().err
+    with pytest.raises(Reached):
+        run(monkeypatch, "--set", "zeroth-val", "--adapter", "a", "--name", "qwen3-asr-1.7b-qn")
+
+
+def test_channel_reports_are_written_as_set_at_channel(reports, monkeypatch, capsys):
+    for name in ("qwen3-asr-1.7b", "qwen3-asr-1.7b-fixed"):
+        (reports / name).mkdir()
+        (reports / name / "zeroth-val@telephone.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(Reached):  # the clean-audio reports are other files
+        run(monkeypatch, "--set", "zeroth-val")
+    with pytest.raises(SystemExit):
+        run(monkeypatch, "--set", "zeroth-val", "--channel", "telephone")
+    assert "zeroth-val@telephone.json exists" in capsys.readouterr().err
+
+
+def test_the_channel_is_applied_before_the_first_30_seconds_are_kept():
+    rng = np.random.default_rng(0)
+    long = (rng.standard_normal(31 * SAMPLE_RATE) * 0.1).astype(np.float32)
+    clean = evaluate_qwen.prepare_audio(long, None)
+    phone = evaluate_qwen.prepare_audio(long, "telephone")
+    assert clean.shape == phone.shape == (30 * SAMPLE_RATE,)
+    assert np.array_equal(clean, long[: 30 * SAMPLE_RATE]) and not np.allclose(phone, clean)
+    assert np.array_equal(phone, evaluate_qwen.CHANNELS["telephone"](long)[: 30 * SAMPLE_RATE])
+
+
+def save_adapter(folder, train_b: bool):
+    from whisper_ko_ft.train_qwen import add_lora
+
+    model = add_lora(tiny_model(torch.float16))
+    if train_b:
+        with torch.no_grad():
+            for name, param in model.named_parameters():
+                if "lora_B" in name:
+                    param.fill_(0.01)
+    model.save_pretrained(str(folder))
+
+
+def test_merging_a_fresh_adapter_leaves_every_weight_as_it_was(tmp_path):
+    save_adapter(tmp_path / "fresh", train_b=False)
+    base = {k: v.clone() for k, v in tiny_model(torch.float16).state_dict().items()}
+    merged = evaluate_qwen.merge_adapter(tiny_model(torch.float16), str(tmp_path / "fresh"))
+    after = merged.state_dict()
+    assert type(merged).__name__ == "Qwen3ASRForConditionalGeneration"
+    assert after.keys() == base.keys()
+    assert all(torch.equal(after[k], base[k]) for k in base)
+
+
+def test_merging_a_trained_adapter_changes_the_targeted_weights_only(tmp_path):
+    save_adapter(tmp_path / "trained", train_b=True)
+    base = {k: v.clone() for k, v in tiny_model(torch.float16).state_dict().items()}
+    after = evaluate_qwen.merge_adapter(tiny_model(torch.float16), str(tmp_path / "trained")).state_dict()
+    changed = {k for k in base if not torch.equal(after[k], base[k])}
+    assert "model.language_model.layers.0.mlp.down_proj.weight" in changed
+    assert "model.audio_tower.layers.1.fc1.weight" in changed
+    assert not any(
+        "multi_modal_projector" in k or "lm_head" in k or "conv" in k or "norm" in k for k in changed
+    )
+    assert all(after[k].dtype == torch.float16 for k in after)
+
+
+def test_reports_name_the_adapter_and_its_weights(tmp_path):
+    save_adapter(tmp_path / "checkpoint-500", train_b=False)
+    info = evaluate_qwen.adapter_info(str(tmp_path / "checkpoint-500"))
+    weights = (tmp_path / "checkpoint-500" / "adapter_model.safetensors").read_bytes()
+    assert info["adapter"].endswith("checkpoint-500")
+    assert info["adapter_sha256"] == hashlib.sha256(weights).hexdigest()
+    assert evaluate_qwen.adapter_info(None) == {"adapter": None, "adapter_sha256": None}

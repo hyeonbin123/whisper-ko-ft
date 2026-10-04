@@ -423,3 +423,190 @@ def test_verdict9_on_reports(reports, capsys, fleurs_candidate, label):
     assert analyze.verdict9("cand", "turbo", ["n"]) == label
     out = capsys.readouterr().out
     assert "cand-fixed" in out and "zeroth-val harmonized" in out and "fleurs-en-val" in out
+
+
+# --- stage 10: LoRA on Qwen3-ASR ---
+
+
+def adapter_file(
+    path,
+    hypotheses,
+    adapter="outputs/qwen-qn-init/checkpoint-0",
+    precision="fp16",
+    limit=100,
+    set_name="zeroth-val500",
+    references=None,
+):
+    """A raw report written with --out: the B=0 check (limit 100) or a checkpoint on all of zeroth-val500."""
+    references = references or ["가" * 100] * len(hypotheses)
+    utterances = []
+    for n, (reference, hypothesis) in enumerate(zip(references, hypotheses, strict=True)):
+        scored = score(reference, hypothesis, "ko")
+        utterances.append(
+            {
+                "id": f"u{n}",
+                "reference": reference,
+                "hypothesis": hypothesis,
+                "edits": scored.edits,
+                "length": scored.length,
+                "nonfinite_logits": False,
+            }
+        )
+    summary = {"precision": precision, "device": "cuda", "set": set_name, "limit": limit, "adapter": adapter}
+    path.write_text(json.dumps({"summary": summary, "utterances": utterances}), encoding="utf-8")
+    return str(path)
+
+
+def test_gate10_passes_only_when_every_hypothesis_is_reproduced(tmp_path):
+    recorded = adapter_file(tmp_path / "fp16.json", ["가" * 100, "가" * 99], adapter=None)
+    same = adapter_file(tmp_path / "same.json", ["가" * 100, "가" * 99])
+    one_off = adapter_file(tmp_path / "off.json", ["가" * 100, "가" * 98])
+    assert analyze.gate10(same, recorded)
+    assert not analyze.gate10(one_off, recorded)
+
+
+def test_gate10_refuses_files_it_cannot_pair(tmp_path):
+    recorded = adapter_file(tmp_path / "fp16.json", ["가"] * 3, adapter=None)
+    with pytest.raises(SystemExit, match="adapter"):
+        analyze.gate10(recorded, recorded)
+    with pytest.raises(SystemExit, match="utterances"):
+        analyze.gate10(adapter_file(tmp_path / "short.json", ["가"] * 2), recorded)
+    with pytest.raises(SystemExit, match="precision"):
+        analyze.gate10(adapter_file(tmp_path / "fp32.json", ["가"] * 3, precision="fp32"), recorded)
+
+
+def test_pick10_takes_the_lowest_harmonized_cer_and_the_earlier_step_on_a_tie(tmp_path):
+    references = ["이천 십 팔 년 가나다라마바사"] * 2
+    files = [
+        adapter_file(
+            tmp_path / "s500.json",
+            ["2018년 가나다라마바", "2018년 가나다라마바사"],
+            adapter="outputs/qwen-qn/checkpoint-500",
+            limit=None,
+            references=references,
+        ),
+        adapter_file(
+            tmp_path / "s1000.json",
+            ["2018년 가나다라마바사"] * 2,  # digits: right after harmonize
+            adapter="outputs/qwen-qn/checkpoint-1000",
+            limit=None,
+            references=references,
+        ),
+        adapter_file(
+            tmp_path / "s1500.json",
+            ["이천 십 팔 년 가나다라마바사"] * 2,
+            adapter="outputs/qwen-qn/checkpoint-1500",
+            limit=None,
+            references=references,
+        ),
+    ]
+    assert analyze.pick10(files) == files[1]  # 1,000 and 1,500 tie at 0; the earlier step wins
+    with pytest.raises(SystemExit, match="limit"):
+        analyze.pick10([adapter_file(tmp_path / "limited.json", ["가"], limit=1)])
+
+
+def steps_file(path, entries):
+    path.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
+    return str(path)
+
+
+def smoke_steps(path, count=50, seconds=6.0, skipped=(), loss=None, peak=5000, longest_at=25, extra=()):
+    entries = [{"event": "start", "first_step": 1}]
+    for step in range(1, count + 1):
+        entries.append(
+            {
+                "step": step,
+                "loss": loss if loss and step == 30 else 0.5,
+                "skipped": step in skipped,
+                "seconds": 30.0 if step == longest_at else seconds,
+                "longest": step == longest_at,
+                "peak_allocated_mb": peak + (500 if step == longest_at else 0),
+            }
+        )
+    return steps_file(path, [*entries, *extra])
+
+
+def mem_file(path, shared=230, smi=9000):
+    rows = ["time,shared_mb,dedicated_mb,smi_used_mb,smi_util,paused"]
+    rows += [f"12:00:0{n},{shared if n == 5 else 230},8000,{smi if n == 5 else 8800},90,0" for n in range(10)]
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def test_smoke10_passes_a_clean_run_and_keeps_1500_steps(tmp_path):
+    result = analyze.smoke10(smoke_steps(tmp_path / "s.jsonl"), mem_file(tmp_path / "m.csv"))
+    assert result["passed"] and result["max_steps"] == 1500
+    assert result["median_step_seconds"] == 6.0  # the longest step is left out
+
+
+@pytest.mark.parametrize(
+    ("steps", "mem", "failed"),
+    [
+        ({"loss": float("nan")}, {}, "1."),
+        ({"skipped": (1, 2, 3, 21, 22, 23, 24, 25, 26)}, {}, "2."),  # six after step 20
+        ({"longest_at": None}, {}, "3."),
+        ({"count": 49}, {}, "4."),
+        ({}, {"shared": 3400}, "5."),
+        ({}, {"smi": 10752}, "6."),
+        ({"peak": 6700}, {}, "7."),  # 7,200 MiB on the longest step
+    ],
+)
+def test_smoke10_fails_each_gate(tmp_path, capsys, steps, mem, failed):
+    result = analyze.smoke10(smoke_steps(tmp_path / "s.jsonl", **steps), mem_file(tmp_path / "m.csv", **mem))
+    assert not result["passed"]
+    assert any(line.startswith(failed) and "불만족" in line for line in capsys.readouterr().out.splitlines())
+
+
+def test_smoke10_allows_skips_in_the_first_20_steps_and_cuts_slow_runs_to_1000_steps(tmp_path):
+    result = analyze.smoke10(
+        smoke_steps(tmp_path / "s.jsonl", skipped=range(1, 21), seconds=20.0), mem_file(tmp_path / "m.csv")
+    )
+    assert result["passed"] and result["max_steps"] == 1000  # 20 s x 1,500 = 8.3 hours
+
+
+@pytest.mark.parametrize(
+    ("zeroth_ok", "fleurs_ok", "label"),
+    [
+        (True, True, "정확도 기준으로 N을 대신하는 범용 모델이다"),
+        (True, False, "N을 유지한다 (다른 도메인 이득 없음)"),
+        (False, True, "다른 도메인용 기준 모델로만 쓴다"),
+        (False, False, "N을 유지한다"),
+    ],
+)
+def test_verdict10_label(zeroth_ok, fleurs_ok, label):
+    assert analyze.verdict10_label(zeroth_ok, fleurs_ok) == label
+
+
+def prepare_stage10(reports, zeroth_candidate, fleurs_candidate):
+    """Base turbo, N, the untrained Qwen and the candidate (raw and fixed) on the validation sets."""
+    (reports / "digit_utterances").mkdir()
+    (reports / "digit_utterances" / "zeroth-val.json").write_text(
+        json.dumps({"ids": ["u0"]}), encoding="utf-8"
+    )
+    zeroth = {"turbo": [4] * 4, "n": [1] * 4, "qwen": [3] * 4, "cand": zeroth_candidate}
+    fleurs = {"turbo": [5] * 4, "n": [6] * 4, "qwen": [4] * 4, "cand": fleurs_candidate}
+    for name in zeroth:
+        names = (name, f"{name}-fixed") if name in ("cand", "qwen") else (name,)
+        for report in names:
+            write_report(reports, report, "zeroth-val", loop_rows(zeroth[name]))
+            write_report(reports, report, "fleurs-ko-val", fleurs_rows(fleurs[name]))
+            write_report(reports, report, "fleurs-en-val", fleurs_rows([1, 1]))
+    for name in ("qwen", "cand"):
+        write_report(reports, name, "zeroth-val@telephone", loop_rows([5] * 4))
+
+
+@pytest.mark.parametrize(
+    ("zeroth_candidate", "fleurs_candidate", "label", "forgetting"),
+    [
+        ([1, 1, 1, 1], [3, 3, 3, 3], "정확도 기준으로 N을 대신하는 범용 모델이다", "안"),
+        ([1, 1, 1, 1], [6, 6, 6, 6], "N을 유지한다 (다른 도메인 이득 없음)", "밖"),
+        ([2, 2, 2, 2], [3, 3, 3, 3], "다른 도메인용 기준 모델로만 쓴다", "안"),
+        ([2, 2, 2, 2], [7, 7, 7, 7], "N을 유지한다", "밖"),
+    ],
+)
+def test_verdict10_on_reports(reports, capsys, zeroth_candidate, fleurs_candidate, label, forgetting):
+    prepare_stage10(reports, zeroth_candidate, fleurs_candidate)
+    assert analyze.verdict10("cand", "n", "qwen", ["turbo"]) == label
+    out = capsys.readouterr().out
+    assert f"망각 상한 +1.0%p {forgetting}" in out
+    assert "zeroth-val@telephone" in out and "cand-fixed" in out and "fleurs-en-val" in out
