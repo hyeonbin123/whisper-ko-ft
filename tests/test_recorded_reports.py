@@ -66,6 +66,17 @@ def test_stored_scores_are_reproduced(path):
         ("qwen3-asr-1.7b-fixed", "zeroth-val", 3231, 93621),  # 3.45%
         ("qwen3-asr-1.7b", "zeroth-test", 817, 19272),  # 4.24%
         ("qwen3-asr-1.7b-fixed", "zeroth-test", 817, 19272),  # 4.24%
+        # 2026-10-05, stage 10: Qwen3-ASR-1.7B + LoRA (QN, checkpoint 1500), raw and the official repetition
+        # fix (no change); the telephone channel of QN and of the untrained model; the checkpoint choice
+        ("qwen3-asr-1.7b-qn", "zeroth-val", 864, 93621),  # 0.92%
+        ("qwen3-asr-1.7b-qn-fixed", "zeroth-val", 864, 93621),  # 0.92%
+        ("qwen3-asr-1.7b-qn", "zeroth-test", 293, 19272),  # 1.52%
+        ("qwen3-asr-1.7b-qn-fixed", "zeroth-test", 293, 19272),  # 1.52%
+        ("qwen3-asr-1.7b-qn", "zeroth-val@telephone", 1254, 93621),  # 1.34%
+        ("qwen3-asr-1.7b", "zeroth-val@telephone", 3566, 93621),  # 3.81%
+        ("qwen3-asr-1.7b-qn-steps", "zeroth-val500-step500", 552, 18321),  # 3.01%
+        ("qwen3-asr-1.7b-qn-steps", "zeroth-val500-step1000", 281, 18321),  # 1.53%
+        ("qwen3-asr-1.7b-qn-steps", "zeroth-val500-step1500", 213, 18321),  # 1.16%
     ],
 )
 def test_recorded_harmonized_totals(report, set_name, edits, length):
