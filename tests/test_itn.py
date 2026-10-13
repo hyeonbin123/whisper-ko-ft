@@ -1,8 +1,17 @@
+# [테스트 묶음] itn.to_digits(6단계 숫자 변환)의 규칙을 실제 Zeroth 정답과 같은 꼴의 예문으로 고정한다. 바꿔야
+# 하는 경우(단위 앞의 숫자)와 그대로 둬야 하는 경우(보통 낱말과 겹치는 숫자 낱말)를 나눠 확인한다.
+# [왜 중요한가] 이 변환은 학습 정답(N, N2, QN)과 맞춘 CER 채점에 함께 쓰인다. 규칙이 너무 넓으면 '이 일은'처럼
+# 보통 문장을 망가뜨리고, 너무 좁으면 표기 차이가 남는다. 규칙을 고칠 때 이전 동작이 깨지지 않게 막는다.
+
 import pytest
 
 from whisper_ko_ft.itn import to_digits
 
 
+# 단위 앞의 숫자가 아라비아 숫자로 바뀌는 경우들: 연도, 달(시 월 → 10월), 날짜, 자리가 내려가는지로 숫자와
+# 단위 '일'을 가르는 경우('삼십 일 일' → '31일', '십 이 일 일부' → '12일 일부'), 퍼센트, 도, 만 단위('1만
+# 7천여'), 학년, 고유어 수사('다섯 번', '스물 한 명'). '달러대'처럼 알려진 조사·접미사가 아닌 것이 붙으면
+# 그대로 둔다.
 @pytest.mark.parametrize(
     ("spelled", "digits"),
     [
@@ -21,10 +30,14 @@ from whisper_ko_ft.itn import to_digits
         ("스물 한 명이 모였다", "21명이 모였다"),
     ],
 )
+# 각 예문이 기대한 문장과 글자까지 같아야 한다.
 def test_numbers_before_a_unit_become_digits(spelled, digits):
     assert to_digits(spelled) == digits
 
 
+# 숫자로 바꾸면 안 되는 보통 문장들: '이 일은'(이것), '한 관계자', '사 측', '구 대표', '세 부담', 단위처럼
+# 시작만 하는 낱말('오 일본'), 단위가 빠진 숫자. 흔한 낱말과 겹치는 한 글자 숫자는 좁은 단위 앞에서만 바꾼다는
+# 규칙을 확인한다.
 @pytest.mark.parametrize(
     "text",
     [
@@ -36,9 +49,11 @@ def test_numbers_before_a_unit_become_digits(spelled, digits):
         "금요일 대구의 낮 최고기온은 이십 육 로 예보됐습니다",  # no unit in the data: left as it is
     ],
 )
+# 입력과 출력이 같아야 한다.
 def test_ordinary_words_are_left_alone(text):
     assert to_digits(text) == text
 
 
+# 이미 아라비아 숫자인 글은 그대로다. 출력 후처리(8단계)를 숫자로 적는 모델의 가설에 적용해도 망가지지 않는다.
 def test_text_with_digits_already_is_unchanged():
     assert to_digits("2018년 5월 3일") == "2018년 5월 3일"

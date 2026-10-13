@@ -1,8 +1,15 @@
+# [테스트 묶음] latin.letters_to_latin(8단계 보조 후보, 한글 글자 이름 → 라틴 글자)의 규칙을 예문으로
+# 고정한다.
+# [왜 중요한가] 사전 없이 규칙만으로 바꾸므로 보통 낱말을 약어로 잘못 바꾸기 쉽다. 바꿔야 하는 경우와 그대로
+# 둬야 하는 경우를 함께 고정해 규칙이 넓어지거나 좁아지는 것을 막는다.
+
 import pytest
 
 from whisper_ko_ft.latin import letters_to_latin
 
 
+# 바꾸는 경우: 붙여 쓴 약어('에이아이'), 조사가 붙은 약어('유에스오씨는'), 띄어 쓴 글자 이름 묶음과 마지막
+# 토큰의 조사('에프 에이에이의'), 세 토큰 묶음('에이치 아이 브이'), 문장부호가 붙은 경우('에이아이.' → 'AI.').
 @pytest.mark.parametrize(
     ("spelled", "latin"),
     [
@@ -15,10 +22,13 @@ from whisper_ko_ft.latin import letters_to_latin
         ("에이아이.", "AI."),  # punctuation stays where it was
     ],
 )
+# 각 예문이 기대한 문장과 같아야 한다.
 def test_spelled_letters_become_latin(spelled, latin):
     assert letters_to_latin(spelled) == latin
 
 
+# 그대로 두는 경우: 흔한 음절과 겹치는 이름으로만 된 낱말('비디오', '오디오', '이유', '오이', '티비'), 글자
+# 하나뿐인 경우('아이가', '에스 자', '에이 그건'), 글자 이름으로만 이루어지지 않은 낱말('케이팝').
 @pytest.mark.parametrize(
     "text",
     [
@@ -34,10 +44,12 @@ def test_spelled_letters_become_latin(spelled, latin):
         "케이팝 공연",  # not made of letter names only
     ],
 )
+# 입력과 출력이 같아야 한다.
 def test_ordinary_words_are_left_alone(text):
     assert letters_to_latin(text) == text
 
 
+# 글자 이름이 없는 글과 빈 문자열은 그대로다.
 def test_text_without_letter_names_is_unchanged():
     assert letters_to_latin("2018년 5월 3일 서울") == "2018년 5월 3일 서울"
     assert letters_to_latin("") == ""

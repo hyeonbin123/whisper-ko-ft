@@ -1,3 +1,11 @@
+# [테스트 묶음] analyze.py의 리포트 읽기 검사, 채점 방식, 단계별 판정 규칙을 작은 가짜 리포트로 확인한다. 실제
+# reports/ 대신 임시 폴더에 몇 발화짜리 리포트를 써 두고 판정 함수가 규칙대로 이름을 붙이는지 본다.
+# [왜 중요한가] 판정 규칙은 재기 전에 문서에 적고 커밋한 약속이다. 코드가 그 약속과 다르면(예: 3단계 구간
+# 조건을 빠뜨린 버그, 커밋 037ad21에서 고침) 결과를 본 뒤 기준이 바뀐 것과 같은 일이 된다. 판정 표의 모든
+# 칸(만족/불만족 조합)과 경계값, 판정하지 않는 경우를 테스트로 고정한다.
+# [구성] 공통(load_rows 검사, 숫자 발화 목록, compare) → 2·3단계 verdict → 6단계 맞춘 CER과 verdict6 →
+# 되풀이와 8단계 채점·verdict8·changes·itn8 → 9단계 gate9·verdict9 → 10단계 gate10·pick10·smoke10·verdict10.
+
 import json
 
 import pytest
@@ -6,6 +14,7 @@ from whisper_ko_ft import analyze
 from whisper_ko_ft.metrics import score
 
 
+# 임시 리포트 폴더에 <이름>/<묶음>.json을 쓴다(요약은 비워 둔다).
 def write_report(root, name, set_name, rows):
     folder = root / name
     folder.mkdir(parents=True, exist_ok=True)
@@ -14,6 +23,8 @@ def write_report(root, name, set_name, rows):
     )
 
 
+# 발화별 편집 수만 정한 가짜 행 목록. 정답 길이는 모두 같고, digit_flags로 가설의 숫자 여부(has_digit)를
+# 정한다.
 def rows(edits, digit_flags=None, length=10):
     flags = digit_flags or [False] * len(edits)
     return [
@@ -22,18 +33,22 @@ def rows(edits, digit_flags=None, length=10):
     ]
 
 
+# analyze.REPORTS를 임시 폴더로 바꾸는 fixture. 실제 커밋된 리포트를 건드리지 않는다.
 @pytest.fixture
 def reports(tmp_path, monkeypatch):
     monkeypatch.setattr(analyze, "REPORTS", tmp_path)
     return tmp_path
 
 
+# 발화 ID가 겹치는 리포트는 거부한다. 1단계에서 FLEURS의 같은 문장 ID 때문에 표에서 행이 빠졌던 오류를 다시
+# 만들지 않게 한다.
 def test_duplicate_ids_are_refused(reports):
     write_report(reports, "m", "fleurs-ko-val", [{"id": "1", "edits": 0, "length": 5}] * 2)
     with pytest.raises(SystemExit, match="not unique"):
         analyze.load_rows("m", "fleurs-ko-val")
 
 
+# --limit으로 일부만 잰 리포트는 판정에 쓰지 않는다(커밋 a29a975).
 def test_a_limit_run_is_refused(reports):
     folder = reports / "m"
     folder.mkdir()
@@ -44,6 +59,8 @@ def test_a_limit_run_is_refused(reports):
         analyze.load_rows("m", "zeroth-val")
 
 
+# 숫자 발화 목록은 기본 모델 두 개 중 하나라도 가설에 숫자가 있는 발화의 합집합이고, 채널 묶음(@telephone)도
+# 같은 목록을 쓰며, 한 번 정한 목록은 --force 없이 다시 쓰지 않는다.
 def test_digit_list_is_the_union_of_both_base_models_and_is_not_overwritten(reports):
     write_report(reports, "whisper-small", "zeroth-val", rows([1, 1, 1], [True, False, False]))
     write_report(reports, "whisper-large-v3-turbo", "zeroth-val", rows([1, 1, 1], [False, True, False]))
@@ -56,6 +73,8 @@ def test_digit_list_is_the_union_of_both_base_models_and_is_not_overwritten(repo
         analyze.write_digits("zeroth-val", force=False)
 
 
+# 2·3단계 판정용 리포트: 기준선 small(첫 발화만 숫자 발화), 후보, FLEURS 한국어 두 모델. 숫자 발화 목록도
+# 만든다.
 def prepare_verdict(reports, zeroth_candidate, fleurs_candidate):
     digits = [True, False, False, False]
     write_report(reports, "whisper-small", "zeroth-val", rows([4, 2, 2, 2], digits))
@@ -66,22 +85,27 @@ def prepare_verdict(reports, zeroth_candidate, fleurs_candidate):
     write_report(reports, "cand", "fleurs-ko-val", rows(fleurs_candidate, length=100))
 
 
+# 같은 도메인에서 크게 좋아지고(전체·숫자 발화 제외 모두) 다른 도메인 악화가 1.0%p 안이면 '범용 개선'.
 def test_verdict_general_improvement(reports):
     prepare_verdict(reports, zeroth_candidate=[1, 1, 1, 1], fleurs_candidate=[1, 2])  # +0.5%p elsewhere
     assert analyze.verdict("whisper-small", "cand") == "범용 개선"
 
 
+# 같은 도메인은 좋아졌지만 FLEURS 한국어가 1.5%p 나빠지면 '도메인 전용'(2·3단계의 실제 판정과 같은 칸).
 def test_verdict_domain_only_when_the_other_domain_gets_worse(reports):
     prepare_verdict(reports, zeroth_candidate=[1, 1, 1, 1], fleurs_candidate=[3, 2])  # +1.5%p elsewhere
     assert analyze.verdict("whisper-small", "cand") == "도메인 전용"
 
 
+# 전체로는 좋아져도 이득이 모두 숫자 발화(표기)에서 나오면 '효과 없음'. 숫자 발화 제외 조건이 있는 이유다.
 def test_verdict_no_effect_when_the_gain_is_only_digit_notation(reports):
     # Overall -40%, but every gain is in the digit utterance: the rest is unchanged.
     prepare_verdict(reports, zeroth_candidate=[0, 2, 2, 2], fleurs_candidate=[1, 1])
     assert analyze.verdict("whisper-small", "cand") == "효과 없음"
 
 
+# 3단계 구간 조건: 숫자 발화 제외의 상대 변화가 기준을 넘어도 짝지은 구간이 0을 포함하면 개선이 아니다.
+# require_interval=False(2단계 규칙)에서는 같은 데이터가 '범용 개선'이 된다.
 def test_verdict_needs_the_no_digit_interval_to_exclude_zero(reports):
     # No digits: relative -16.7%, but one utterance gets worse, so the paired interval includes 0.
     prepare_verdict(reports, zeroth_candidate=[0, 0, 2, 3], fleurs_candidate=[1, 1])
@@ -89,6 +113,8 @@ def test_verdict_needs_the_no_digit_interval_to_exclude_zero(reports):
     assert analyze.verdict("whisper-small", "cand", require_interval=False) == "범용 개선"  # stage 2 rules
 
 
+# FLEURS를 정답에 숫자가 있는 발화와 없는 발화로 나눠 비교할 수 있다. 악화가 숫자 있는 발화에만 있는
+# 경우(2단계에서 본 모양)를 그대로 보여 주는지.
 def test_compare_can_split_by_digits_in_the_reference(reports):
     base = [
         {"id": "a", "edits": 1, "length": 10, "reference": "1978년"},
@@ -108,6 +134,7 @@ def test_compare_can_split_by_digits_in_the_reference(reports):
     assert (without["utterances"], without["delta"]) == (1, 0.0)
 
 
+# 정답은 Zeroth식('이천 십 팔 년 오 월')이고 가설만 다른 행들. 저장된 편집 수는 일부러 9로 둔다.
 def notation_rows(hypotheses):
     return [
         {"id": f"u{n}", "edits": 9, "length": 9, "reference": "이천 십 팔 년 오 월", "hypothesis": h}
@@ -115,6 +142,8 @@ def notation_rows(hypotheses):
     ]
 
 
+# 맞춘 CER은 '2018년 5월'과 '이천 십 팔 년 오 월'을 같게 보아 둘 다 오류 0이다. 원래 채점(저장된 값)은 그대로
+# 남는다.
 def test_harmonized_scoring_ignores_the_notation_of_numbers(reports):
     write_report(reports, "cand", "zeroth-val", notation_rows(["2018년 5월", "이천 십 팔 년 오 월"]))
     loaded = analyze.load_rows("cand", "zeroth-val", harmonized=True)
@@ -122,6 +151,8 @@ def test_harmonized_scoring_ignores_the_notation_of_numbers(reports):
     assert analyze.load_rows("cand", "zeroth-val")["u0"]["edits"] == 9  # the stored score is untouched
 
 
+# 6단계 판정용 리포트. 맞춘 채점은 글을 다시 채점하므로 정답·가설 글 자체에 오류 수만큼 차이를 넣는다. 기준선
+# 10%, L2 2%, 후보는 인자로 정한다.
 def prepare_verdict6(reports, candidate_edits, fleurs_candidate):
     def spelled(edits):
         return [{**row, "reference": "문장", "hypothesis": "문장"} for row in rows(edits, length=100)]
@@ -140,21 +171,26 @@ def prepare_verdict6(reports, candidate_edits, fleurs_candidate):
     write_report(reports, "cand", "fleurs-ko-val", rows(fleurs_candidate, length=100))
 
 
+# 기준선보다 크게 낮고 L2와 같으며 다른 도메인 악화가 작으면 '범용으로 쓸 수 있다'(6단계의 실제 판정).
 def test_verdict6_general_when_both_rules_hold(reports):
     prepare_verdict6(reports, candidate_edits=[2, 2], fleurs_candidate=[1, 2])
     assert analyze.verdict6("base", "l2", "cand") == "표기를 바꿔 학습하면 범용으로 쓸 수 있다"
 
 
+# 다른 도메인 악화가 2%p면 '표기만으로는 해결되지 않는다'.
 def test_verdict6_notation_is_not_enough_when_the_other_domain_gets_worse(reports):
     prepare_verdict6(reports, candidate_edits=[2, 2], fleurs_candidate=[3, 3])
     assert analyze.verdict6("base", "l2", "cand") == "표기만으로는 해결되지 않는다"
 
 
+# L2보다 1.0%p 높으면(허용 0.3%p 초과) '같은 도메인의 이득을 잃는다'.
 def test_verdict6_gain_lost_when_clearly_above_the_previous_model(reports):
     prepare_verdict6(reports, candidate_edits=[3, 3], fleurs_candidate=[1, 1])  # +1.0%p above l2
     assert analyze.verdict6("base", "l2", "cand") == "표기를 바꾸면 같은 도메인의 이득을 잃는다"
 
 
+# 되풀이 발화는 '편집 수 > 정답 길이'로 센다. 숫자 표기만 다른 발화(b)는 정답 길이를 넘지 않아 되풀이가
+# 아니고, 맞춘 채점으로 다시 세도 되풀이는 a 하나다.
 def test_loops_counts_utterances_with_more_edits_than_reference_characters(reports, capsys):
     looped = "가나다" + "라니" * 40  # a repeated syllable pair, as in 105_003_0478
     utterances = [
@@ -169,6 +205,8 @@ def test_loops_counts_utterances_with_more_edits_than_reference_characters(repor
     assert "1 of 3" in capsys.readouterr().out
 
 
+# evaluate가 쓰는 것처럼 저장된 편집 수가 글의 원래 채점과 일치하는 행을 만든다(다시 채점한 값과 비교할 수
+# 있게).
 def scored_rows(pairs, **extra):
     """Rows whose stored edits are the original scoring of their texts, as evaluate writes them."""
     out = []
@@ -187,6 +225,8 @@ def scored_rows(pairs, **extra):
     return out
 
 
+# 출력 숫자 변환(itn)은 가설만 바꾼다. 숫자로 쓰인 FLEURS 정답에 대해 한글 숫자 가설은 오류 0이 되고, 정답이
+# 한글 숫자인 발화는 그대로 틀린다. itn-harmonized는 양쪽을 맞춰 둘 다 0이다.
 def test_output_itn_rewrites_the_hypothesis_only(reports):
     pairs = [
         ("1978년 5월에 열렸다", "천 구백 칠십 팔 년 오 월에 열렸다"),  # FLEURS writes digits
@@ -201,6 +241,9 @@ def test_output_itn_rewrites_the_hypothesis_only(reports):
     assert [row["edits"] for row in both.values()] == [0, 0]
 
 
+# 표기 무관 채점은 숫자와 '%'뿐 아니라 글자 이름('에프 에이에이' → FAA)까지 맞춰 오류 0이 된다. 맞춘
+# 채점만으로는 오류가 남고, itn-latin은 가설만 바꿔 오류를 줄인다. 저장된 가설 글은 어떤 채점에서도 바뀌지
+# 않는다.
 def test_notation_agnostic_scoring_also_reads_letter_names(reports):
     pairs = [("faa는 50%를 줄였다", "에프 에이에이는 오십 퍼센트를 줄였다")]
     write_report(reports, "m", "fleurs-ko-val", scored_rows(pairs))
@@ -211,18 +254,23 @@ def test_notation_agnostic_scoring_also_reads_letter_names(reports):
     assert latin["edits"] < analyze.load_rows("m", "fleurs-ko-val")["u0"]["edits"]
 
 
+# 한국어용 다시 채점을 영어 묶음에 주면 거부한다.
 def test_korean_rescoring_is_refused_for_english_sets(reports):
     write_report(reports, "m", "fleurs-en-val", rows([1]))
     with pytest.raises(SystemExit, match="Korean"):
         analyze.load_rows("m", "fleurs-en-val", scoring="itn")
 
 
+# 후보와 기준선을 서로 다른 채점으로 비교할 때 정답 길이가 달라지면(여기서는 '%' 처리 차이) 짝지은 비교를
+# 거부한다.
 def test_compare_refuses_different_reference_lengths(reports):
     write_report(reports, "m", "fleurs-ko-val", scored_rows([("faa는 50%를", "faa는 50%를")]))
     with pytest.raises(SystemExit, match="reference"):
         analyze.compare("fleurs-ko-val", "m", "m", scoring="agnostic", baseline_scoring=None)
 
 
+# 8~10단계 테스트용 Zeroth 행. 100글자 정답 뒤에 e글자를 덧붙인 가설이라 맞춘 채점으로 다시 채점해도 편집 수가
+# e다. e > 100이면 되풀이 발화가 된다. temperatures를 주면 재시도 기록을 붙인다.
 def loop_rows(edits, temperatures=None):
     """Zeroth rows scored again from their texts: `e` inserted characters after a 100-character reference."""
     temperatures = temperatures or [None] * len(edits)
@@ -236,6 +284,7 @@ def loop_rows(edits, temperatures=None):
     return out
 
 
+# FLEURS용 행. 원래 채점 그대로 쓰므로 편집 수를 직접 넣는다(길이 100).
 def fleurs_rows(edits, temperatures=None):
     temperatures = temperatures or [None] * len(edits)
     out = []
@@ -247,6 +296,8 @@ def fleurs_rows(edits, temperatures=None):
     return out
 
 
+# 8단계 판정용 리포트를 만든다. 기록된 greedy에서는 n2의 zeroth-val u3만 되풀이(150 > 100)이고, 후보마다 바뀐
+# 묶음만 따로 주며 나머지는 greedy와 같게(temperature 0) 쓴다.
 def prepare_stage8(reports, arms):
     """Recorded greedy reports of models n and n2 (n2 loops on u3 of zeroth-val) and the arms' reports.
 
@@ -274,21 +325,26 @@ def prepare_stage8(reports, arms):
             write_report(reports, f"{model}-{arm}", set_name, make(edits, temperatures))
 
 
+# n2의 되풀이 발화가 temperature 0.2로 다시 디코딩되어 되풀이가 없어진 결과.
 STOPPED = ([1, 1, 1, 2], [0.0, 0.0, 0.0, 0.2])  # n2's loop decoded again at 0.2 and gone
 
 
+# 두 후보가 모두 통과하면 더 단순한 D1a를 고른다.
 def test_verdict8_picks_the_simpler_arm_when_it_passes(reports):
     stopped = {("n2", "zeroth-val"): STOPPED}
     prepare_stage8(reports, {"d1a": stopped, "d1": stopped})
     assert analyze.verdict8(["n", "n2"], ["d1a", "d1"]) == "d1a"
 
 
+# D1a가 되풀이는 막았지만 다른 묶음의 정확도를 잃으면(구간 상한 +0.1%p 초과) 다음 후보 D1을 고른다.
 def test_verdict8_takes_the_next_arm_when_the_first_costs_accuracy(reports):
     worse = {("n2", "zeroth-val"): STOPPED, ("n", "fleurs-ko-val"): ([1, 3, 1, 3], [0.0, 0.4, 0.0, 0.4])}
     prepare_stage8(reports, {"d1a": worse, "d1": {("n2", "zeroth-val"): STOPPED}})
     assert analyze.verdict8(["n", "n2"], ["d1a", "d1"]) == "d1"
 
 
+# 되풀이가 남거나(마지막 temperature까지 되풀이) 새 되풀이가 생기면 어느 후보도 고르지 않고 greedy를 그대로
+# 쓴다(None).
 def test_verdict8_keeps_greedy_when_a_loop_is_left(reports):
     still = {("n2", "zeroth-val"): ([1, 1, 1, 150], [0.0, 0.0, 0.0, 1.0])}  # decoded again, looped every time
     new_loop = {("n2", "zeroth-val"): STOPPED, ("n", "fleurs-en-val"): ([1, 150], [0.0, 0.0])}
@@ -296,6 +352,8 @@ def test_verdict8_keeps_greedy_when_a_loop_is_left(reports):
     assert analyze.verdict8(["n", "n2"], ["d1a", "d1"]) is None
 
 
+# 기록된 되풀이 발화가 첫 디코딩에서 되풀이하지 않아 다시 디코딩되지 않았으면 재시도를 시험하지 못한 것이므로
+# 판정하지 않고 멈춘다.
 def test_verdict8_makes_no_verdict_when_the_recorded_loop_is_not_decoded_again(reports):
     # The first (greedy) pass did not loop on u3 this time, so the fallback was never put to the test.
     gone = {("n2", "zeroth-val"): ([1, 1, 1, 2], [0.0, 0.0, 0.0, 0.0])}
@@ -304,6 +362,8 @@ def test_verdict8_makes_no_verdict_when_the_recorded_loop_is_not_decoded_again(r
         analyze.verdict8(["n", "n2"], ["d1a", "d1"])
 
 
+# changes가 다시 디코딩한 발화(u1)와, 다시 디코딩하지 않았는데 가설이 바뀐 발화(u2)를 구분하고, 되풀이 전후를
+# 맞게 세는지.
 def test_changes_separates_decoding_again_from_other_changes(reports, capsys):
     write_report(reports, "base", "fleurs-ko-val", fleurs_rows([1, 150, 1]))
     changed = fleurs_rows([1, 2, 3], [0.0, 0.2, 0.0])  # u1 decoded again, u2 changed without it
@@ -316,6 +376,8 @@ def test_changes_separates_decoding_again_from_other_changes(reports, capsys):
     assert (found["loops_before"], found["loops_after"]) == (["u1"], [])
 
 
+# itn8 판정 이름의 경계: FLEURS 구간 상한이 0보다 작아야 '쓴다'(0이면 '이득이 없다'), Zeroth 맞춘 CER이
+# +0.05%p를 넘으면 FLEURS와 관계없이 '해친다'.
 @pytest.mark.parametrize(
     ("fleurs_upper", "zeroth_delta", "label"),
     [
@@ -328,6 +390,8 @@ def test_itn8_label(fleurs_upper, zeroth_delta, label):
     assert analyze.itn8_label(fleurs_upper, zeroth_delta) == label
 
 
+# 리포트로 itn8 전체를 돌리면, FLEURS에서는 한글 숫자 가설이 후처리로 맞게 되고 Zeroth 맞춘 CER은 그대로라
+# '출력 숫자 변환을 쓴다'.
 def test_itn8_on_reports(reports):
     words = ["이", "삼", "사", "오", "육"]
     fleurs = [(f"{1972 + n}년 {n + 3}월", f"천 구백 칠십 {words[n]} 년 {words[n + 1]} 월") for n in range(4)]
@@ -338,6 +402,8 @@ def test_itn8_on_reports(reports):
     assert analyze.itn8("n", "base") == "출력 숫자 변환을 쓴다"
 
 
+# 9단계 fp16 점검 파일(앞 발화 일부를 --out으로 쓴 raw 리포트) 흉내. 발화마다 정답 길이 250글자이고
+# 정밀도·장치·빈 가설·넘침을 정할 수 있다.
 def gate_file(path, precision, edits, hypotheses=None, nonfinite=None, device="cuda"):
     """A stage 9 fp16-check file: a raw report of the first utterances of zeroth-val500 (limit 100)."""
     hypotheses = hypotheses or ["가설"] * len(edits)
@@ -352,6 +418,7 @@ def gate_file(path, precision, edits, hypotheses=None, nonfinite=None, device="c
     return str(path)
 
 
+# fp16과 fp32의 CER 차이가 ±0.20%p 안(편집 하나가 0.1%p)이면 fp16을 쓰고, 어느 방향이든 0.3%p면 fp32로 잰다.
 def test_gate9_keeps_fp16_when_it_matches_fp32(tmp_path):
     fp32 = gate_file(tmp_path / "fp32.json", "fp32", [2, 2, 2, 2], device="cpu")
     assert analyze.gate9(gate_file(tmp_path / "a.json", "fp16", [2, 2, 2, 2]), fp32)
@@ -362,6 +429,7 @@ def test_gate9_keeps_fp16_when_it_matches_fp32(tmp_path):
     assert not analyze.gate9(gate_file(tmp_path / "e.json", "fp16", [0, 1, 2, 2]), fp32)  # -0.3%p
 
 
+# CER이 같아도 fp16 쪽에 빈 가설이나 넘침 발화가 하나라도 있으면 fp32로 잰다.
 @pytest.mark.parametrize(
     "broken",
     [
@@ -374,6 +442,7 @@ def test_gate9_falls_back_to_fp32_on_empty_outputs_or_overflow(tmp_path, broken)
     assert not analyze.gate9(gate_file(tmp_path / "fp16.json", "fp16", [2, 2, 2, 2], **broken), fp32)
 
 
+# 정밀도 표시가 fp16·fp32 짝이 아니거나 발화가 다르면 비교 자체를 거부한다.
 def test_gate9_refuses_files_it_cannot_pair(tmp_path):
     fp32 = gate_file(tmp_path / "fp32.json", "fp32", [2, 2, 2, 2], device="cpu")
     with pytest.raises(SystemExit, match="precision"):
@@ -382,6 +451,8 @@ def test_gate9_refuses_files_it_cannot_pair(tmp_path):
         analyze.gate9(gate_file(tmp_path / "fp16.json", "fp16", [2, 2, 2]), fp32)
 
 
+# 9단계 판정 이름의 경계: 상한이 0이면 '더 나은'이 아니고(상한 < 0이어야 한다), 하한이 0이면 '나쁘다'가
+# 아니다.
 @pytest.mark.parametrize(
     ("low", "high", "label"),
     [
@@ -395,6 +466,7 @@ def test_verdict9_label(low, high, label):
     assert analyze.verdict9_label(low, high) == label
 
 
+# 9단계 판정용 리포트: 기준선 turbo, N, 후보의 raw와 fixed(fixed가 되풀이를 줄인 모양), 세 묶음.
 def prepare_stage9(reports, fleurs_candidate):
     """Base turbo, N and the candidate's two outputs on the three validation sets."""
     (reports / "digit_utterances").mkdir()
@@ -409,6 +481,8 @@ def prepare_stage9(reports, fleurs_candidate):
         write_report(reports, name, "fleurs-en-val", fleurs_rows([1, 1]))
 
 
+# FLEURS 한국어에서 후보가 확실히 낮으면 '더 나은 기준 모델', 같거나 발화마다 엇갈리면 '가리지 못했다', 확실히
+# 높으면 '나쁘다'. 보고 항목(fixed, Zeroth 맞춘 CER, 영어)이 출력에 있는지도 본다.
 @pytest.mark.parametrize(
     ("fleurs_candidate", "label"),
     [
@@ -428,6 +502,8 @@ def test_verdict9_on_reports(reports, capsys, fleurs_candidate, label):
 # --- stage 10: LoRA on Qwen3-ASR ---
 
 
+# 10단계 --out 파일 흉내: 관문 (a)의 B=0 점검(limit 100) 또는 체크포인트의 zeroth-val500 전체 측정. 정답·가설
+# 글을 실제로 채점해 편집 수를 넣는다.
 def adapter_file(
     path,
     hypotheses,
@@ -457,6 +533,7 @@ def adapter_file(
     return str(path)
 
 
+# 관문 (a)는 가설이 하나라도 다르면 실패다(오류율이 비슷한 것으로는 부족하다).
 def test_gate10_passes_only_when_every_hypothesis_is_reproduced(tmp_path):
     recorded = adapter_file(tmp_path / "fp16.json", ["가" * 100, "가" * 99], adapter=None)
     same = adapter_file(tmp_path / "same.json", ["가" * 100, "가" * 99])
@@ -465,6 +542,7 @@ def test_gate10_passes_only_when_every_hypothesis_is_reproduced(tmp_path):
     assert not analyze.gate10(one_off, recorded)
 
 
+# 어댑터가 있는 실행과 없는 기록의 짝이 아니거나, 발화 수·정밀도가 다르면 비교를 거부한다.
 def test_gate10_refuses_files_it_cannot_pair(tmp_path):
     recorded = adapter_file(tmp_path / "fp16.json", ["가"] * 3, adapter=None)
     with pytest.raises(SystemExit, match="adapter"):
@@ -475,6 +553,8 @@ def test_gate10_refuses_files_it_cannot_pair(tmp_path):
         analyze.gate10(adapter_file(tmp_path / "fp32.json", ["가"] * 3, precision="fp32"), recorded)
 
 
+# 체크포인트 고르기는 맞춘 CER로 한다. 숫자 표기만 다른 1,000·1,500스텝은 둘 다 오류 0이라 동률이고 이른
+# 1,000스텝이 이긴다. --limit 파일은 거부한다.
 def test_pick10_takes_the_lowest_harmonized_cer_and_the_earlier_step_on_a_tie(tmp_path):
     references = ["이천 십 팔 년 가나다라마바사"] * 2
     files = [
@@ -505,11 +585,14 @@ def test_pick10_takes_the_lowest_harmonized_cer_and_the_earlier_step_on_a_tie(tm
         analyze.pick10([adapter_file(tmp_path / "limited.json", ["가"], limit=1)])
 
 
+# steps.jsonl 흉내(한 줄에 한 항목).
 def steps_file(path, entries):
     path.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
     return str(path)
 
 
+# 스모크 50스텝 기록 흉내. 25번째가 가장 긴 스텝(30초, 메모리 +500MiB)이고, 건너뜀·손실·스텝 수·메모리를 바꿔
+# 각 관문을 일부러 실패시킬 수 있다.
 def smoke_steps(path, count=50, seconds=6.0, skipped=(), loss=None, peak=5000, longest_at=25, extra=()):
     entries = [{"event": "start", "first_step": 1}]
     for step in range(1, count + 1):
@@ -526,6 +609,7 @@ def smoke_steps(path, count=50, seconds=6.0, skipped=(), loss=None, peak=5000, l
     return steps_file(path, [*entries, *extra])
 
 
+# 메모리 감시 CSV 흉내. 표본 하나에만 지정한 공유 메모리와 nvidia-smi 값을 넣는다.
 def mem_file(path, shared=230, smi=9000):
     rows = ["time,shared_mb,dedicated_mb,smi_used_mb,smi_util,paused"]
     rows += [f"12:00:0{n},{shared if n == 5 else 230},8000,{smi if n == 5 else 8800},90,0" for n in range(10)]
@@ -533,12 +617,16 @@ def mem_file(path, shared=230, smi=9000):
     return str(path)
 
 
+# 깨끗한 스모크는 통과하고 1,500스텝을 유지한다. 스텝 시간 중앙값에서 가장 긴 스텝은 빠진다.
 def test_smoke10_passes_a_clean_run_and_keeps_1500_steps(tmp_path):
     result = analyze.smoke10(smoke_steps(tmp_path / "s.jsonl"), mem_file(tmp_path / "m.csv"))
     assert result["passed"] and result["max_steps"] == 1500
     assert result["median_step_seconds"] == 6.0  # the longest step is left out
 
 
+# 일곱 조건을 하나씩 어긴 경우마다 해당 번호 줄이 '불만족'으로 찍히고 전체가 실패한다: 손실 nan, 20스텝 뒤
+# 건너뜀 6개, 가장 긴 스텝 없음, 49스텝, 공유 메모리 3,400MiB(9단계에서 넘쳤을 때의 크기), nvidia-smi
+# 10,752MiB(경계값은 실패), torch 7,200MiB.
 @pytest.mark.parametrize(
     ("steps", "mem", "failed"),
     [
@@ -557,6 +645,7 @@ def test_smoke10_fails_each_gate(tmp_path, capsys, steps, mem, failed):
     assert any(line.startswith(failed) and "불만족" in line for line in capsys.readouterr().out.splitlines())
 
 
+# 앞 20스텝의 건너뜀은 세지 않는다. 스텝당 20초면 1,500스텝이 8.3시간이라 1,000스텝으로 줄인다.
 def test_smoke10_allows_skips_in_the_first_20_steps_and_cuts_slow_runs_to_1000_steps(tmp_path):
     result = analyze.smoke10(
         smoke_steps(tmp_path / "s.jsonl", skipped=range(1, 21), seconds=20.0), mem_file(tmp_path / "m.csv")
@@ -564,6 +653,7 @@ def test_smoke10_allows_skips_in_the_first_20_steps_and_cuts_slow_runs_to_1000_s
     assert result["passed"] and result["max_steps"] == 1000  # 20 s x 1,500 = 8.3 hours
 
 
+# 10단계 판정 표의 네 칸이 docs/experiments.md의 문장과 같은지.
 @pytest.mark.parametrize(
     ("zeroth_ok", "fleurs_ok", "label"),
     [
@@ -577,6 +667,8 @@ def test_verdict10_label(zeroth_ok, fleurs_ok, label):
     assert analyze.verdict10_label(zeroth_ok, fleurs_ok) == label
 
 
+# 10단계 판정용 리포트: 기준선 turbo, N, 학습 전 Qwen, 후보(Qwen과 후보는 fixed도), 세 묶음과 두 모델의 전화
+# 음질 판.
 def prepare_stage10(reports, zeroth_candidate, fleurs_candidate):
     """Base turbo, N, the untrained Qwen and the candidate (raw and fixed) on the validation sets."""
     (reports / "digit_utterances").mkdir()
@@ -595,6 +687,9 @@ def prepare_stage10(reports, zeroth_candidate, fleurs_candidate):
         write_report(reports, name, "zeroth-val@telephone", loop_rows([5] * 4))
 
 
+# 조건 1·2의 네 조합이 판정 표대로 나오고, 망각 보고 줄(학습 전 Qwen 대비 상한 ≤ +1.0%p)이 '안/밖'으로 맞게
+# 찍히는지. 실제 10단계 결과는 둘째 줄과 같은 모양(조건 1만 만족, 망각 허용 폭 밖)이었다. 전화 음질·fixed·영어
+# 보고도 출력에 있어야 한다.
 @pytest.mark.parametrize(
     ("zeroth_candidate", "fleurs_candidate", "label", "forgetting"),
     [

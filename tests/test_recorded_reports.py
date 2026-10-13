@@ -4,6 +4,14 @@ A change to text_norm, metrics, itn or jiwer that moves them must be deliberate:
 values here and write the reason in docs/experiments.md.
 """
 
+# [테스트 묶음] 커밋된 리포트(reports/)의 수치를 지금 코드로 다시 계산해 기록과 같은지 확인한다(위 docstring).
+# 원래 채점은 리포트에 저장된 발화별 편집 수·길이와 요약 오류율을, 맞춘 CER과 출력 후처리 채점은 저장하지
+# 않으므로 총합을 숫자로 고정해 비교한다.
+# [왜 중요한가] docs/experiments.md와 README의 수치는 모두 이 리포트에서 나왔다. 정규화·채점·숫자 변환 코드나
+# jiwer 버전이 바뀌면 같은 리포트에서 다른 수치가 나와 문서와 코드가 어긋난다. 그런 변경은 의도한 것일 때만
+# 고정값을 고치고 이유를 문서에 남기게 한다.
+# [범위] 모델이나 GPU 없이 저장된 글만 다시 채점하므로 CI에서도 돈다.
+
 import json
 
 import numpy as np
@@ -13,13 +21,19 @@ from whisper_ko_ft import analyze
 from whisper_ko_ft.metrics import error_rate, score
 from whisper_ko_ft.paths import REPORTS
 
+# FILES: reports/<이름>/<묶음>.json 전부(숫자 발화 목록 폴더는 리포트가 아니라 뺀다). 리포트가 새로 커밋되면
+# 자동으로 검사 대상이 된다.
 FILES = sorted(p for p in REPORTS.glob("*/*.json") if p.parent.name != "digit_utterances")
 
 
+# 리포트를 하나도 못 찾으면 아래 검사가 아무것도 하지 않고 통과하므로, 먼저 있는지 확인한다.
 def test_reports_are_found():
     assert FILES
 
 
+# 리포트마다: 발화별로 정답·가설을 다시 채점해 저장된 (편집 수, 길이)와 같고, 정답이 빈 발화를 뺀 묶음
+# 오류율이 요약의 error_rate(소수 다섯째 자리)와 같아야 한다. 리포트 이름으로 테스트 ID를 붙여 어느 리포트가
+# 깨졌는지 바로 보이게 한다.
 @pytest.mark.parametrize("path", FILES, ids=lambda p: f"{p.parent.name}/{p.name}")
 def test_stored_scores_are_reproduced(path):
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -33,6 +47,9 @@ def test_stored_scores_are_reproduced(path):
     assert round(rate, 5) == data["summary"]["error_rate"]
 
 
+# 맞춘 CER(6단계부터의 Zeroth 지표)의 총합 고정. 반올림한 오류율로 비교하면 작은 변화가 묻히므로 편집 수와
+# 정답 길이의 합을 그대로 비교한다(옆 주석). 각 줄 끝의 퍼센트는 문서에 적힌 값이다. 새 단계의 리포트를 커밋할
+# 때마다 이 목록에 줄을 더했다.
 # Harmonized CER (stages 6 and 7, and the 2026-10-02 checks of N) is not stored; it is scored again on
 # every call. Pinned as totals, so that a change too small to move the rounded rate still fails. The
 # comment is the rate in the docs.
@@ -79,12 +96,15 @@ def test_stored_scores_are_reproduced(path):
         ("qwen3-asr-1.7b-qn-steps", "zeroth-val500-step1500", 213, 18321),  # 1.16%
     ],
 )
+# analyze.load_rows로 맞춘 채점을 다시 해서 총합이 고정값과 같은지.
 def test_recorded_harmonized_totals(report, set_name, edits, length):
     rows = analyze.load_rows(report, set_name, harmonized=True)
     got_edits, got_lengths = analyze.arrays(rows, sorted(rows))
     assert (int(got_edits.sum()), int(got_lengths.sum())) == (edits, length)
 
 
+# 8단계 출력 숫자 변환 판정(itn8)의 근거가 된 총합: N과 기준선 turbo의 FLEURS 한국어 후처리 CER, 후처리해도
+# 맞춘 CER이 그대로인 N의 Zeroth.
 # Stage 8 output post-processing (2026-10-04): the totals behind the `itn8` verdict, scored on every call.
 @pytest.mark.parametrize(
     ("report", "set_name", "scoring", "edits", "length"),
@@ -94,6 +114,7 @@ def test_recorded_harmonized_totals(report, set_name, edits, length):
         ("turbo-n", "zeroth-val", "itn-harmonized", 1172, 93621),  # 1.25%, as harmonized
     ],
 )
+# 지정한 채점 방식으로 다시 채점한 총합이 고정값과 같은지.
 def test_recorded_post_processed_totals(report, set_name, scoring, edits, length):
     rows = analyze.load_rows(report, set_name, scoring=scoring)
     got_edits, got_lengths = analyze.arrays(rows, sorted(rows))

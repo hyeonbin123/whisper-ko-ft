@@ -1,3 +1,12 @@
+# [테스트 묶음] faster-whisper 경로의 멜 필터 수(ct2_features.py, evaluate_ct2.py)를 확인한다. 합친 모델
+# 폴더에 128개 설정이 써지는지, 설정 파일이 없거나 틀린 폴더를 어떻게 다루는지, evaluate_ct2가 오디오를 읽기
+# 전에 turbo에 128개를 쓰는지.
+# [왜 중요한가] 2026-09-20 재시도 측정이 turbo에 멜 80개로 계산된 특징 때문에 첫 발화에서 모두
+# 멈췄다(docs/experiments.md '추가 측정', 커밋 61b4b2f에서 고침). 같은 실패가 다시 나지 않게 고정한다.
+# evaluate_ct2 테스트는 고치기 전 코드에서 실패하는 것을 확인했다(커밋 61b4b2f 메시지).
+# [방법] 가중치 없이 설정 객체만 만들고, evaluate_ct2 테스트는 faster_whisper 모델을 가짜로 바꾼다.
+# faster-whisper는 선택 의존성(ct2 묶음)이라 없으면 그 두 테스트는 건너뛴다(CI에는 설치하지 않는다).
+
 import json
 import sys
 
@@ -11,11 +20,14 @@ from whisper_ko_ft.ct2_features import (
     write_preprocessor_config,
 )
 
+# turbo·large-v3는 멜 128개, small은 80개.
 # whisper-large-v3 and large-v3-turbo take 128 mel bins, whisper-small 80.
 TURBO_MEL_BINS = 128
 SMALL_MEL_BINS = 80
 
 
+# merge_adapter가 쓰는 설정 파일: 이름이 변환기 복사 목록(COPY_FILES)에 있고, faster-whisper가 읽는 평평한
+# 형식으로 feature_size 128이 들어 있으며, feature_kwargs가 그것을 그대로 읽는다.
 def test_merged_folder_gets_the_128_bin_config_that_the_converter_copies(tmp_path):
     config = WhisperConfig(num_mel_bins=TURBO_MEL_BINS)  # no weights are loaded
     extractor = WhisperFeatureExtractor(feature_size=TURBO_MEL_BINS)
@@ -28,12 +40,15 @@ def test_merged_folder_gets_the_128_bin_config_that_the_converter_copies(tmp_pat
     assert feature_kwargs(tmp_path, TURBO_MEL_BINS)["feature_size"] == TURBO_MEL_BINS
 
 
+# 기본 특징 추출기(80개)를 128개 모델에 쓰려고 하면 거부하고 파일을 남기지 않는다.
 def test_a_feature_extractor_that_does_not_fit_the_model_is_refused(tmp_path):
     with pytest.raises(ValueError, match="128"):
         write_preprocessor_config(WhisperFeatureExtractor(), TURBO_MEL_BINS, tmp_path)
     assert not (tmp_path / PREPROCESSOR_CONFIG).exists()
 
 
+# 설정 파일 없이 tokenizer.json만 있는 폴더(2026-09-20에 변환한 폴더와 같은 상태)는 모델의 멜 수만 넣은 인자를
+# 받는다. turbo와 small 모두.
 @pytest.mark.parametrize("n_mels", [TURBO_MEL_BINS, SMALL_MEL_BINS])
 def test_a_folder_without_the_config_uses_the_model_mel_bins(tmp_path, n_mels):
     # The folder converted on 2026-09-20 had only tokenizer.json, and faster-whisper used 80 bins for turbo.
@@ -41,16 +56,20 @@ def test_a_folder_without_the_config_uses_the_model_mel_bins(tmp_path, n_mels):
     assert feature_kwargs(tmp_path, n_mels) == {"feature_size": n_mels}
 
 
+# 설정 파일이 80개인데 모델이 128개면 조용히 틀리게 계산하지 않고 오류로 멈춘다.
 def test_a_config_that_disagrees_with_the_model_is_refused(tmp_path):
     write_preprocessor_config(WhisperFeatureExtractor(), SMALL_MEL_BINS, tmp_path)
     with pytest.raises(ValueError, match="128 mel bins"):
         feature_kwargs(tmp_path, TURBO_MEL_BINS)
 
 
+# 모델을 띄운 뒤 묶음을 읽으려던 순간에 던지는 예외. 이 순서(모델 먼저, 오디오 나중)를 확인하는 데 쓴다.
 class Reached(Exception):
     """The model was loaded and the set was about to be read."""
 
 
+# 가중치 없는 가짜 WhisperModel: 변환된 turbo 모델(n_mels 128)처럼 보이지만 faster-whisper 기본 특징
+# 추출기(80개)를 가진 상태로 만든다. 마지막으로 만든 객체를 last에 남겨 테스트가 꺼내 본다.
 class FakeWhisperModel:
     """faster_whisper.WhisperModel for a turbo folder without preprocessor_config.json, without weights."""
 
@@ -62,6 +81,8 @@ class FakeWhisperModel:
         FakeWhisperModel.last = self
 
 
+# evaluate_ct2.main이 묶음을 읽기 전에 특징 추출기를 128개로 바꿔 두는지. 리포트 위치·커밋·모델·묶음 읽기는
+# monkeypatch로 바꿔 실제 파일과 GPU를 쓰지 않는다.
 def test_evaluate_ct2_uses_128_mel_bins_for_turbo_before_reading_audio(tmp_path, monkeypatch):
     pytest.importorskip("faster_whisper")  # the ct2 dependency group; CI does not install it
     from whisper_ko_ft import evaluate_ct2
@@ -81,6 +102,8 @@ def test_evaluate_ct2_uses_128_mel_bins_for_turbo_before_reading_audio(tmp_path,
     assert FakeWhisperModel.last.feature_extractor.mel_filters.shape[0] == TURBO_MEL_BINS
 
 
+# evaluate_ct2도 있는 리포트를 --overwrite 없이 덮어쓰지 않고, --no-report(속도 측정)면 리포트를 건드리지
+# 않으므로 그대로 진행한다.
 def test_evaluate_ct2_no_report_skips_the_existing_report_check(tmp_path, monkeypatch, capsys):
     pytest.importorskip("faster_whisper")
     from whisper_ko_ft import evaluate_ct2

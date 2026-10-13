@@ -1,5 +1,14 @@
 """Stage 9: the Qwen3-ASR harness (docs/experiments.md, 9단계). No weights: stubs and tiny modules."""
 
+# [테스트 묶음] evaluate_qwen.py(9·10단계 Qwen3-ASR 하네스)를 가중치 없이 확인한다: raw 출력이 공식 파서에서
+# 반복 제거만 뺀 것인지, 앞 30초 자르기, 생성 토큰 수와 한도 도달, fp16 넘침 감시, 한 디코딩에서 두 리포트,
+# 인자 검사(test 묶음, 덮어쓰기, CPU 실행, 등록 모델, 어댑터 이름, 채널), 어댑터 병합과 SHA-256 기록.
+# [왜 중요한가] 9단계 판정은 raw 출력으로 Whisper 하네스와 같은 조건에서 비교한다는 전제 위에 있다. raw에 반복
+# 제거가 섞이거나, 30초 창·프롬프트·생성 인자가 달라지면 비교 조건이 무너진다. 10단계에서는 어댑터 병합이
+# 겨냥한 층만 바꾸는지가 결과 해석의 전제다.
+# [방법] 앞부분은 처리기·모델 대역으로 인자와 출력 모양을 보고, 뒷부분은 tiny_qwen의 작은 무작위 모델로 실제
+# PEFT 병합을 한다. 공식 파서(_parse_single_output)는 transformers에서 직접 가져와 비교 기준으로 쓴다.
+
 import hashlib
 import json
 import sys
@@ -13,15 +22,20 @@ from transformers.models.qwen3_asr.processing_qwen3_asr import _parse_single_out
 from whisper_ko_ft import evaluate_qwen
 from whisper_ko_ft.store import SAMPLE_RATE
 
+# EOS: 끝 토큰 번호 두 개(대역 모델에서 쓰는 값). LOOP: 같은 구절을 30번 되풀이한 글(공식 반복 제거가 줄이는
+# 예).
 EOS = (151643, 151645)
 LOOP = "그리고 다시 " + "도와서는 그 " * 30
 
 
+# 공식 파서의 결과(반복 제거 포함). fixed 출력과 같은 것이다.
 def official(text: str) -> str:
     """What processor.extract_transcription returns (the official parse, with its repetition fix)."""
     return _parse_single_output(text)["transcription"]
 
 
+# 반복이 없는 글에서는 raw와 공식 결과가 같아야 한다: 언어를 고정해 표시가 없는 경우, 모델이 'language
+# Korean<asr_text>' 표시를 적은 경우, 앞뒤 공백, 빈 출력.
 @pytest.mark.parametrize(
     ("generated", "expected"),
     [
@@ -36,11 +50,13 @@ def test_raw_output_is_the_official_parse_without_the_repetition_fix(generated, 
     assert official(generated) == expected  # nothing repeats here, so the two outputs agree
 
 
+# 되풀이가 있는 글은 raw에서 그대로 남고(Whisper 하네스와 같은 조건), 공식 결과에서만 짧아진다.
 def test_the_repetition_fix_only_changes_the_fixed_output():
     assert evaluate_qwen.raw_transcription(LOOP) == LOOP.strip()
     assert len(official(LOOP)) < len(LOOP.strip())
 
 
+# 31초 음성은 앞 30초만 남기고, 30초보다 짧으면 복사하지 않고 같은 배열을 돌려준다.
 def test_audio_is_cut_to_the_first_30_seconds_like_the_whisper_harness():
     long = np.arange(31 * SAMPLE_RATE, dtype=np.float32)
     short = np.ones(5 * SAMPLE_RATE, dtype=np.float32)
@@ -49,6 +65,8 @@ def test_audio_is_cut_to_the_first_30_seconds_like_the_whisper_harness():
     assert evaluate_qwen.first_window(short) is short
 
 
+# 생성 토큰 수는 첫 끝 토큰 앞까지 센다. 끝 토큰이 없으면 한도까지 간 것으로 표시하고, 바로 끝나면 0이다. 끝
+# 토큰이 하나(정수)로 와도 동작한다.
 def test_generated_lengths_count_tokens_before_the_end_and_flag_the_limit():
     generated = torch.tensor(
         [
@@ -61,6 +79,7 @@ def test_generated_lengths_count_tokens_before_the_end_and_flag_the_limit():
     assert evaluate_qwen.generated_lengths(generated[:1], EOS[1]) == [(2, False)]
 
 
+# 출력층 훅이 디코딩 단계마다 행별로 inf를 잡아 누적하는지, take 뒤에는 다음 배치를 위해 비워지는지.
 def test_nonfinite_watch_flags_the_rows_with_overflowing_logits():
     head = torch.nn.Linear(2, 3)
     watch = evaluate_qwen.NonFiniteWatch(head)
@@ -71,6 +90,7 @@ def test_nonfinite_watch_flags_the_rows_with_overflowing_logits():
     assert watch.take(2) == [False, False]  # taken: the next batch starts clean
 
 
+# 처리기가 돌려주는 BatchFeature 대역. to(device, dtype)를 기록만 하고 자신을 돌려준다.
 class Inputs(dict):
     """Stands in for the processor's BatchFeature."""
 
@@ -79,6 +99,8 @@ class Inputs(dict):
         return self
 
 
+# Qwen3ASRProcessor 대역: 공식 입력 함수 호출(발화 수, 언어)을 기록하고, 토큰 11은 '안녕하세요.', 12는 LOOP로
+# 바꿔 글을 만든다. extract_transcription은 진짜 공식 파서를 쓴다.
 class Processor:
     """Stands in for Qwen3ASRProcessor: token ids as text, end tokens dropped; the official parse."""
 
@@ -99,6 +121,8 @@ class Processor:
         return [official(text) for text in texts]
 
 
+# 모델 대역: generate 인자를 저장하고, 프롬프트 3토큰 뒤에 생성 토큰이 붙은 결과를 돌려준다. 첫 행은 1토큰 뒤
+# 끝, 둘째 행은 끝 없이 3토큰(한도 도달).
 class Model:
     """Stands in for the model: keeps the arguments of generate; prompt (3 tokens) + generated ids."""
 
@@ -113,6 +137,9 @@ class Model:
         return torch.tensor([[1, 1, 1, 11, EOS[1], EOS[1]], [1, 1, 1, 12, 12, 12]])
 
 
+# transcribe 한 번에: 공식 입력 함수를 언어 Korean으로 한 번 부르고, generate에는 입력과 등록한 greedy
+# 인자(표본 없음, 빔 1, 256토큰)만 넘기며, 프롬프트를 잘라 낸 생성 부분에서 raw·fixed·토큰 수·한도 도달·넘침을
+# 모두 만든다.
 def test_one_decoding_gives_both_outputs_with_the_registered_arguments():
     model, processor = Model(), Processor()
     audio = [np.zeros(SAMPLE_RATE, dtype=np.float32)] * 2
@@ -134,6 +161,9 @@ def test_one_decoding_gives_both_outputs_with_the_registered_arguments():
     ]
 
 
+# 같은 행에서 raw와 fixed 리포트가 각자의 가설로 채점되는지: 가설만 다르고 원본 키(raw, fixed)는 행에 남지
+# 않으며, 요약의 발화 수·빈 정답 수·한도 도달·넘침·fixed_changed가 맞고, 되풀이 발화는 raw에서 세어지며 반복
+# 제거 덕분에 fixed의 오류율이 낮다. JSON으로 쓸 수 있는지도 본다.
 def test_reports_score_each_output_on_its_own():
     rows = [
         {"id": "a", "speaker": "s", "seconds": 1.0, "reference": "안녕하세요", "raw": "안녕하세요.",
@@ -159,10 +189,13 @@ def test_reports_score_each_output_on_its_own():
     json.dumps(payloads, ensure_ascii=False)  # what main writes
 
 
+# 인자 검사를 통과해 묶음을 읽으려던 순간에 던지는 예외.
 class Reached(Exception):
     """The argument checks passed and the set was about to be loaded."""
 
 
+# 리포트 폴더를 임시 폴더로 바꾸고 묶음·모델 불러오기를 Reached로 바꾸는 fixture(실제 reports/와 GPU를 쓰지
+# 않는다).
 @pytest.fixture
 def reports(tmp_path, monkeypatch):
     def stop(*args, **kwargs):
@@ -174,11 +207,13 @@ def reports(tmp_path, monkeypatch):
     return tmp_path
 
 
+# 명령줄 인자를 바꿔 evaluate_qwen.main을 한 번 부른다.
 def run(monkeypatch, *args):
     monkeypatch.setattr(sys, "argv", ["evaluate_qwen", *args])
     evaluate_qwen.main()
 
 
+# test 묶음은 --allow-test가 있어야 잰다(단계마다 한 번).
 def test_test_sets_need_allow_test(reports, monkeypatch, capsys):
     with pytest.raises(SystemExit):
         run(monkeypatch, "--set", "zeroth-test")
@@ -187,6 +222,7 @@ def test_test_sets_need_allow_test(reports, monkeypatch, capsys):
         run(monkeypatch, "--set", "zeroth-test", "--allow-test")
 
 
+# raw와 fixed 리포트 중 하나라도 이미 있으면 --overwrite 없이는 멈춘다.
 @pytest.mark.parametrize("existing", ["qwen3-asr-1.7b", "qwen3-asr-1.7b-fixed"])
 def test_neither_report_is_replaced_without_overwrite(reports, monkeypatch, capsys, existing):
     (reports / existing).mkdir()
@@ -198,6 +234,7 @@ def test_neither_report_is_replaced_without_overwrite(reports, monkeypatch, caps
         run(monkeypatch, "--set", "zeroth-val", "--overwrite")
 
 
+# CPU 실행은 측정 조건이 아니므로 reports/에 쓰지 못하고, --out(fp16 점검의 fp32 쪽)이나 --no-report만 된다.
 def test_a_cpu_run_is_not_a_measurement(reports, monkeypatch, capsys):
     with pytest.raises(SystemExit):
         run(monkeypatch, "--set", "zeroth-val500", "--device", "cpu", "--precision", "fp32")
@@ -209,6 +246,7 @@ def test_a_cpu_run_is_not_a_measurement(reports, monkeypatch, capsys):
         run(monkeypatch, "--set", "zeroth-val500", "--device", "cpu", "--no-report", "--limit", "4")
 
 
+# --out 파일도 덮어쓰기 보호를 받고, 파일을 쓰는 --out과 쓰지 않는 --no-report는 함께 줄 수 없다.
 def test_out_is_not_replaced_without_overwrite_and_excludes_no_report(reports, monkeypatch, capsys):
     out = reports / "fp16.json"
     out.write_text("{}", encoding="utf-8")
@@ -219,6 +257,8 @@ def test_out_is_not_replaced_without_overwrite_and_excludes_no_report(reports, m
         run(monkeypatch, "--set", "zeroth-val500", "--out", str(out), "--overwrite", "--no-report")
 
 
+# 등록한 모델의 고정 revision과 리포트 이름이 docs/experiments.md 9단계에 적은 값과 같고, 등록하지 않은 모델은
+# --revision과 --name을 직접 줘야 한다.
 def test_registered_models_have_a_pinned_revision_and_a_report_name(reports, monkeypatch, capsys):
     assert evaluate_qwen.REGISTERED["Qwen/Qwen3-ASR-1.7B-hf"] == (
         "bcd2b5b7f32b480ab5790554cfa8347f246a14f3",
@@ -236,6 +276,7 @@ def test_registered_models_have_a_pinned_revision_and_a_report_name(reports, mon
 # --- stage 10: a LoRA adapter merged into the base, and the telephone channel ---
 
 
+# 10단계: 어댑터를 합쳐 잴 때는 --name이 필수다(학습 전 모델의 리포트 폴더에 섞이지 않게).
 def test_an_adapter_needs_a_name(reports, monkeypatch, capsys):
     with pytest.raises(SystemExit):
         run(monkeypatch, "--set", "zeroth-val", "--adapter", "outputs/qwen-qn/checkpoint-500")
@@ -244,6 +285,8 @@ def test_an_adapter_needs_a_name(reports, monkeypatch, capsys):
         run(monkeypatch, "--set", "zeroth-val", "--adapter", "a", "--name", "qwen3-asr-1.7b-qn")
 
 
+# 채널 리포트는 <묶음>@telephone.json이라 깨끗한 음성 리포트와 다른 파일이다. 전화 음질 리포트만 있으면 깨끗한
+# 판은 잴 수 있고, 전화 음질 판은 덮어쓰기 보호에 걸린다.
 def test_channel_reports_are_written_as_set_at_channel(reports, monkeypatch, capsys):
     for name in ("qwen3-asr-1.7b", "qwen3-asr-1.7b-fixed"):
         (reports / name).mkdir()
@@ -255,6 +298,8 @@ def test_channel_reports_are_written_as_set_at_channel(reports, monkeypatch, cap
     assert "zeroth-val@telephone.json exists" in capsys.readouterr().err
 
 
+# 채널 변환을 발화 전체에 먼저 적용하고 그 뒤 앞 30초를 자르는지(Whisper 하네스와 같은 순서). 결과가 '변환 뒤
+# 자르기'와 정확히 같아야 한다.
 def test_the_channel_is_applied_before_the_first_30_seconds_are_kept():
     rng = np.random.default_rng(0)
     long = (rng.standard_normal(31 * SAMPLE_RATE) * 0.1).astype(np.float32)
@@ -265,6 +310,8 @@ def test_the_channel_is_applied_before_the_first_30_seconds_are_kept():
     assert np.array_equal(phone, evaluate_qwen.CHANNELS["telephone"](long)[: 30 * SAMPLE_RATE])
 
 
+# 작은 모델에 train_qwen.add_lora로 LoRA를 붙여 저장한다. train_b면 B 행렬을 0.01로 채워 '학습한' 어댑터를
+# 흉내 내고, 아니면 B가 0인 학습 전 어댑터다.
 def save_adapter(folder, train_b: bool):
     from whisper_ko_ft.train_qwen import add_lora
 
@@ -277,6 +324,8 @@ def save_adapter(folder, train_b: bool):
     model.save_pretrained(str(folder))
 
 
+# 학습 전 어댑터(B=0)를 합치면 모든 가중치가 그대로이고 결과는 보통의 Qwen3-ASR 모델이다. 10단계 관문 (a)(학습
+# 전 어댑터로 9단계 디코딩이 재현되는지)의 전제다.
 def test_merging_a_fresh_adapter_leaves_every_weight_as_it_was(tmp_path):
     save_adapter(tmp_path / "fresh", train_b=False)
     base = {k: v.clone() for k, v in tiny_model(torch.float16).state_dict().items()}
@@ -287,6 +336,8 @@ def test_merging_a_fresh_adapter_leaves_every_weight_as_it_was(tmp_path):
     assert all(torch.equal(after[k], base[k]) for k in base)
 
 
+# B가 0이 아닌 어댑터를 합치면 겨냥한 층(언어 모델 MLP, 오디오 인코더 fc1 등)만 바뀌고,
+# 투영층·출력층·합성곱·정규화는 그대로이며, 모든 가중치가 fp16으로 남는다.
 def test_merging_a_trained_adapter_changes_the_targeted_weights_only(tmp_path):
     save_adapter(tmp_path / "trained", train_b=True)
     base = {k: v.clone() for k, v in tiny_model(torch.float16).state_dict().items()}
@@ -300,6 +351,7 @@ def test_merging_a_trained_adapter_changes_the_targeted_weights_only(tmp_path):
     assert all(after[k].dtype == torch.float16 for k in after)
 
 
+# 리포트에 남길 어댑터 정보: 폴더 경로와 가중치 파일의 SHA-256. 어댑터가 없으면 둘 다 None.
 def test_reports_name_the_adapter_and_its_weights(tmp_path):
     save_adapter(tmp_path / "checkpoint-500", train_b=False)
     info = evaluate_qwen.adapter_info(str(tmp_path / "checkpoint-500"))
