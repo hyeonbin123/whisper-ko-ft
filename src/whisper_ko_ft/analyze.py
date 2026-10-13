@@ -262,9 +262,12 @@ def table(
                 base_rate = error_rate(base_edits, lengths)
                 d_low, d_high = difference_interval(edits, base_edits, lengths)
                 delta = error_rate(edits, lengths) - base_rate
+                # 기준선 오류율이 0이면 상대 변화를 낼 수 없어 compare처럼 nan으로 찍는다(차이와 구간은
+                # 그대로 찍는다).
+                relative = delta / base_rate if base_rate else float("nan")
                 line += (
                     f"  vs {baseline}: {delta * 100:+.2f}%p [{d_low * 100:+.2f}, {d_high * 100:+.2f}]"
-                    f", relative {delta / base_rate * 100:+.1f}%"
+                    f", relative {relative * 100:+.1f}%"
                 )
             print(line)
 
@@ -736,7 +739,10 @@ def read_steps(path: str) -> dict[int, dict]:
 # 스모크 중 5초마다 남긴 GPU 메모리 표본 CSV(저장소 밖의 감시 스크립트가 쓴다)를 읽는다. 숫자 열은 float로
 # 바꾸고, 카운터가 비어 있던 칸은 None으로 둔다.
 def read_memwatch(path: str) -> list[dict]:
-    """GPU memory samples (work/stage10/memwatch.ps1): MiB as numbers, None where a counter was missing."""
+    """GPU memory samples of the smoke run (a CSV written by a monitoring script kept outside the repository).
+
+    The MiB counters become numbers, and None where a counter was missing.
+    """
     with open(path, encoding="utf-8") as file:
         rows = list(csv.DictReader(file))
     keys = ("shared_mb", "dedicated_mb", "smi_used_mb", "smi_util")

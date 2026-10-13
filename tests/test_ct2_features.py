@@ -1,11 +1,11 @@
 # [테스트 묶음] faster-whisper 경로의 멜 필터 수(ct2_features.py, evaluate_ct2.py)를 확인한다. 합친 모델
 # 폴더에 128개 설정이 써지는지, 설정 파일이 없거나 틀린 폴더를 어떻게 다루는지, evaluate_ct2가 오디오를 읽기
-# 전에 turbo에 128개를 쓰는지.
+# 전에 turbo에 128개를 쓰는지. 끝에 evaluate_ct2 요약의 빈 가설 수가 evaluate와 같은 기준인지도 본다.
 # [왜 중요한가] 2026-09-20 재시도 측정이 turbo에 멜 80개로 계산된 특징 때문에 첫 발화에서 모두
 # 멈췄다(docs/experiments.md '추가 측정', 커밋 61b4b2f에서 고침). 같은 실패가 다시 나지 않게 고정한다.
 # evaluate_ct2 테스트는 고치기 전 코드에서 실패하는 것을 확인했다(커밋 61b4b2f 메시지).
 # [방법] 가중치 없이 설정 객체만 만들고, evaluate_ct2 테스트는 faster_whisper 모델을 가짜로 바꾼다.
-# faster-whisper는 선택 의존성(ct2 묶음)이라 없으면 그 두 테스트는 건너뛴다(CI에는 설치하지 않는다).
+# faster-whisper는 선택 의존성(ct2 묶음)이라 없으면 evaluate_ct2 테스트는 건너뛴다(CI에는 설치하지 않는다).
 
 import json
 import sys
@@ -127,3 +127,57 @@ def test_evaluate_ct2_no_report_skips_the_existing_report_check(tmp_path, monkey
     monkeypatch.setattr(sys, "argv", [*args, "--no-report"])  # speed runs: the report is not replaced
     with pytest.raises(Reached):
         evaluate_ct2.main()
+
+
+# faster-whisper 구간 대역: 리포트가 쓰는 text와 temperature만 가진다.
+class Segment:
+    def __init__(self, text: str, temperature: float = 0.0) -> None:
+        self.text, self.temperature = text, temperature
+
+
+# 받아 적기까지 하는 가짜 모델. 오디오 대신 받은 발화 ID로 미리 정한 구간 목록을 돌려준다.
+class TranscribingModel(FakeWhisperModel):
+    segments: dict[str, list[Segment]] = {}
+
+    def transcribe(self, audio, **kwargs):
+        return iter(self.segments[audio]), None
+
+
+# 오디오 저장소 대역: memmap 대신 발화 ID를 '오디오'로 돌려준다.
+class IdStore:
+    def __init__(self, name: str) -> None:
+        pass
+
+    def read(self, utterance):
+        return utterance.id
+
+
+# 요약의 빈 가설 수는 evaluate.decoding_counts와 같은 기준이다: 채점한 발화(정답이 비지 않은 발화)만
+# 세고, 공백만 남은 가설도 빈 가설로 센다. 고치기 전에는 정답이 빈 발화까지 세고 공백 가설은 세지 않아
+# 3이었다.
+def test_evaluate_ct2_counts_empty_hypotheses_over_scored_utterances_only(tmp_path, monkeypatch):
+    pytest.importorskip("faster_whisper")
+    from whisper_ko_ft import evaluate_ct2
+    from whisper_ko_ft.store import Utterance
+
+    texts = {"spoken": "가나다", "silent": "라마", "blank": "바사", "no-ref-1": "", "no-ref-2": ""}
+    TranscribingModel.segments = {
+        "spoken": [Segment("가나다")],
+        "silent": [],  # nothing transcribed
+        "blank": [Segment(" "), Segment(" ")],  # joins to a single space
+        "no-ref-1": [],
+        "no-ref-2": [],
+    }
+    utterances = [Utterance(i, "s", text, "x", 0, 16_000) for i, text in texts.items()]
+    monkeypatch.setattr(evaluate_ct2, "REPORTS", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "ROOT", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "git_commit", lambda: "test")
+    monkeypatch.setattr(evaluate_ct2, "WhisperModel", TranscribingModel)
+    monkeypatch.setattr(evaluate_ct2, "AudioStore", IdStore)
+    monkeypatch.setattr(evaluate_ct2, "load_set", lambda name: ("ko", utterances))
+    monkeypatch.setattr(sys, "argv", ["evaluate_ct2", "--model", str(tmp_path), "--name", "n", "--set", "x"])
+
+    evaluate_ct2.main()
+
+    summary = json.loads((tmp_path / "n" / "x.json").read_text(encoding="utf-8"))["summary"]
+    assert (summary["utterances"], summary["empty_hypotheses"]) == (3, 2)

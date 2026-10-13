@@ -150,6 +150,9 @@ def main() -> None:
     # 요약. more_edits_than_characters는 되풀이 발화(편집 수 > 정답 길이, 5단계 판정의 '정답보다 오류가 많은
     # 발화') 수, decoded_again은 다시 디코딩한 발화 수, empty_hypotheses는 빈 가설 수(위 '알려진 차이'),
     # mel_bins는 실제로 쓴 멜 수다. 엔진 버전도 남긴다.
+    # empty_hypotheses는 evaluate.decoding_counts와 같은 기준으로 센다: 채점한 발화(kept)만, 공백만 남은
+    # 가설도 빈 가설로. 2026-10-13 전에는 정답이 빈 발화까지 세고 공백 가설은 세지 않았다. 커밋된
+    # faster-whisper 리포트에는 정답이 빈 발화도 공백 가설도 없어, 발화 행으로 다시 세면 두 기준 모두 0이다.
     summary = {
         "model": args.model,
         "engine": "faster-whisper",
@@ -161,7 +164,7 @@ def main() -> None:
         "interval_95": [round(low, 5), round(high, 5)],
         "more_edits_than_characters": sum(r["edits"] > r["length"] for r in kept),
         "decoded_again": sum(r["temperature"] > 0 for r in rows),
-        "empty_hypotheses": sum(not r["hypothesis"] for r in rows),
+        "empty_hypotheses": sum(not r["hypothesis"].strip() for r in kept),
         "mel_bins": model.feature_extractor.mel_filters.shape[0],
         "audio_seconds": round(audio_seconds, 1),
         "wall_seconds": round(wall, 1),

@@ -3,7 +3,7 @@
 # [왜 중요한가] 판정 규칙은 재기 전에 문서에 적고 커밋한 약속이다. 코드가 그 약속과 다르면(예: 3단계 구간
 # 조건을 빠뜨린 버그, 커밋 037ad21에서 고침) 결과를 본 뒤 기준이 바뀐 것과 같은 일이 된다. 판정 표의 모든
 # 칸(만족/불만족 조합)과 경계값, 판정하지 않는 경우를 테스트로 고정한다.
-# [구성] 공통(load_rows 검사, 숫자 발화 목록, compare) → 2·3단계 verdict → 6단계 맞춘 CER과 verdict6 →
+# [구성] 공통(load_rows 검사, 숫자 발화 목록, compare, table) → 2·3단계 verdict → 6단계 맞춘 CER과 verdict6 →
 # 되풀이와 8단계 채점·verdict8·changes·itn8 → 9단계 gate9·verdict9 → 10단계 gate10·pick10·smoke10·verdict10.
 
 import json
@@ -132,6 +132,18 @@ def test_compare_can_split_by_digits_in_the_reference(reports):
 
     assert (with_digit["utterances"], round(with_digit["delta"], 3)) == (1, 0.5)
     assert (without["utterances"], without["delta"]) == (1, 0.0)
+
+
+# 기준선 오류율이 0인 부분집합에서도 table이 멈추지 않는다. 상대 변화는 compare처럼 nan으로 찍고, 차이(%p)와
+# 구간은 그대로 찍는다. 고치기 전에는 상대 변화를 0으로 나눠 ZeroDivisionError로 멈췄다.
+def test_table_prints_nan_relative_change_when_the_baseline_makes_no_errors(reports, capsys):
+    write_report(reports, "base", "fleurs-ko-val", rows([0, 0]))
+    write_report(reports, "cand", "fleurs-ko-val", rows([1, 0]))
+
+    analyze.table("fleurs-ko-val", ["base", "cand"], "base", split_digits=False)
+
+    line = next(x for x in capsys.readouterr().out.splitlines() if x.strip().startswith("cand"))
+    assert "vs base: +5.00%p" in line and "relative +nan%" in line
 
 
 # 정답은 Zeroth식('이천 십 팔 년 오 월')이고 가설만 다른 행들. 저장된 편집 수는 일부러 9로 둔다.
