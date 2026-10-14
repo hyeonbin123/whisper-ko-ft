@@ -1,10 +1,10 @@
-"""Write copies of the Zeroth training sets whose references have numbers as digits (stage 6).
+"""정답의 숫자를 아라비아 숫자로 바꾼 Zeroth 학습 묶음 사본을 쓴다(6단계).
 
-Usage:
+사용법:
     uv run python -m whisper_ko_ft.prepare_itn
 
-Reads data/cache/sets/zeroth-train.json and zeroth-val500.json (from `prepare`) and writes
-zeroth-train-itn.json and zeroth-val500-itn.json next to them. The audio is shared.
+`prepare`가 만든 data/cache/sets/zeroth-train.json과 zeroth-val500.json을 읽어, 같은 폴더에
+zeroth-train-itn.json과 zeroth-val500-itn.json을 쓴다. 오디오는 원래 묶음과 같은 저장소를 함께 쓴다.
 """
 
 # [파일 역할] 6단계(정답의 숫자 표기를 바꿔 학습)용 묶음 목록을 만든다. prepare가 만든 zeroth-train과

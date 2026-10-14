@@ -20,8 +20,7 @@ from whisper_ko_ft.ct2_features import (
     write_preprocessor_config,
 )
 
-# turbo·large-v3는 멜 128개, small은 80개.
-# whisper-large-v3 and large-v3-turbo take 128 mel bins, whisper-small 80.
+# whisper-large-v3와 large-v3-turbo는 멜 필터 128개, whisper-small은 80개를 받는다.
 TURBO_MEL_BINS = 128
 SMALL_MEL_BINS = 80
 
@@ -29,14 +28,14 @@ SMALL_MEL_BINS = 80
 # merge_adapter가 쓰는 설정 파일: 이름이 변환기 복사 목록(COPY_FILES)에 있고, faster-whisper가 읽는 평평한
 # 형식으로 feature_size 128이 들어 있으며, feature_kwargs가 그것을 그대로 읽는다.
 def test_merged_folder_gets_the_128_bin_config_that_the_converter_copies(tmp_path):
-    config = WhisperConfig(num_mel_bins=TURBO_MEL_BINS)  # no weights are loaded
+    config = WhisperConfig(num_mel_bins=TURBO_MEL_BINS)  # 가중치는 불러오지 않는다
     extractor = WhisperFeatureExtractor(feature_size=TURBO_MEL_BINS)
 
     written = write_preprocessor_config(extractor, config.num_mel_bins, tmp_path)
 
     assert written.name == PREPROCESSOR_CONFIG and PREPROCESSOR_CONFIG in COPY_FILES
     saved = json.loads(written.read_text(encoding="utf-8"))
-    assert saved["feature_size"] == TURBO_MEL_BINS  # flat, as faster-whisper reads it
+    assert saved["feature_size"] == TURBO_MEL_BINS  # faster-whisper가 읽는 평평한 형식
     assert feature_kwargs(tmp_path, TURBO_MEL_BINS)["feature_size"] == TURBO_MEL_BINS
 
 
@@ -51,7 +50,7 @@ def test_a_feature_extractor_that_does_not_fit_the_model_is_refused(tmp_path):
 # 받는다. turbo와 small 모두.
 @pytest.mark.parametrize("n_mels", [TURBO_MEL_BINS, SMALL_MEL_BINS])
 def test_a_folder_without_the_config_uses_the_model_mel_bins(tmp_path, n_mels):
-    # The folder converted on 2026-09-20 had only tokenizer.json, and faster-whisper used 80 bins for turbo.
+    # 2026-09-20에 변환한 폴더에는 tokenizer.json만 있었고, faster-whisper는 turbo에 멜 80개를 썼다.
     (tmp_path / "tokenizer.json").write_text("{}", encoding="utf-8")
     assert feature_kwargs(tmp_path, n_mels) == {"feature_size": n_mels}
 
@@ -63,28 +62,29 @@ def test_a_config_that_disagrees_with_the_model_is_refused(tmp_path):
         feature_kwargs(tmp_path, TURBO_MEL_BINS)
 
 
-# 모델을 띄운 뒤 묶음을 읽으려던 순간에 던지는 예외. 이 순서(모델 먼저, 오디오 나중)를 확인하는 데 쓴다.
 class Reached(Exception):
-    """The model was loaded and the set was about to be read."""
+    """모델을 띄웠고 묶음을 읽으려던 참이다. 이 순서(모델 먼저, 오디오 나중)를 확인하는 데 쓰는 예외다."""
 
 
-# 가중치 없는 가짜 WhisperModel: 변환된 turbo 모델(n_mels 128)처럼 보이지만 faster-whisper 기본 특징
-# 추출기(80개)를 가진 상태로 만든다. 마지막으로 만든 객체를 last에 남겨 테스트가 꺼내 본다.
 class FakeWhisperModel:
-    """faster_whisper.WhisperModel for a turbo folder without preprocessor_config.json, without weights."""
+    """preprocessor_config.json이 없는 turbo 폴더를 연 faster_whisper.WhisperModel 흉내(가중치 없음).
+
+    변환된 turbo 모델(n_mels 128)처럼 보이지만 faster-whisper 기본 특징 추출기(80개)를 가진 상태로 만든다.
+    마지막으로 만든 객체를 last에 남겨 테스트가 꺼내 본다.
+    """
 
     def __init__(self, path, device, compute_type):
         from faster_whisper.feature_extractor import FeatureExtractor
 
         self.model = type("Ct2Whisper", (), {"n_mels": TURBO_MEL_BINS})()
-        self.feature_extractor = FeatureExtractor()  # what faster-whisper builds: 80 bins
+        self.feature_extractor = FeatureExtractor()  # faster-whisper가 만드는 것: 멜 80개
         FakeWhisperModel.last = self
 
 
 # evaluate_ct2.main이 묶음을 읽기 전에 특징 추출기를 128개로 바꿔 두는지. 리포트 위치·커밋·모델·묶음 읽기는
 # monkeypatch로 바꿔 실제 파일과 GPU를 쓰지 않는다.
 def test_evaluate_ct2_uses_128_mel_bins_for_turbo_before_reading_audio(tmp_path, monkeypatch):
-    pytest.importorskip("faster_whisper")  # the ct2 dependency group; CI does not install it
+    pytest.importorskip("faster_whisper")  # ct2 의존성 묶음. CI에는 설치하지 않는다
     from whisper_ko_ft import evaluate_ct2
 
     def stop(*args, **kwargs):
@@ -124,7 +124,7 @@ def test_evaluate_ct2_no_report_skips_the_existing_report_check(tmp_path, monkey
     with pytest.raises(SystemExit):
         evaluate_ct2.main()
     assert "--overwrite" in capsys.readouterr().err
-    monkeypatch.setattr(sys, "argv", [*args, "--no-report"])  # speed runs: the report is not replaced
+    monkeypatch.setattr(sys, "argv", [*args, "--no-report"])  # 속도 측정: 리포트를 바꿔 쓰지 않는다
     with pytest.raises(Reached):
         evaluate_ct2.main()
 
@@ -163,8 +163,8 @@ def test_evaluate_ct2_counts_empty_hypotheses_over_scored_utterances_only(tmp_pa
     texts = {"spoken": "가나다", "silent": "라마", "blank": "바사", "no-ref-1": "", "no-ref-2": ""}
     TranscribingModel.segments = {
         "spoken": [Segment("가나다")],
-        "silent": [],  # nothing transcribed
-        "blank": [Segment(" "), Segment(" ")],  # joins to a single space
+        "silent": [],  # 받아 적은 것이 없다
+        "blank": [Segment(" "), Segment(" ")],  # 이으면 공백 하나가 된다
         "no-ref-1": [],
         "no-ref-2": [],
     }

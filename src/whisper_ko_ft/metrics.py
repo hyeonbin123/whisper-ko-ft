@@ -1,4 +1,4 @@
-"""Error rates with utterance-level bootstrap intervals (rules in docs/experiments.md, "지표")."""
+"""오류율과 발화 단위 부트스트랩 구간(규칙은 docs/experiments.md "지표")."""
 
 # [파일 역할] 채점의 핵심. 발화 하나의 편집 수(score), 묶음 전체의 오류율(error_rate), 발화 단위 부트스트랩
 # 신뢰구간(interval), 두 모델의 짝지은 차이 구간(difference_interval)을 계산한다.
@@ -31,10 +31,10 @@ BOOTSTRAP_SEED = 0
 # score의 결과. 정규화한 정답·가설, 편집 수(치환 + 삭제 + 삽입), 정답 길이(한국어는 글자 수, 영어는 단어 수).
 @dataclass(frozen=True)
 class Scored:
-    reference: str  # normalized
-    hypothesis: str  # normalized
+    reference: str  # 정규화한 정답
+    hypothesis: str  # 정규화한 가설
     edits: int
-    length: int  # reference characters (ko) or words (en)
+    length: int  # 정답 길이: 한국어(ko)는 글자 수, 영어(en)는 단어 수
 
 
 # 발화 하나를 채점한다. 정규화한 정답이 비면 None을 돌려준다(길이 0으로는 오류율을 낼 수 없다).
@@ -42,7 +42,7 @@ class Scored:
 # 호출 위치: evaluate.score_rows(evaluate·evaluate_qwen의 리포트), evaluate_ct2, train의 체크포인트 평가,
 # analyze의 다시 채점, tests/test_recorded_reports.py.
 def score(reference: str, hypothesis: str, language: str) -> Scored | None:
-    """Edit counts of one utterance, or None when the normalized reference is empty."""
+    """발화 하나의 편집 수. 정규화한 정답이 비어 있으면 None."""
     ref, hyp = normalize(reference, language), normalize(hypothesis, language)
     if not ref:
         return None
@@ -59,9 +59,11 @@ def score(reference: str, hypothesis: str, language: str) -> Scored | None:
     return Scored(ref, hyp, edits, out.hits + out.substitutions + out.deletions)
 
 
-# 묶음 전체 오류율 = 편집 수 합 ÷ 정답 길이 합. 입력은 발화별 편집 수와 정답 길이 배열(같은 순서).
 def error_rate(edits: np.ndarray, lengths: np.ndarray) -> float:
-    """Corpus-level rate: total edits over total reference length."""
+    """묶음 전체 기준 오류율 = 편집 수 합 ÷ 정답 길이 합.
+
+    입력은 발화별 편집 수와 정답 길이 배열(같은 순서)이다.
+    """
     return float(edits.sum() / lengths.sum())
 
 
@@ -76,7 +78,7 @@ def _resample_indices(count: int) -> np.ndarray:
 # 백분위를 낸다. 글자가 아니라 발화를 단위로 뽑는다(docs/experiments.md '지표').
 # 호출 위치: evaluate·evaluate_ct2·evaluate_qwen의 리포트 요약, analyze의 표.
 def interval(edits: np.ndarray, lengths: np.ndarray) -> tuple[float, float]:
-    """95% bootstrap interval of the corpus-level rate, resampling utterances."""
+    """묶음 전체 기준 오류율의 95% 부트스트랩 구간. 발화를 단위로 재표집한다."""
     picks = _resample_indices(len(edits))
     # picks로 인덱싱하면 (1,000, 발화 수) 배열이 되고, 행마다 합해 표본 묶음 1,000개의 오류율을 한 번에
     # 구한다.
@@ -91,7 +93,7 @@ def interval(edits: np.ndarray, lengths: np.ndarray) -> tuple[float, float]:
 # 위치: analyze.
 # 주의: 세 배열은 같은 발화를 같은 순서로 담아야 한다.
 def difference_interval(edits_a: np.ndarray, edits_b: np.ndarray, lengths: np.ndarray) -> tuple[float, float]:
-    """95% interval of rate(a) - rate(b) over the same utterances (paired resampling)."""
+    """같은 발화들에서 rate(a) - rate(b)의 95% 구간(짝지은 재표집)."""
     picks = _resample_indices(len(lengths))
     # 정답 길이는 두 모델이 같으므로 한 번만 합해 양쪽 분모로 쓴다.
     totals = lengths[picks].sum(axis=1)

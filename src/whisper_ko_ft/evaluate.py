@@ -1,17 +1,17 @@
-"""Transcribe a set with a Whisper model and write an error-rate report.
+"""Whisper 모델로 묶음을 받아 적고 오류율 리포트를 쓴다.
 
-Usage:
+사용법:
     uv run python -m whisper_ko_ft.evaluate --model openai/whisper-small --set zeroth-val
     uv run python -m whisper_ko_ft.evaluate --model outputs/small-a/best --set fleurs-ko-val --name small-a
 
-Decoding settings are fixed in docs/experiments.md ("디코딩"). Test sets need --allow-test, because they
-are measured once per stage. The report keeps every reference and hypothesis so rates can be recomputed.
-With --channel telephone the report is written as <set>@telephone.json. Reports are committed records: an
-existing one is replaced only with --overwrite, and --adapter needs --name.
+디코딩 설정은 docs/experiments.md("디코딩")에 고정되어 있다. test 묶음은 단계마다 한 번만 재므로
+--allow-test가 있어야 한다. 리포트에는 모든 정답과 가설을 남겨 오류율을 다시 계산할 수 있게 한다.
+--channel telephone이면 리포트를 <묶음>@telephone.json으로 쓴다. 리포트는 커밋되는 기록이라 이미 있는
+리포트는 --overwrite가 있을 때만 바꿔 쓰고, --adapter에는 --name이 필요하다.
 
---fallback turns on the temperature fallback of transformers' Whisper generate (stage 8): a decoding whose
-token bytes compress too well (a loop), or with a low mean log-probability ("ratio-logprob" only), is decoded
-again at the next temperature. The report then records each utterance's final temperature.
+--fallback은 transformers Whisper generate의 temperature 재시도를 켠다(8단계): 토큰 바이트가 너무 잘
+압축되는(되풀이) 디코딩, 또는 평균 로그확률이 낮은 디코딩("ratio-logprob"일 때만)을 다음 temperature로 다시
+디코딩한다. 이때 리포트에 발화마다 마지막 temperature를 적는다.
 """
 
 # [파일 역할] 이 프로젝트의 기본 측정 하네스. Whisper 모델(기준 모델, 전체 파인튜닝 체크포인트, 또는 기본 모델
@@ -65,9 +65,9 @@ _DIGIT = re.compile(r"[0-9]")
 # 디코딩한다.
 # FALLBACKS: 8단계 후보. ratio(D1a)는 생성한 토큰 바이트의 zlib 압축비가 1.35를 넘으면(같은 구절이 되풀이되면
 # 잘 압축된다), ratio-logprob(D1)은 거기에 더해 평균 로그확률이 −1.0보다 낮을 때도 다시 디코딩한다. 두 값은
-# transformers 문서의 권장값이고 바꾸지 않기로 했다(docs/experiments.md 8단계).
-# Stage 8 candidates (docs/experiments.md): D1a = "ratio", D1 = "ratio-logprob". The ratio is zlib on the
-# token bytes, as transformers computes it (1.35 is its documented value); faster-whisper's 2.4 uses the text.
+# transformers 문서의 권장값이고 바꾸지 않기로 했다(docs/experiments.md 8단계). 압축비는 transformers가
+# 계산하는 대로 토큰 바이트에 zlib을 적용한 값이다. faster-whisper의 기준 2.4는 글자에 적용한 값이라 서로
+# 다르다.
 TEMPERATURES = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
 FALLBACKS: dict[str, dict[str, float]] = {
     "ratio": {"compression_ratio_threshold": 1.35},
@@ -86,9 +86,9 @@ def decoding_settings(
     compression_ratio_threshold: float | None = None,
     logprob_threshold: float | None = None,
 ) -> dict:
-    """Extra generate arguments: none for greedy decoding, the fallback candidate otherwise.
+    """generate에 더 넘길 인자: greedy 디코딩이면 없고, 아니면 재시도 후보의 설정이다.
 
-    The two thresholds replace the candidate's values in smoke runs (to force decoding again).
+    두 기준값은 스모크 실행에서 후보의 값을 바꿀 때 쓴다(다시 디코딩을 일부러 일으키려고).
     """
     if fallback is None:
         if compression_ratio_threshold is not None or logprob_threshold is not None:
@@ -114,10 +114,10 @@ def decoding_settings(
 def final_temperatures(
     calls: list[tuple[float | None, bool]], batch_size: int, temperatures: Sequence[float]
 ) -> list[tuple[float, bool]]:
-    """(final temperature, still failing at the last temperature) of each utterance of a batch.
+    """배치의 발화마다 (마지막 temperature, 마지막 temperature에서도 기준을 넘었는지).
 
-    `calls` are the fallback decisions in the order transformers makes them: one per utterance at the first
-    temperature, then one per utterance still failing, in batch order, at each higher temperature.
+    `calls`는 transformers가 내린 재시도 결정을 내린 순서대로 담는다: 첫 temperature에서 발화마다 하나씩,
+    그다음 더 높은 temperature마다 아직 기준을 넘는 발화에 대해 배치 순서대로 하나씩.
     """
     # 처음에는 모든 발화가 temperature 0, 기준 통과로 시작한다. pending은 아직 다음 단계로 넘어갈 수 있는
     # 발화, position은 calls에서 읽은 위치다.
@@ -154,10 +154,10 @@ def final_temperatures(
 # 주의: 비공개 메서드라 transformers 버전이 바뀌면 인자 위치가 달라질 수 있다. 그때는 final_temperatures의
 # 검사가 멈춰 알린다. tests/test_decoding.py가 작은 무작위 Whisper로 실제 경로를 확인한다.
 class FallbackTrace:
-    """Records which utterances transformers decoded again, and at what temperature.
+    """transformers가 어떤 발화를 어느 temperature로 다시 디코딩했는지 기록한다.
 
-    Whisper's generate decides per decoding in `_need_fallback` (transformers 5.17, generation_whisper.py) but
-    does not return the decisions, so the method is wrapped on this model instance.
+    Whisper의 generate는 디코딩마다 `_need_fallback`에서 재시도를 판단하지만(transformers 5.17,
+    generation_whisper.py) 그 판단을 돌려주지 않는다. 그래서 이 모델 객체의 그 메서드를 감싼다.
     """
 
     def __init__(self, model, settings: dict) -> None:
@@ -184,7 +184,7 @@ class FallbackTrace:
 # generate 결과에서 토큰 ID 텐서를 꺼낸다. 로그확률 기준(D1)처럼 점수를 돌려받는 경로에서는 출력 객체가 오고,
 # 그 밖에는 텐서가 온다. 두 경우를 한곳에서 맞춘다.
 def sequences(output) -> torch.Tensor:
-    """Token ids from generate, which returns a tensor or, with return_dict_in_generate, an output object."""
+    """generate 결과의 토큰 ID. generate는 텐서를, return_dict_in_generate이면 출력 객체를 돌려준다."""
     return output if isinstance(output, torch.Tensor) else output["sequences"]
 
 
@@ -201,7 +201,7 @@ def transcribe(
     settings: dict,
     trace: FallbackTrace | None = None,
 ) -> tuple[list[str], list[tuple[float, bool]] | None]:
-    """Hypotheses of one batch, and each utterance's final temperature when the fallback is traced."""
+    """배치 하나의 가설 목록과, 재시도를 기록할 때는 발화마다 마지막 temperature."""
     # 추론만 하므로 inference_mode로 기울기 기록을 끈다(메모리와 시간 절약).
     with torch.inference_mode():
         output = model.generate(
@@ -223,9 +223,9 @@ def transcribe(
 # 돌려준다(요약의 skipped_empty_reference). 가설에 아라비아 숫자가 있는지(has_digit)도 적는다.
 # 호출 위치: main, evaluate_qwen(raw와 fixed 리포트).
 def score_rows(rows: list[dict], language: str) -> int:
-    """Edits and reference length of each row (0 and 0 when the normalized reference is empty).
+    """행마다 편집 수와 정답 길이를 채운다(정규화한 정답이 비면 0과 0).
 
-    Returns the number of rows skipped for an empty reference.
+    정답이 비어 건너뛴 행의 수를 돌려준다.
     """
     skipped = 0
     for row in rows:
@@ -239,10 +239,12 @@ def score_rows(rows: list[dict], language: str) -> int:
     return skipped
 
 
-# 배치마다 걸린 시간의 중앙값과 90번째 백분위. 배치 1이면 한 발화의 지연이다. 9단계 속도 비교(Qwen과 turbo의
-# 한 발화 지연)를 위해 두 하네스의 요약에 넣었다(docs/experiments.md 9단계 '속도와 GPU 메모리').
 def batch_seconds_summary(seconds: list[float]) -> dict:
-    """Median and 90th percentile of the time per batch: the latency of one utterance at batch size 1."""
+    """배치마다 걸린 시간의 중앙값과 90번째 백분위. 배치 크기 1이면 발화 하나의 지연이다.
+
+    9단계 속도 비교(Qwen과 turbo의 한 발화 지연)를 위해 두 하네스의 요약에 넣었다(docs/experiments.md 9단계
+    '속도와 GPU 메모리').
+    """
     if not seconds:
         return {"batch_seconds_median": None, "batch_seconds_p90": None}
     median, p90 = np.percentile(seconds, [50, 90])
@@ -254,7 +256,7 @@ def batch_seconds_summary(seconds: list[float]) -> dict:
 # 재시도를 쓰지 않은 리포트는 재시도 관련 두 값을 None으로 둔다.
 # 되풀이 수는 원래 채점 기준이다. Zeroth의 맞춘 채점 기준 되풀이는 analyze loops --harmonized로 따로 센다.
 def decoding_counts(rows: list[dict], fallback: bool) -> dict:
-    """Summary counts over the scored utterances: decoded again, loops (more edits than reference), empty."""
+    """채점한 발화에서 센 요약 개수: 다시 디코딩한 발화, 되풀이(편집 수 > 정답 길이), 빈 가설."""
     kept = [row for row in rows if row["length"]]
     return {
         "redecoded": sum(row["temperature"] > 0 for row in kept) if fallback else None,
@@ -269,7 +271,7 @@ def decoding_counts(rows: list[dict], fallback: bool) -> dict:
 # git이 없으면 'unknown', 커밋이 없으면 'uncommitted'. 호출 위치:
 # evaluate·evaluate_ct2·evaluate_qwen·train·train_qwen.
 def git_commit(root: Path = ROOT) -> str:
-    """Short HEAD hash; '+dirty' when code or dependency files differ from HEAD (not reports or docs)."""
+    """짧은 HEAD 해시. 코드나 의존성 파일이 HEAD와 다르면 '+dirty'를 붙인다(리포트·문서는 보지 않는다)."""
     try:
         head = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True, text=True
@@ -306,26 +308,26 @@ def load_model(path: str, adapter: str | None) -> tuple[WhisperForConditionalGen
 # --overwrite, --fallback과 --seed(8단계), 스모크용 기준값 둘.
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", required=True, help="Hugging Face model ID or a local checkpoint folder")
-    parser.add_argument("--adapter", help="LoRA adapter folder to merge into --model")
+    parser.add_argument("--model", required=True, help="Hugging Face 모델 ID 또는 로컬 체크포인트 폴더")
+    parser.add_argument("--adapter", help="--model에 합칠 LoRA 어댑터 폴더")
     parser.add_argument("--set", required=True, dest="set_name")
     parser.add_argument(
-        "--name", help="report name; defaults to the last part of --model (required with --adapter)"
+        "--name", help="리포트 이름. 기본값은 --model 경로의 마지막 부분(--adapter와 함께면 필수)"
     )
     parser.add_argument(
-        "--channel", choices=list(CHANNELS), help="pass the audio through a channel simulation"
+        "--channel", choices=list(CHANNELS), help="오디오를 채널 흉내(전화 음질 등)에 통과시킨다"
     )
     parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--limit", type=int, help="only the first N utterances (smoke runs, speed checks)")
-    parser.add_argument("--allow-test", action="store_true", help="required for *-test sets")
-    parser.add_argument("--no-report", action="store_true", help="print the summary only")
-    parser.add_argument("--overwrite", action="store_true", help="replace an existing report")
-    parser.add_argument("--fallback", choices=list(FALLBACKS), help="temperature fallback (stage 8)")
-    parser.add_argument("--seed", type=int, default=0, help="sampling seed of the fallback, per batch")
+    parser.add_argument("--limit", type=int, help="앞의 N개 발화만 잰다(스모크 실행, 속도 확인)")
+    parser.add_argument("--allow-test", action="store_true", help="*-test 묶음을 잴 때 필요하다")
+    parser.add_argument("--no-report", action="store_true", help="요약만 찍고 리포트는 쓰지 않는다")
+    parser.add_argument("--overwrite", action="store_true", help="이미 있는 리포트를 바꿔 쓴다")
+    parser.add_argument("--fallback", choices=list(FALLBACKS), help="temperature 재시도 후보(8단계)")
+    parser.add_argument("--seed", type=int, default=0, help="재시도 표본 시드(배치마다 첫 발화 번호를 더함)")
     parser.add_argument(
-        "--compression-ratio-threshold", type=float, help="smoke runs only (--no-report): replace 1.35"
+        "--compression-ratio-threshold", type=float, help="스모크 전용(--no-report): 1.35 대신 쓴다"
     )
-    parser.add_argument("--logprob-threshold", type=float, help="smoke runs only (--no-report): replace -1.0")
+    parser.add_argument("--logprob-threshold", type=float, help="스모크 전용(--no-report): -1.0 대신 쓴다")
     args = parser.parse_args()
 
     # 규칙을 지키게 하는 검사들. test 묶음은 단계마다 한 번만 재므로 --allow-test가 있어야 한다. --adapter로
@@ -348,7 +350,7 @@ def main() -> None:
     target = REPORTS / (args.name or Path(args.model).name) / f"{args.set_name}{suffix}.json"
     if not args.no_report and target.exists() and not args.overwrite:
         parser.error(f"{target.relative_to(ROOT)} exists; pass --overwrite to measure it again")
-    commit = git_commit()  # the code that measures, before any of it can change
+    commit = git_commit()  # 측정하는 코드의 커밋을, 코드가 바뀔 수 있기 전에 기록한다
 
     # 묶음을 읽고(--limit이면 앞 N개만), 모델을 올린다. 재시도 후보면 이 모델 객체에 FallbackTrace를 건다.
     language, utterances = load_set(args.set_name)
@@ -380,7 +382,7 @@ def main() -> None:
         # 재시도는 temperature > 0에서 표본을 뽑는다. 시드를 '--seed + 배치 첫 발화 번호'로 배치마다 정해,
         # 결과가 실행 순서가 아니라 배치 내용에만 달리게 한다(docs/experiments.md 8단계).
         if args.fallback:
-            torch.manual_seed(args.seed + begin)  # sampled decodings depend only on the batch, not on the run
+            torch.manual_seed(args.seed + begin)  # 표본 디코딩이 실행 순서가 아니라 배치에만 달리게 한다
         # 모델이 fp16이므로 특징도 fp16으로 바꿔 넘긴다.
         texts, decisions = transcribe(
             model,
@@ -391,7 +393,7 @@ def main() -> None:
             settings,
             trace,
         )
-        batch_seconds.append(time.perf_counter() - batch_started)  # decoding the text waits for the GPU
+        batch_seconds.append(time.perf_counter() - batch_started)  # 글로 바꾸는 단계가 GPU 완료를 기다린다
         # 발화별 행: ID, 화자, 길이, 정답, 가설(앞뒤 공백 제거). 재시도 후보면 마지막 temperature와
         # fallback_exhausted를 더한다. 이 행들이 리포트의 utterances가 되어 모든 수치를 나중에 다시 계산하는
         # 근거가 된다.

@@ -1,12 +1,12 @@
-"""Turn the downloaded parquet files into audio stores and the evaluation/training sets.
+"""내려받은 parquet 파일을 오디오 저장소와 평가·학습 묶음으로 바꾼다.
 
-Usage:
+사용법:
     uv run python -m whisper_ko_ft.prepare
 
-Writes data/cache/<store>.int16 + <store>.json, and data/cache/sets/<set>.json:
-    zeroth-train    Zeroth-Korean train without the validation speakers
-    zeroth-val      the 10 validation speakers (docs/experiments.md, "데이터 분리")
-    zeroth-val500   50 utterances per validation speaker, for picking checkpoints during training
+data/cache/<저장소>.int16 + <저장소>.json과 data/cache/sets/<묶음>.json을 쓴다:
+    zeroth-train    validation 화자를 뺀 Zeroth-Korean train
+    zeroth-val      validation 화자 10명의 발화 전부(docs/experiments.md "데이터 분리")
+    zeroth-val500   validation 화자마다 50발화. 학습 중 체크포인트를 고를 때 쓴다
     zeroth-test, fleurs-ko-val, fleurs-ko-test, fleurs-en-val, fleurs-en-test
 """
 
@@ -43,7 +43,7 @@ from whisper_ko_ft.store import SAMPLE_RATE
 
 # STORES: 만들 오디오 저장소 6개와 각각의 원본 폴더, 정답 열 이름, 화자 열 이름. 두 데이터셋의 열 이름이
 # 달라(Zeroth는 text·speaker_id, FLEURS는 transcription) 여기서 맞춘다. FLEURS는 화자 열을 쓰지 않아 None이다.
-# store -> (parquet folder, text column, speaker column or None)
+# 형식: 저장소 이름 -> (parquet 폴더, 정답 열, 화자 열 또는 None)
 STORES = {
     "zeroth_train": (RAW / "zeroth" / "default" / "train", "text", "speaker_id"),
     "zeroth_test": (RAW / "zeroth" / "default" / "test", "text", "speaker_id"),
@@ -54,9 +54,8 @@ STORES = {
 }
 
 
-# parquet에 든 오디오 바이트 하나를 16 kHz 모노 int16 표본으로 바꾼다. 호출 위치: build_store.
 def decode(audio_bytes: bytes) -> np.ndarray:
-    """16 kHz mono int16 samples."""
+    """parquet에 든 오디오 바이트 하나를 16 kHz 모노 int16 표본으로 바꾼다. 호출 위치: build_store."""
     # always_2d=True로 받아 모노·스테레오를 같은 모양(표본 수 × 채널 수)으로 다루고, 채널 평균으로 모노를
     # 만든다.
     samples, rate = sf.read(io.BytesIO(audio_bytes), dtype="float32", always_2d=True)
@@ -74,7 +73,7 @@ def decode(audio_bytes: bytes) -> np.ndarray:
 # 색인 JSON이 이미 있으면 다시 디코딩하지 않고 그것을 읽어 돌려준다. 저장소를 다시 만들려면 색인 파일을
 # 지운다.
 def build_store(name: str, folder: Path, text_column: str, speaker_column: str | None) -> list[dict]:
-    """Write <name>.int16 and return its index entries. Skips the work if the index already exists."""
+    """<name>.int16을 쓰고 색인 항목을 돌려준다. 색인이 이미 있으면 작업을 건너뛴다."""
     index_path = CACHE / f"{name}.json"
     if index_path.exists():
         return json.loads(index_path.read_text(encoding="utf-8"))
@@ -101,8 +100,8 @@ def build_store(name: str, folder: Path, text_column: str, speaker_column: str |
                     out.write(samples.tobytes())
                     # 같은 ID가 다시 나오면 두 번째부터 '<ID>#2', '#3' …을 붙여 발화마다 고유한 ID를 만든다.
                     # 1단계에서 표를 만드는 코드가 ID로 발화를 찾다가 FLEURS 행 일부가 빠진 오류가 있어 이렇게
-                    # 고쳤다(docs/experiments.md 1단계 결과).
-                    # FLEURS ids are sentence ids: several speakers read the same sentence.
+                    # 고쳤다(docs/experiments.md 1단계 결과). FLEURS의 id는 문장 ID라 여러 화자가 같은 문장을
+                    # 읽으면 같은 id가 여러 번 나온다.
                     source_id = str(row["id"])
                     seen[source_id] = seen.get(source_id, 0) + 1
                     entries.append(

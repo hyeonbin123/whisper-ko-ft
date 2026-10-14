@@ -46,7 +46,7 @@ def test_init_adapter_implies_lora_with_the_saved_settings(tmp_path):
     resolve_lora_args(args)
 
     used = (args.lora_r, args.lora_alpha, args.lora_dropout, args.lora_targets)
-    assert used == (16, 32, 0.05, ["fc1", "q_proj"])  # not the --lora-* values
+    assert used == (16, 32, 0.05, ["fc1", "q_proj"])  # --lora-* 값이 아니다
 
 
 # 새 LoRA에서 alpha를 주지 않으면 2 × rank가 된다(3단계 rank 16 → alpha 32).
@@ -95,7 +95,7 @@ def test_init_adapter_without_lora_r_loads_the_base_in_fp16_and_the_adapter(tmp_
     monkeypatch.setattr(train.WhisperProcessor, "from_pretrained", lambda *args, **kwargs: processor)
     monkeypatch.setattr(train.WhisperForConditionalGeneration, "from_pretrained", fake_model)
     monkeypatch.setattr("peft.PeftModel.from_pretrained", fake_adapter)
-    monkeypatch.setattr(train, "Seq2SeqTrainingArguments", training_starts)  # stop if the adapter is skipped
+    monkeypatch.setattr(train, "Seq2SeqTrainingArguments", training_starts)  # 어댑터를 건너뛰면 여기서 멈춘다
     argv = ["train", "--run-name", "x", "--learning-rate", "5e-5", "--init-adapter", str(tmp_path)]
     monkeypatch.setattr(sys, "argv", argv)
 

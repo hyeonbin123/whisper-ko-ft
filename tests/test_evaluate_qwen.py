@@ -1,4 +1,4 @@
-"""Stage 9: the Qwen3-ASR harness (docs/experiments.md, 9단계). No weights: stubs and tiny modules."""
+"""9단계: Qwen3-ASR 하네스(docs/experiments.md 9단계). 가중치 없이 대역과 작은 모듈로 확인한다."""
 
 # [테스트 묶음] evaluate_qwen.py(9·10단계 Qwen3-ASR 하네스)를 가중치 없이 확인한다: raw 출력이 공식 파서에서
 # 반복 제거만 뺀 것인지, 앞 30초 자르기, 생성 토큰 수와 한도 도달, fp16 넘침 감시, 한 디코딩에서 두 리포트,
@@ -28,9 +28,8 @@ EOS = (151643, 151645)
 LOOP = "그리고 다시 " + "도와서는 그 " * 30
 
 
-# 공식 파서의 결과(반복 제거 포함). fixed 출력과 같은 것이다.
 def official(text: str) -> str:
-    """What processor.extract_transcription returns (the official parse, with its repetition fix)."""
+    """processor.extract_transcription이 돌려주는 것(반복 제거를 포함한 공식 파싱). fixed 출력과 같다."""
     return _parse_single_output(text)["transcription"]
 
 
@@ -39,15 +38,15 @@ def official(text: str) -> str:
 @pytest.mark.parametrize(
     ("generated", "expected"),
     [
-        ("지난해 3월 김 전 장관의 동료인", "지난해 3월 김 전 장관의 동료인"),  # language forced in the prompt
-        ("language Korean<asr_text>조계종이 처음이다.", "조계종이 처음이다."),  # the model wrote the marker
+        ("지난해 3월 김 전 장관의 동료인", "지난해 3월 김 전 장관의 동료인"),  # 프롬프트에서 언어 고정
+        ("language Korean<asr_text>조계종이 처음이다.", "조계종이 처음이다."),  # 모델이 표시를 적음
         ("  When you call someone.  ", "When you call someone."),
         ("", ""),
     ],
 )
 def test_raw_output_is_the_official_parse_without_the_repetition_fix(generated, expected):
     assert evaluate_qwen.raw_transcription(generated) == expected
-    assert official(generated) == expected  # nothing repeats here, so the two outputs agree
+    assert official(generated) == expected  # 되풀이가 없어 두 출력이 같다
 
 
 # 되풀이가 있는 글은 raw에서 그대로 남고(Whisper 하네스와 같은 조건), 공식 결과에서만 짧아진다.
@@ -70,9 +69,9 @@ def test_audio_is_cut_to_the_first_30_seconds_like_the_whisper_harness():
 def test_generated_lengths_count_tokens_before_the_end_and_flag_the_limit():
     generated = torch.tensor(
         [
-            [5, 6, EOS[1], EOS[1]],  # ended after two tokens, then padding
-            [5, 6, 7, 8],  # never ended: ran into the token limit
-            [EOS[0], EOS[1], EOS[1], EOS[1]],  # ended at once (empty output)
+            [5, 6, EOS[1], EOS[1]],  # 두 토큰 뒤에 끝나고 그 뒤는 패딩
+            [5, 6, 7, 8],  # 끝나지 않음: 토큰 한도에 닿았다
+            [EOS[0], EOS[1], EOS[1], EOS[1]],  # 바로 끝남(빈 출력)
         ]
     )
     assert evaluate_qwen.generated_lengths(generated, list(EOS)) == [(2, False), (4, True), (0, False)]
@@ -84,25 +83,26 @@ def test_nonfinite_watch_flags_the_rows_with_overflowing_logits():
     head = torch.nn.Linear(2, 3)
     watch = evaluate_qwen.NonFiniteWatch(head)
     with torch.inference_mode():
-        head(torch.tensor([[[1.0, 0.0]], [[0.0, 1.0]]]))  # one decoding step, two rows
-        head(torch.tensor([[[1.0, 0.0]], [[float("inf"), 1.0]]]))  # the second row overflows
+        head(torch.tensor([[[1.0, 0.0]], [[0.0, 1.0]]]))  # 디코딩 한 단계, 두 행
+        head(torch.tensor([[[1.0, 0.0]], [[float("inf"), 1.0]]]))  # 둘째 행이 넘친다
     assert watch.take(2) == [False, True]
-    assert watch.take(2) == [False, False]  # taken: the next batch starts clean
+    assert watch.take(2) == [False, False]  # 꺼낸 뒤에는 다음 배치가 깨끗하게 시작한다
 
 
-# 처리기가 돌려주는 BatchFeature 대역. to(device, dtype)를 기록만 하고 자신을 돌려준다.
 class Inputs(dict):
-    """Stands in for the processor's BatchFeature."""
+    """처리기가 돌려주는 BatchFeature 대역. to(device, dtype)를 기록만 하고 자신을 돌려준다."""
 
     def to(self, device, dtype):
         self.moved = (device, dtype)
         return self
 
 
-# Qwen3ASRProcessor 대역: 공식 입력 함수 호출(발화 수, 언어)을 기록하고, 토큰 11은 '안녕하세요.', 12는 LOOP로
-# 바꿔 글을 만든다. extract_transcription은 진짜 공식 파서를 쓴다.
 class Processor:
-    """Stands in for Qwen3ASRProcessor: token ids as text, end tokens dropped; the official parse."""
+    """Qwen3ASRProcessor 대역: 토큰 번호를 글로 바꾸고(끝 토큰은 뺀다), 파싱은 공식 파서를 쓴다.
+
+    공식 입력 함수 호출(발화 수, 언어)을 기록하고, 토큰 11은 '안녕하세요.', 12는 LOOP로 바꿔 글을 만든다.
+    extract_transcription은 진짜 공식 파서를 쓴다.
+    """
 
     def __init__(self) -> None:
         self.requests: list[tuple[int, str]] = []
@@ -121,10 +121,11 @@ class Processor:
         return [official(text) for text in texts]
 
 
-# 모델 대역: generate 인자를 저장하고, 프롬프트 3토큰 뒤에 생성 토큰이 붙은 결과를 돌려준다. 첫 행은 1토큰 뒤
-# 끝, 둘째 행은 끝 없이 3토큰(한도 도달).
 class Model:
-    """Stands in for the model: keeps the arguments of generate; prompt (3 tokens) + generated ids."""
+    """모델 대역: generate 인자를 저장하고, 프롬프트(3토큰) 뒤에 생성 토큰이 붙은 결과를 돌려준다.
+
+    첫 행은 1토큰 뒤 끝, 둘째 행은 끝 없이 3토큰(한도 도달)이다.
+    """
 
     class generation_config:  # noqa: N801
         eos_token_id = list(EOS)
@@ -144,7 +145,7 @@ def test_one_decoding_gives_both_outputs_with_the_registered_arguments():
     model, processor = Model(), Processor()
     audio = [np.zeros(SAMPLE_RATE, dtype=np.float32)] * 2
     out = evaluate_qwen.transcribe(model, processor, audio, "ko", "cpu", torch.float16)
-    assert processor.requests == [(2, "Korean")]  # the official prompt, language forced
+    assert processor.requests == [(2, "Korean")]  # 공식 프롬프트, 언어 고정
     assert model.kwargs == {
         "input_ids": model.kwargs["input_ids"],
         "input_features": "features",
@@ -184,14 +185,13 @@ def test_reports_score_each_output_on_its_own():
         assert summary["utterances"] == 2 and summary["skipped_empty_reference"] == 1
         assert summary["hit_token_limit"] == 1 and summary["nonfinite_utterances"] == 0
         assert summary["fixed_changed"] == 1
-    assert raw["summary"]["loops"] == 1  # more edits than reference characters
+    assert raw["summary"]["loops"] == 1  # 편집 수가 정답 글자 수보다 많다
     assert raw["summary"]["error_rate"] > fixed["summary"]["error_rate"]
-    json.dumps(payloads, ensure_ascii=False)  # what main writes
+    json.dumps(payloads, ensure_ascii=False)  # main이 쓰는 것
 
 
-# 인자 검사를 통과해 묶음을 읽으려던 순간에 던지는 예외.
 class Reached(Exception):
-    """The argument checks passed and the set was about to be loaded."""
+    """인자 검사를 통과했고 묶음을 불러오려던 참이다(그 순간에 던지는 예외)."""
 
 
 # 리포트 폴더를 임시 폴더로 바꾸고 묶음·모델 불러오기를 Reached로 바꾸는 fixture(실제 reports/와 GPU를 쓰지
@@ -273,7 +273,7 @@ def test_registered_models_have_a_pinned_revision_and_a_report_name(reports, mon
         run(monkeypatch, *other, "--set", "zeroth-val")
 
 
-# --- stage 10: a LoRA adapter merged into the base, and the telephone channel ---
+# --- 10단계: 기본 가중치에 합친 LoRA 어댑터, 그리고 전화 채널 ---
 
 
 # 10단계: 어댑터를 합쳐 잴 때는 --name이 필수다(학습 전 모델의 리포트 폴더에 섞이지 않게).
@@ -291,7 +291,7 @@ def test_channel_reports_are_written_as_set_at_channel(reports, monkeypatch, cap
     for name in ("qwen3-asr-1.7b", "qwen3-asr-1.7b-fixed"):
         (reports / name).mkdir()
         (reports / name / "zeroth-val@telephone.json").write_text("{}", encoding="utf-8")
-    with pytest.raises(Reached):  # the clean-audio reports are other files
+    with pytest.raises(Reached):  # 깨끗한 음성 리포트는 다른 파일이다
         run(monkeypatch, "--set", "zeroth-val")
     with pytest.raises(SystemExit):
         run(monkeypatch, "--set", "zeroth-val", "--channel", "telephone")

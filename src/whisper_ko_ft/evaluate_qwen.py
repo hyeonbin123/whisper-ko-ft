@@ -1,30 +1,29 @@
-"""Transcribe a set with Qwen3-ASR (stage 9) and write two reports from one decoding: raw and fixed.
+"""Qwen3-ASR로 묶음을 받아 적고(9단계), 한 번의 디코딩에서 raw와 fixed 두 리포트를 쓴다.
 
-Usage:
+사용법:
     uv run python -m whisper_ko_ft.evaluate_qwen --set zeroth-val
     uv run python -m whisper_ko_ft.evaluate_qwen --model Qwen/Qwen3-ASR-0.6B-hf --set zeroth-val
-    uv run python -m whisper_ko_ft.evaluate_qwen --set zeroth-val500 --limit 100 --out <file>  (fp16 check)
-    uv run python -m whisper_ko_ft.evaluate_qwen --adapter outputs/qwen-qn/checkpoint-1000 --name <name>
-        --set zeroth-val [--channel telephone]  (stage 10)
+    uv run python -m whisper_ko_ft.evaluate_qwen --set zeroth-val500 --limit 100 --out <파일>  (fp16 점검)
+    uv run python -m whisper_ko_ft.evaluate_qwen --adapter outputs/qwen-qn/checkpoint-1000 --name <이름>
+        --set zeroth-val [--channel telephone]  (10단계)
 
-Decoding is fixed in docs/experiments.md (9단계): the model's own Transformers classes (transformers >= 5.13)
-at a pinned revision, fp16 (or fp32), SDPA attention, greedy, the language forced through the official prompt
-(`apply_transcription_request`, which ends the prompt with "language Korean<asr_text>"), at most 256 new
-tokens, batch 16, and the first 30 seconds of audio, as the Whisper harness hears them.
+디코딩 설정은 docs/experiments.md(9단계)에 고정되어 있다: 고정한 revision의 모델 전용 Transformers
+클래스(transformers >= 5.13), fp16(또는 fp32), SDPA 어텐션, greedy, 공식 프롬프트로 언어
+고정(`apply_transcription_request`가 프롬프트를 "language Korean<asr_text>"로 끝낸다), 새 토큰 최대 256개,
+배치 16, 그리고 Whisper 하네스가 듣는 것과 같은 오디오 앞 30초.
 
-One decoding gives two outputs. "raw" is the generated text after the <asr_text> marker with nothing else
-done to it; it goes to reports/<name>/. "fixed" is the official output, `processor.extract_transcription`,
-which also runs the original implementation's repetition fix (`_detect_and_fix_repetitions`); it goes to
-reports/<name>-fixed/. The Whisper harness has no such fix, so the verdict uses raw.
+한 번의 디코딩에서 출력 두 개가 나온다. "raw"는 <asr_text> 표시 뒤에 생성된 글에 아무것도 더 하지 않은
+것이고 reports/<이름>/에 간다. "fixed"는 공식 출력 `processor.extract_transcription`이며, 원래 구현의 반복
+제거(`_detect_and_fix_repetitions`)까지 거친다. reports/<이름>-fixed/에 간다. Whisper 하네스에는 그런 반복
+제거가 없으므로 판정은 raw로 한다.
 
-Rows also keep the number of generated tokens, whether the decoding ran into the token limit, and whether any
-logits of that utterance were not finite (an fp16 overflow). A CPU run is never a measurement: it needs --out
-(the fp32 half of the fp16 check) or --no-report.
+발화 행에는 생성한 토큰 수, 디코딩이 토큰 한도에 닿았는지, 그 발화의 로짓 중 유한하지 않은 값(fp16 넘침)이
+있었는지도 남긴다. CPU 실행은 결코 측정이 아니다: --out(fp16 점검의 fp32 쪽)이나 --no-report가 있어야 한다.
 
-Stage 10: --adapter merges a LoRA adapter (`train_qwen`) into the fp16 base before decoding, as `evaluate`
-does for Whisper; it needs --name, and the reports record the adapter folder and the SHA-256 of its weights.
---out also takes the checkpoint runs on zeroth-val500. --channel telephone passes the audio through the
-telephone channel of stage 4 before the first 30 seconds are kept, and the reports go to <set>@telephone.json.
+10단계: --adapter는 `evaluate`가 Whisper에 하듯 디코딩 전에 LoRA 어댑터(`train_qwen`)를 fp16 기본 가중치에
+합친다. --name이 필요하고, 리포트에 어댑터 폴더와 가중치의 SHA-256을 적는다. --out은 zeroth-val500에서
+체크포인트를 재는 실행에도 쓴다. --channel telephone은 앞 30초를 자르기 전에 오디오를 4단계의 전화 채널에
+통과시키고, 리포트는 <묶음>@telephone.json으로 간다.
 """
 
 # [파일 역할] 9·10단계의 측정 하네스. 계열이 다른 공개 모델 Qwen3-ASR(오디오 인코더 + Qwen3 언어 모델)로
@@ -75,9 +74,9 @@ from whisper_ko_ft.store import SAMPLE_RATE, AudioStore, load_set
 
 # DEFAULT_MODEL: 9·10단계 후보 Qwen3-ASR-1.7B의 Transformers 판(-hf).
 # REGISTERED: 모델 → (고정한 revision, 리포트 이름). revision을 고정해 Hub의 모델이 바뀌어도 같은 가중치로
-# 다시 잴 수 있게 한다(docs/experiments.md 9단계 '재기 전에 아는 것').
+# 다시 잴 수 있게 한다(docs/experiments.md 9단계 '재기 전에 아는 것'). revision은 2026-10-04에 내려받은
+# 것이다.
 DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B-hf"
-# Model -> (pinned revision, report name). The revisions are the ones downloaded on 2026-10-04.
 REGISTERED = {
     "Qwen/Qwen3-ASR-1.7B-hf": ("bcd2b5b7f32b480ab5790554cfa8347f246a14f3", "qwen3-asr-1.7b"),
     "Qwen/Qwen3-ASR-0.6B-hf": ("7f1569a48a89f3e3f4dc3a5c9d28bddd903bc76c", "qwen3-asr-0.6b"),
@@ -101,7 +100,7 @@ WINDOW_SAMPLES = WINDOW_SECONDS * SAMPLE_RATE
 # 된다(docs/experiments.md 9단계 '디코딩').
 # 반복을 지우지 않고 <non_speech> 같은 태그도 남긴다(그 수는 요약에 센다). 호출 위치: transcribe.
 def raw_transcription(text: str) -> str:
-    """The official parse of a decoded output (`_parse_single_output`) without its repetition fix."""
+    """디코딩 출력의 공식 파싱(`_parse_single_output`)에서 반복 제거만 뺀 것."""
     text = text.strip()
     if "assistant\n" in text:
         text = text.split("assistant\n", 1)[-1]
@@ -114,14 +113,15 @@ def raw_transcription(text: str) -> str:
 # 듣게 한다. 30초 이하면 복사 없이 그대로 돌려준다.
 # 호출 위치: prepare_audio, train_qwen의 콜레이터(학습 입력도 같은 창).
 def first_window(audio: np.ndarray) -> np.ndarray:
-    """The first 30 seconds: what the Whisper harness hears of a longer utterance."""
+    """앞 30초. 더 긴 발화에서 Whisper 하네스가 듣는 부분이다."""
     return audio[:WINDOW_SAMPLES] if audio.shape[0] > WINDOW_SAMPLES else audio
 
 
-# 채널 변환(있으면)을 발화 전체에 먼저 적용한 뒤 앞 30초를 자른다. Whisper 하네스도 변환 뒤에 특징 추출기가
-# 30초로 자르므로 순서가 같다.
 def prepare_audio(audio: np.ndarray, channel: str | None) -> np.ndarray:
-    """The channel (if any) on the whole utterance, then the first 30 seconds, as the Whisper harness does."""
+    """채널 변환(있으면)을 발화 전체에 먼저 적용한 뒤 앞 30초를 자른다.
+
+    Whisper 하네스도 변환 뒤에 특징 추출기가 30초로 자르므로 순서가 같다.
+    """
     return first_window(CHANNELS[channel](audio) if channel else audio)
 
 
@@ -129,7 +129,7 @@ def prepare_audio(audio: np.ndarray, channel: str | None) -> np.ndarray:
 # 되풀이에 빠졌을 가능성이 있어 요약에 센다(hit_token_limit).
 # eos_token_id가 하나일 수도 여러 개일 수도 있어 목록으로 맞춘 뒤 torch.isin으로 찾는다.
 def generated_lengths(generated: torch.Tensor, eos_token_id) -> list[tuple[int, bool]]:
-    """(tokens before the first end token, ran into the token limit instead) for each row."""
+    """행마다 (첫 끝 토큰 앞까지의 토큰 수, 끝 토큰 대신 토큰 한도에 닿았는지)."""
     eos = torch.tensor(eos_token_id if isinstance(eos_token_id, list | tuple) else [eos_token_id])
     ended = torch.isin(generated.cpu(), eos)
     lengths = []
@@ -144,7 +144,7 @@ def generated_lengths(generated: torch.Tensor, eos_token_id) -> list[tuple[int, 
 # 왜 필요한가: 넘침이 있었는지는 가설 글만 봐서는 확인할 수 없어 디코딩 중에 직접 본다. 발화마다 기록해 fp16
 # 점검의 통과 조건(넘침 발화 0)과 리포트의 nonfinite_utterances에 쓴다.
 class NonFiniteWatch:
-    """Flags the rows of a batch whose logits were ever not finite (an fp16 overflow), through a hook."""
+    """훅으로 배치에서 로짓이 한 번이라도 유한하지 않았던(fp16 넘침) 행을 표시한다."""
 
     def __init__(self, head: torch.nn.Module) -> None:
         self.rows: torch.Tensor | None = None
@@ -164,7 +164,7 @@ class NonFiniteWatch:
 def transcribe(
     model, processor, audio: list[np.ndarray], language: str, device: str, dtype, watch=None
 ) -> list[dict]:
-    """Both outputs of one batch, with the token counts and the overflow flag of each utterance."""
+    """배치 하나의 두 출력과, 발화마다 토큰 수와 넘침 표시."""
     # 공식 입력 함수로 프롬프트(언어 고정)와 오디오 특징을 만든다. 맥락 프롬프트(system)는 비운다. 멜 특징은
     # 처리기 기본값대로 CPU에서 계산하고 속도에 포함된다(docs/experiments.md 9단계). 그 뒤 모델과 같은
     # 장치·dtype으로 옮긴다.
@@ -196,7 +196,7 @@ def transcribe(
 # raw와 다른 발화 수(fixed_changed, 두 리포트에 같은 값). 9단계 결과의 '공식 반복 제거가 바꾼 발화 0'이 이
 # 값이다.
 def report_payloads(rows: list[dict], language: str, meta: dict) -> dict[str, dict]:
-    """One report per output: the same utterances, each scored on its own hypothesis."""
+    """출력마다 리포트 하나: 발화는 같고, 각 리포트는 자기 가설로 채점한다."""
     changed = sum(row["raw"] != row["fixed"] for row in rows)
     payloads = {}
     for output in OUTPUTS:
@@ -235,7 +235,7 @@ def report_payloads(rows: list[dict], language: str, meta: dict) -> dict[str, di
 # Whisper의 N을 evaluate --adapter로 잴 때와 같은 방식이다(docs/experiments.md 10단계 '디코딩과 리포트').
 # peft는 어댑터가 있을 때만 불러온다.
 def merge_adapter(model, adapter: str):
-    """The base model with a LoRA adapter merged into its weights (in the base model's dtype)."""
+    """LoRA 어댑터를 가중치에 합친 기본 모델(기본 모델의 dtype 그대로)."""
     from peft import PeftModel
 
     return PeftModel.from_pretrained(model, adapter).merge_and_unload()
@@ -244,7 +244,7 @@ def merge_adapter(model, adapter: str):
 # 리포트 요약에 남길 어댑터 폴더와 가중치 파일(adapter_model.safetensors)의 SHA-256. 체크포인트 폴더
 # 이름만으로는 같은 가중치인지 알 수 없어서, 어떤 가중치로 쟀는지 내용으로 확인할 수 있게 한다.
 def adapter_info(adapter: str | None) -> dict:
-    """The adapter folder and the SHA-256 of its weights, for the report summary."""
+    """리포트 요약에 넣을 어댑터 폴더와 그 가중치의 SHA-256."""
     if adapter is None:
         return {"adapter": None, "adapter_sha256": None}
     weights = (Path(adapter) / "adapter_model.safetensors").read_bytes()
@@ -272,24 +272,24 @@ def load_model(model_id: str, revision: str, dtype, device: str, adapter: str | 
 # --overwrite.
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="Hugging Face model ID (a -hf checkpoint)")
-    parser.add_argument("--revision", help="defaults to the pinned revision of a registered model")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Hugging Face 모델 ID(-hf 체크포인트)")
+    parser.add_argument("--revision", help="기본값은 등록한 모델의 고정 revision")
     parser.add_argument("--set", required=True, dest="set_name")
-    parser.add_argument("--name", help="report name of the raw output; the fixed one goes to <name>-fixed")
+    parser.add_argument("--name", help="raw 출력의 리포트 이름. fixed는 <이름>-fixed에 간다")
     parser.add_argument(
-        "--adapter", help="LoRA adapter folder to merge into --model (stage 10; needs --name)"
+        "--adapter", help="--model에 합칠 LoRA 어댑터 폴더(10단계 train_qwen이 저장한 것. --name 필요)"
     )
     parser.add_argument(
-        "--channel", choices=list(CHANNELS), help="pass the audio through a channel simulation"
+        "--channel", choices=list(CHANNELS), help="오디오를 채널 흉내(전화 음질 등)에 통과시킨다"
     )
     parser.add_argument("--precision", choices=list(DTYPES), default="fp16")
     parser.add_argument("--device", choices=["cuda", "cpu"], default="cuda")
     parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--limit", type=int, help="only the first N utterances (fp16 check, smoke, speed)")
-    parser.add_argument("--allow-test", action="store_true", help="required for *-test sets")
-    parser.add_argument("--no-report", action="store_true", help="print the summaries only")
-    parser.add_argument("--out", help="write only the raw report, to this file (the fp16 check)")
-    parser.add_argument("--overwrite", action="store_true", help="replace an existing report")
+    parser.add_argument("--limit", type=int, help="앞의 N개 발화만 잰다(fp16 점검, 스모크, 속도)")
+    parser.add_argument("--allow-test", action="store_true", help="*-test 묶음을 잴 때 필요하다")
+    parser.add_argument("--no-report", action="store_true", help="요약만 찍고 리포트는 쓰지 않는다")
+    parser.add_argument("--out", help="raw 리포트 하나만 이 파일에 쓴다(fp16 점검)")
+    parser.add_argument("--overwrite", action="store_true", help="이미 있는 리포트를 바꿔 쓴다")
     args = parser.parse_args()
 
     # evaluate.py와 같은 규칙 보호: test 묶음은 --allow-test, 어댑터로 잴 때는 --name 필수(기준 모델의
@@ -324,7 +324,7 @@ def main() -> None:
     for target in targets.values():
         if target.exists() and not args.overwrite:
             parser.error(f"{target} exists; pass --overwrite to measure it again")
-    commit = git_commit()  # the code that measures, before any of it can change
+    commit = git_commit()  # 측정하는 코드의 커밋을, 코드가 바뀔 수 있기 전에 기록한다
 
     # 묶음을 읽고, 어댑터 정보(SHA-256)를 커밋처럼 디코딩 전에 읽어 둔 뒤 모델을 올리고 출력층에 넘침 감시를
     # 건다.
@@ -332,7 +332,7 @@ def main() -> None:
     if args.limit:
         utterances = utterances[: args.limit]
     dtype, cuda = DTYPES[args.precision], args.device == "cuda"
-    adapter = adapter_info(args.adapter)  # read before decoding, like the commit
+    adapter = adapter_info(args.adapter)  # 커밋처럼 디코딩 전에 읽어 둔다
     model, processor = load_model(args.model, revision, dtype, args.device, args.adapter)
     watch = NonFiniteWatch(model.lm_head)
     stores: dict[str, AudioStore] = {}
@@ -352,7 +352,7 @@ def main() -> None:
             for u in batch
         ]
         outputs = transcribe(model, processor, audio, language, args.device, dtype, watch)
-        batch_seconds.append(time.perf_counter() - batch_started)  # decoding the text waits for the GPU
+        batch_seconds.append(time.perf_counter() - batch_started)  # 글로 바꾸는 단계가 GPU 완료를 기다린다
         for utterance, out in zip(batch, outputs, strict=True):
             rows.append(
                 {

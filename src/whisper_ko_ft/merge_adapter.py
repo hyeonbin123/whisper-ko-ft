@@ -1,13 +1,13 @@
-"""Merge a LoRA adapter into its base model and save it, so that ct2-transformers-converter can read it.
+"""LoRA 어댑터를 기본 모델에 합쳐 저장한다. ct2-transformers-converter가 읽을 수 있게 하려는 것이다.
 
-Usage:
+사용법:
     uv run python -m whisper_ko_ft.merge_adapter --model openai/whisper-large-v3-turbo \
         --adapter outputs/turbo-n/best --output outputs/turbo-n/merged
     uv run ct2-transformers-converter --model outputs/turbo-n/merged --output_dir outputs/turbo-n/ct2 \
         --quantization float16 --copy_files tokenizer.json preprocessor_config.json
 
-Besides the processor, the folder gets the flat preprocessor_config.json that faster-whisper reads for the
-number of mel bins (128 for large-v3 and turbo; see `ct2_features`).
+처리기 외에, faster-whisper가 멜 필터 개수를 읽어 가는 평평한 preprocessor_config.json도 폴더에
+쓴다(large-v3와 turbo는 128개. `ct2_features` 참고).
 """
 
 # [파일 역할] 학습한 LoRA 어댑터(예: outputs/turbo-n/best)를 기본 Whisper 가중치에 합쳐 보통의 Transformers

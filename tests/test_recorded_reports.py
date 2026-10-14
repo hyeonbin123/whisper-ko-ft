@@ -1,7 +1,7 @@
-"""The numbers in docs/experiments.md are recomputed from the committed reports with the current code.
+"""docs/experiments.md의 수치를 커밋된 리포트에서 지금 코드로 다시 계산한다.
 
-A change to text_norm, metrics, itn or jiwer that moves them must be deliberate: update the expected
-values here and write the reason in docs/experiments.md.
+text_norm, metrics, itn, jiwer의 변경이 이 수치를 움직인다면 의도한 변경이어야 한다: 여기의 기대값을 고치고
+그 이유를 docs/experiments.md에 적는다.
 """
 
 # [테스트 묶음] 커밋된 리포트(reports/)의 수치를 지금 코드로 다시 계산해 기록과 같은지 확인한다(위 docstring).
@@ -47,12 +47,10 @@ def test_stored_scores_are_reproduced(path):
     assert round(rate, 5) == data["summary"]["error_rate"]
 
 
-# 맞춘 CER(6단계부터의 Zeroth 지표)의 총합 고정. 반올림한 오류율로 비교하면 작은 변화가 묻히므로 편집 수와
-# 정답 길이의 합을 그대로 비교한다(옆 주석). 각 줄 끝의 퍼센트는 문서에 적힌 값이다. 새 단계의 리포트를 커밋할
+# 맞춘 CER(6·7단계와 2026-10-02 N 확인부터 쓴 Zeroth 지표)의 총합 고정. 맞춘 CER은 리포트에 저장하지 않고
+# 부를 때마다 다시 채점한다. 반올림한 오류율로 비교하면 그 값을 움직이지 못할 만큼 작은 변화가 묻히므로 편집
+# 수와 정답 길이의 합을 그대로 비교한다. 각 줄 끝의 퍼센트는 문서에 적힌 값이다. 새 단계의 리포트를 커밋할
 # 때마다 이 목록에 줄을 더했다.
-# Harmonized CER (stages 6 and 7, and the 2026-10-02 checks of N) is not stored; it is scored again on
-# every call. Pinned as totals, so that a change too small to move the rounded rate still fails. The
-# comment is the rate in the docs.
 @pytest.mark.parametrize(
     ("report", "set_name", "edits", "length"),
     [
@@ -64,27 +62,27 @@ def test_stored_scores_are_reproduced(path):
         ("turbo-l2", "zeroth-test", 394, 19272),  # 2.04%
         ("turbo-n", "zeroth-test", 517, 19272),  # 2.68%
         ("turbo-n2", "zeroth-test", 387, 19272),  # 2.01%
-        # 2026-10-02: N in CTranslate2, fallback off and on
+        # 2026-10-02: CTranslate2로 잰 N, 재시도 끔과 켬
         ("turbo-n-ct2", "zeroth-val", 1203, 93621),  # 1.28%
         ("turbo-n-ct2-fallback", "zeroth-val", 1203, 93621),  # 1.28%
         ("turbo-n-ct2", "zeroth-test", 373, 19272),  # 1.94%
         ("turbo-n-ct2-fallback", "zeroth-test", 373, 19272),  # 1.94%
-        # 2026-10-02: the speed check on val-500, transformers batch 1 and CTranslate2
+        # 2026-10-02: val-500 속도 확인, transformers 배치 1과 CTranslate2
         ("turbo-n-b1", "zeroth-val500", 320, 18321),  # 1.75%
         ("turbo-n-ct2", "zeroth-val500", 316, 18321),  # 1.72%
-        # 2026-10-04, stage 8: the fallback decodings (D1a picked; D1 gave the same hypotheses)
+        # 2026-10-04, 8단계: 재시도 디코딩(D1a를 고름. D1도 같은 가설을 냈다)
         ("turbo-n-d1a", "zeroth-val", 1172, 93621),  # 1.25%
         ("turbo-n-d1", "zeroth-val", 1172, 93621),  # 1.25%
         ("turbo-n2-d1a", "zeroth-val", 1119, 93621),  # 1.20%
         ("turbo-n2-d1", "zeroth-val", 1119, 93621),  # 1.20%
         ("turbo-n-d1a", "zeroth-test", 381, 19272),  # 1.98%
-        # 2026-10-04, stage 9: Qwen3-ASR-1.7B untrained, raw and the official repetition fix (no change)
+        # 2026-10-04, 9단계: 학습 전 Qwen3-ASR-1.7B, raw와 공식 반복 제거(바뀐 것 없음)
         ("qwen3-asr-1.7b", "zeroth-val", 3231, 93621),  # 3.45%
         ("qwen3-asr-1.7b-fixed", "zeroth-val", 3231, 93621),  # 3.45%
         ("qwen3-asr-1.7b", "zeroth-test", 817, 19272),  # 4.24%
         ("qwen3-asr-1.7b-fixed", "zeroth-test", 817, 19272),  # 4.24%
-        # 2026-10-05, stage 10: Qwen3-ASR-1.7B + LoRA (QN, checkpoint 1500), raw and the official repetition
-        # fix (no change); the telephone channel of QN and of the untrained model; the checkpoint choice
+        # 2026-10-05, 10단계: Qwen3-ASR-1.7B + LoRA(QN, 체크포인트 1500), raw와 공식 반복 제거(바뀐 것
+        # 없음). QN과 학습 전 모델의 전화 채널. 체크포인트 고르기
         ("qwen3-asr-1.7b-qn", "zeroth-val", 864, 93621),  # 0.92%
         ("qwen3-asr-1.7b-qn-fixed", "zeroth-val", 864, 93621),  # 0.92%
         ("qwen3-asr-1.7b-qn", "zeroth-test", 293, 19272),  # 1.52%
@@ -103,15 +101,14 @@ def test_recorded_harmonized_totals(report, set_name, edits, length):
     assert (int(got_edits.sum()), int(got_lengths.sum())) == (edits, length)
 
 
-# 8단계 출력 숫자 변환 판정(itn8)의 근거가 된 총합: N과 기준선 turbo의 FLEURS 한국어 후처리 CER, 후처리해도
-# 맞춘 CER이 그대로인 N의 Zeroth.
-# Stage 8 output post-processing (2026-10-04): the totals behind the `itn8` verdict, scored on every call.
+# 8단계 출력 숫자 변환(2026-10-04) 판정(itn8)의 근거가 된 총합(부를 때마다 다시 채점한다): N과 기준선
+# turbo의 FLEURS 한국어 후처리 CER, 후처리해도 맞춘 CER이 그대로인 N의 Zeroth.
 @pytest.mark.parametrize(
     ("report", "set_name", "scoring", "edits", "length"),
     [
-        ("turbo-n", "fleurs-ko-val", "itn", 512, 10419),  # 4.91% (5.28% as is)
-        ("whisper-large-v3-turbo", "fleurs-ko-val", "itn", 492, 10419),  # 4.72% (4.75% as is)
-        ("turbo-n", "zeroth-val", "itn-harmonized", 1172, 93621),  # 1.25%, as harmonized
+        ("turbo-n", "fleurs-ko-val", "itn", 512, 10419),  # 4.91%(후처리 전 5.28%)
+        ("whisper-large-v3-turbo", "fleurs-ko-val", "itn", 492, 10419),  # 4.72%(후처리 전 4.75%)
+        ("turbo-n", "zeroth-val", "itn-harmonized", 1172, 93621),  # 1.25%, 맞춘 CER과 같다
     ],
 )
 # 지정한 채점 방식으로 다시 채점한 총합이 고정값과 같은지.

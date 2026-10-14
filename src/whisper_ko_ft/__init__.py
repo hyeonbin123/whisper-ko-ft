@@ -1,1 +1,1 @@
-"""Fine-tune Whisper on public Korean speech and measure what it gains and loses."""
+"""공개 한국어 음성 데이터로 Whisper를 파인튜닝하고, 그 결과 무엇을 얻고 무엇을 잃는지 잰다."""

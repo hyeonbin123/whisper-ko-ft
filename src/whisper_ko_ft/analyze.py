@@ -1,30 +1,30 @@
-"""Tables from the reports: digit utterances, error rates with intervals, paired comparisons.
+"""리포트에서 표를 만든다: 숫자 발화, 구간을 붙인 오류율, 짝지은 비교.
 
-Usage:
+사용법:
     uv run python -m whisper_ko_ft.analyze digits --set zeroth-val
     uv run python -m whisper_ko_ft.analyze table --set zeroth-val --reports whisper-small small-a \
         --baseline whisper-small
 
     uv run python -m whisper_ko_ft.analyze verdict --baseline whisper-small --candidate small-a
 
-`digits` fixes the list of "digit utterances" of a set (docs/experiments.md, "숫자 표기"): utterances where
-either base model wrote an Arabic digit. It is written once and not overwritten without --force.
-`verdict` applies the verdict rules of stages 2 and 3 to validation reports (the stage 3 interval condition is
-on unless --no-interval-rule).
-`verdict6` applies the stage 6 rules. `--harmonized` scores the stored references and hypotheses again after
-`itn.harmonize`, so that either notation of a number gets the same score (docs/experiments.md, stage 6).
-`loops` lists the utterances with more edits than reference characters (repetition loops), per report.
+`digits`는 묶음의 "숫자 발화" 목록을 확정한다(docs/experiments.md "숫자 표기"): 기본 모델 둘 중 하나라도
+아라비아 숫자를 쓴 발화다. 한 번 쓰고 --force 없이는 덮어쓰지 않는다.
+`verdict`는 2·3단계 판정 규칙을 validation 리포트에 적용한다(3단계의 구간 조건은 --no-interval-rule이
+없으면 켜진다).
+`verdict6`은 6단계 규칙을 적용한다. `--harmonized`는 저장된 정답과 가설에 `itn.harmonize`를 적용한 뒤 다시
+채점해, 숫자를 어느 표기로 적든 같은 점수를 받게 한다(docs/experiments.md 6단계).
+`loops`는 리포트마다 편집 수가 정답 글자 수보다 많은 발화(되풀이 오류)를 보여 준다.
 
-Stage 8: `--scoring` scores the stored texts again in other ways (SCORINGS; the reports are never changed).
-`changes` shows what a fallback decoding changed against the recorded greedy report, `verdict8` applies the
-decoding rules and `itn8` the rules of the output post-processing.
+8단계: `--scoring`은 저장된 글을 다른 방식으로 다시 채점한다(SCORINGS. 리포트는 절대 바꾸지 않는다).
+`changes`는 재시도 디코딩이 기록된 greedy 리포트에 비해 무엇을 바꿨는지 보여 주고, `verdict8`은 디코딩 규칙을,
+`itn8`은 출력 후처리의 규칙을 적용한다.
 
-Stage 9 (another base model, Qwen3-ASR): `gate9` decides fp16 or fp32 from two runs on the first 100
-utterances of zeroth-val500, `verdict9` applies the other-domain rule and prints what is reported with it.
+9단계(다른 기준 모델 Qwen3-ASR): `gate9`는 zeroth-val500 앞 100발화에서 잰 두 실행으로 fp16과 fp32 중
+무엇을 쓸지 정하고, `verdict9`는 다른 도메인 규칙을 적용해 그와 함께 보고할 것을 찍는다.
 
-Stage 10 (LoRA on Qwen3-ASR): `gate10` checks that a fresh adapter (B=0) reproduces the stage 9 fp16 check,
-`smoke10` reads a smoke run's step log and GPU memory samples against the gates, `pick10` picks the checkpoint
-by harmonized CER on zeroth-val500, and `verdict10` applies the rules against N.
+10단계(Qwen3-ASR에 LoRA): `gate10`은 새 어댑터(B=0)가 9단계 fp16 점검을 재현하는지 확인하고, `smoke10`은
+스모크 실행의 스텝 기록과 GPU 메모리 표본을 관문에 비춰 읽고, `pick10`은 zeroth-val500의 맞춘 CER로
+체크포인트를 고르고, `verdict10`은 N에 대한 규칙을 적용한다.
 """
 
 # [파일 역할] 커밋된 리포트(reports/)만 읽어 표와 판정을 내는 분석 도구. 모델을 다시 돌리지 않는다.
@@ -66,90 +66,82 @@ BASE_MODELS = ("whisper-small", "whisper-large-v3-turbo")
 # 상대 20% 이상 낮고(-0.20), 숫자 발화를 빼고도 상대 10% 이상 낮아야 한다(-0.10). 다른 도메인은 FLEURS 한국어
 # validation CER이 절대 1.0%p(0.010)를 넘게 나빠지지 않아야 한다. 이 1.0%p는 6·7단계와 10단계 망각 줄에도
 # 그대로 쓰인다.
-# Verdict rules (docs/experiments.md, "판정 규칙"): relative CER change on Zeroth validation, overall and
-# without digit utterances, and the largest allowed absolute CER increase on FLEURS Korean validation.
 IN_DOMAIN_RELATIVE = -0.20
 IN_DOMAIN_NO_DIGITS_RELATIVE = -0.10
 OUT_OF_DOMAIN_MAX_INCREASE = 0.010
 # 6단계: N의 맞춘 CER이 3단계 L2보다 0.3%p를 넘게 높으면 같은 도메인 이득을 잃은 것으로 본다.
-# Stage 6: the harmonized CER may be at most this much above the stage 3 model's.
 STAGE6_MAX_ABOVE_L2 = 0.003
-# 8단계: 재시도 후보는 어느 오류율도 짝지은 구간 상한 기준 +0.1%p를 넘게 올리면 안 되고, 출력 숫자 변환은
-# Zeroth 맞춘 CER을 +0.05%p를 넘게 올리면 안 된다(docs/experiments.md 8단계 판정 규칙).
-# Stage 8: a fallback arm may raise no rate by more than this (upper end of the paired 95% interval), and the
-# output post-processing may raise the harmonized Zeroth CER by at most STAGE8_ITN_MAX_INCREASE.
+# 8단계: 재시도 후보는 어느 오류율도 짝지은 95% 구간 상한 기준 +0.1%p를 넘게 올리면 안 되고, 출력 숫자
+# 변환은 Zeroth 맞춘 CER을 +0.05%p(STAGE8_ITN_MAX_INCREASE)를 넘게 올리면 안 된다(docs/experiments.md 8단계
+# 판정 규칙).
 STAGE8_MAX_INCREASE = 0.001
 STAGE8_ITN_MAX_INCREASE = 0.0005
-# 8단계 판정에 쓰는 validation 세 묶음과 채점: Zeroth는 맞춘 채점, FLEURS 한국어·영어는 원래 채점. 9·10단계의
-# 되풀이 보고도 같은 묶음을 쓴다.
-# The sets of the stage 8 decoding rules, each with the scoring its loops and rates are counted in.
+# 8단계 디코딩 판정에 쓰는 validation 세 묶음과, 각 묶음의 되풀이와 오류율을 셀 채점: Zeroth는 맞춘 채점,
+# FLEURS 한국어·영어는 원래 채점. 9·10단계의 되풀이 보고도 같은 묶음을 쓴다.
 STAGE8_SETS = {"zeroth-val": "harmonized", "fleurs-ko-val": None, "fleurs-en-val": None}
-# 9단계 fp16 점검: fp16과 fp32의 원래 CER 차이가 ±0.20%p 안이고 빈 가설·넘침이 없어야 fp16으로
-# 잰다(docs/experiments.md 9단계 'fp16 점검').
-# Stage 9: fp16 is used when its raw CER on the first 100 utterances of zeroth-val500 is within this of the
-# fp32 run's (either direction), with no empty hypothesis and no utterance with non-finite logits.
+# 9단계 fp16 점검: zeroth-val500 앞 100발화에서 fp16의 원래 CER이 fp32 실행과 어느 방향으로든 ±0.20%p
+# 안이고, 빈 가설과 로짓이 유한하지 않은(넘친) 발화가 없어야 fp16으로 잰다(docs/experiments.md 9단계 'fp16
+# 점검').
 STAGE9_FP16_MAX_GAP = 0.002
 # 10단계 스모크 관문(docs/experiments.md 10단계 '관문' (c)): 앞 20스텝(GradScaler가 배율을 맞추는 구간)은
 # 건너뜀을 세지 않고 그 뒤 5개까지 허용, 학습 프로세스의 공유 GPU 메모리 512MiB 이하, nvidia-smi 카드 전체
 # 10,752MiB 미만, torch 최대 할당 7,168MiB 이하. 스텝 시간 중앙값 × 1,500이 8시간을 넘으면 1,000스텝으로
 # 줄인다.
-# 공유 메모리 기준이 0이 아니라 512MiB인 이유(옆 주석): 9단계 디코딩 프로세스는 넘치기 전에도 이 카운터가 약
-# 230MB였다.
-# Stage 10. Smoke gates: GradScaler skips after the first STAGE10_SKIP_GRACE steps, the Windows "GPU Process
-# Memory" shared usage of the training process (stage 9 decoding sat at ~230 MB until it spilled to 3.4 GB),
-# nvidia-smi memory.used of the whole card, torch's peak allocation, and the time budget of the full run.
+# 공유 메모리는 Windows "GPU Process Memory" 카운터의 학습 프로세스 공유 사용량이고, 카드 전체는 nvidia-smi의
+# memory.used다. 공유 메모리 기준이 0이 아니라 512MiB인 이유: 9단계 디코딩 프로세스는 3.4GB로 넘치기 전까지도
+# 이 카운터가 약 230MB에 머물렀다.
 STAGE10_SKIP_GRACE = 20
 STAGE10_MAX_SKIPS = 5
 STAGE10_MAX_SHARED_MB = 512
-STAGE10_MAX_GPU_MB = 10_752  # 10.5 GiB, as nvidia-smi counts (MiB)
+STAGE10_MAX_GPU_MB = 10_752  # 10.5 GiB(nvidia-smi가 세는 MiB 단위)
 STAGE10_MAX_ALLOCATED_MB = 7_168  # 7 GiB
 STAGE10_HOURS = 8.0
 STAGE10_STEPS, STAGE10_FEWER_STEPS = 1_500, 1_000
-# 10단계 판정: 조건 1은 Zeroth 맞춘 CER에서 QN − N 구간 상한 < +0.10%p. 망각 보고 줄은 FLEURS 한국어에서 QN −
-# 학습 전 Qwen 상한 ≤ +1.0%p(판정은 바꾸지 않는 보고용).
+# 10단계 판정: 조건 1은 Zeroth 맞춘 CER에서 QN − N의 짝지은 95% 구간 상한 < +0.10%p. 망각 보고 줄은 FLEURS
+# 한국어에서 QN − 학습 전 Qwen 상한 ≤ +1.0%p(판정은 바꾸지 않는 보고용).
 # _DIGIT: 정답에 아라비아 숫자가 있는지(FLEURS를 숫자 유무로 나눌 때).
-# Verdict: QN may be at most this much above N on Zeroth (upper end of the paired 95% interval of the
-# harmonized CER); the reported forgetting line allows this much above the untrained Qwen on FLEURS Korean.
 STAGE10_ZEROTH_MAX_ABOVE_N = 0.001
 STAGE10_FORGETTING_MAX = 0.010
 _DIGIT = re.compile(r"[0-9]")
 
 
 # 채점 방식 다섯 가지. 모두 (정답, 가설)을 받아 바꾼 (정답, 가설)을 돌려주고, 저장된 리포트는 바꾸지 않는다.
-# harmonized(6단계 맞춘 CER): 양쪽에 같은 숫자 표기 통일을 적용해 '오 월'과 '5월'이 같은 점수를 받게 한다.
 def _harmonized(reference: str, hypothesis: str) -> tuple[str, str]:
-    """Stage 6: one number notation on both sides."""
+    """harmonized(6단계 맞춘 CER): 정답과 가설 양쪽에 같은 숫자 표기 통일을 적용한다.
+
+    그래서 '오 월'과 '5월'이 같은 점수를 받는다.
+    """
     return harmonize(reference), harmonize(hypothesis)
 
 
-# itn(8단계 출력 후처리): 가설의 숫자 낱말만 아라비아 숫자로 바꾸고 정답은 그대로 둔다. 서비스에서 출력에
-# 후처리를 붙였을 때의 원래 CER이다.
 def _itn(reference: str, hypothesis: str) -> tuple[str, str]:
-    """Stage 8 output post-processing: spelled numbers in the hypothesis become digits; reference as is."""
+    """itn(8단계 출력 후처리): 가설의 풀어 쓴 숫자만 아라비아 숫자로 바꾸고 정답은 그대로 둔다.
+
+    서비스에서 출력에 후처리를 붙였을 때의 원래 CER이다.
+    """
     return reference, to_digits(hypothesis)
 
 
-# itn-harmonized: 후처리한 가설을 맞춘 채점으로 다시 잰다. 후처리가 맞춘 채점에서 다른 것을 바꾸지 않는지 보는
-# 데 쓴다(itn8의 조건 2).
 def _itn_harmonized(reference: str, hypothesis: str) -> tuple[str, str]:
-    """The post-processed hypothesis under the stage 6 scoring."""
+    """itn-harmonized: 후처리한 가설을 6단계 채점(맞춘 CER)으로 다시 잰다.
+
+    후처리가 맞춘 채점에서 다른 것을 바꾸지 않는지 보는 데 쓴다(itn8의 조건 2).
+    """
     return _harmonized(*_itn(reference, hypothesis))
 
 
-# itn-latin(판정 없음): 숫자 후처리에 더해 한글 글자 이름을 라틴 글자로 바꾼 가설.
 def _itn_latin(reference: str, hypothesis: str) -> tuple[str, str]:
-    """Stage 8, no verdict: the post-processing plus letter names as Latin letters."""
+    """itn-latin(8단계, 판정 없음): 숫자 후처리에 더해 가설의 한글 글자 이름을 라틴 글자로 바꾼다."""
     return reference, letters_to_latin(to_digits(hypothesis))
 
 
-# agnostic(판정 없는 보조 지표, 표기 무관 CER): 숫자와 글자 이름을 양쪽 모두 같은 표기로 맞춘다.
 def _agnostic(reference: str, hypothesis: str) -> tuple[str, str]:
-    """Stage 8 auxiliary metric: numbers and letter names in one notation on both sides."""
+    """agnostic(8단계 판정 없는 보조 지표, 표기 무관 CER): 양쪽의 숫자와 글자 이름을 같은 표기로 맞춘다."""
     return letters_to_latin(harmonize(reference)), letters_to_latin(harmonize(hypothesis))
 
 
-# SCORINGS: --scoring 이름 → 변환 함수. 모두 한국어 CER용이다(load_rows가 영어 묶음에서는 거부한다).
-# How the stored reference and hypothesis are rewritten before Korean CER is computed again.
+# SCORINGS: --scoring 이름 → 변환 함수. 한국어 CER을 다시 계산하기 전에 저장된 정답과 가설을 어떻게 바꿀지
+# 정한다. 모두 한국어 CER용이다(load_rows가 영어 묶음에서는 거부한다).
 SCORINGS = {
     "harmonized": _harmonized,
     "itn": _itn,
@@ -167,7 +159,7 @@ SCORINGS = {
 def load_rows(
     report: str, set_name: str, harmonized: bool = False, scoring: str | None = None
 ) -> dict[str, dict]:
-    """Scored utterances of a report by id; `harmonized` is `scoring="harmonized"`."""
+    """리포트의 채점된 발화를 ID별로 돌려준다. `harmonized`는 `scoring="harmonized"`와 같다."""
     scoring = "harmonized" if harmonized else scoring
     if scoring and set_name.startswith("fleurs-en"):
         raise SystemExit(f"{set_name}: the {scoring!r} scoring is for Korean sets")
@@ -182,18 +174,21 @@ def load_rows(
     return rows
 
 
-# 행 하나를 SCORINGS[scoring]으로 바꾼 글로 한국어 CER을 다시 계산해 edits·length만 바꾼 새 행을 돌려준다.
-# 원래 정답·가설 글은 그대로 남는다.
 def rescored(row: dict, scoring: str = "harmonized") -> dict:
-    """The row scored again (Korean CER) after SCORINGS[scoring]; the stored texts stay as they are."""
+    """행 하나를 SCORINGS[scoring]으로 바꾼 글로 한국어 CER을 다시 계산한 새 행.
+
+    edits·length만 바뀌고, 저장된 정답·가설 글은 그대로 남는다.
+    """
     scored = score(*SCORINGS[scoring](row["reference"], row["hypothesis"]), "ko")
     return {**row, "edits": scored.edits, "length": scored.length}
 
 
-# 묶음의 확정된 '숫자 발화' ID 집합(reports/digit_utterances/<묶음>.json). 목록은 깨끗한 음성에서 정했으므로,
-# 'zeroth-val@telephone'처럼 채널이 붙은 묶음도 '@' 앞 이름의 목록을 쓴다.
 def digit_ids(set_name: str) -> set[str]:
-    """The list is defined on clean audio; "zeroth-val@telephone" uses the list of "zeroth-val"."""
+    """묶음의 확정된 '숫자 발화' ID 집합(reports/digit_utterances/<묶음>.json).
+
+    목록은 깨끗한 음성에서 정했으므로, "zeroth-val@telephone"처럼 채널이 붙은 묶음도 '@' 앞
+    이름("zeroth-val")의 목록을 쓴다.
+    """
     path = REPORTS / "digit_utterances" / f"{set_name.split('@')[0]}.json"
     return set(json.loads(path.read_text(encoding="utf-8"))["ids"])
 
@@ -287,12 +282,12 @@ def compare(
     scoring: str | None = None,
     baseline_scoring: str | None = "same",
 ) -> dict:
-    """Rates of two reports over their shared utterances and the paired interval of the difference.
+    """두 리포트의 공통 발화에서 잰 오류율과, 그 차이의 짝지은 구간.
 
-    `without_digits` drops the fixed digit utterances of a Zeroth set. `reference_digits` keeps only the
-    utterances whose reference has (True) or lacks (False) an Arabic digit, for sets like FLEURS whose
-    references write numbers as digits. `baseline_scoring` scores the baseline differently from the candidate
-    (stage 8: a report post-processed against itself); both must leave the reference lengths equal.
+    `without_digits`는 Zeroth 묶음의 확정된 숫자 발화를 뺀다. `reference_digits`는 정답에 아라비아 숫자가
+    있는(True) 또는 없는(False) 발화만 남긴다. FLEURS처럼 정답이 숫자를 아라비아 숫자로 적는 묶음용이다.
+    `baseline_scoring`은 기준선을 후보와 다른 방식으로 채점한다(8단계: 한 리포트를 후처리한 것과 원래 것의
+    비교). 두 채점 모두 정답 길이를 같게 남겨야 한다.
     """
     scoring = "harmonized" if harmonized else scoring
     cand_rows = load_rows(candidate, set_name, scoring=scoring)
@@ -342,7 +337,7 @@ def verdict(baseline: str, candidate: str, require_interval: bool = True) -> str
         ("zeroth-val all", overall),
         ("zeroth-val no digits", no_digits),
         ("fleurs-ko-val", other),
-        # Reported since stage 3, not part of the verdict (docs/experiments.md, stage 2 post-hoc analysis).
+        # 3단계부터 보고하지만 판정에는 들어가지 않는다(docs/experiments.md 2단계 사후 분석).
         ("  reference has digit", compare("fleurs-ko-val", candidate, baseline, reference_digits=True)),
         ("  reference has none", compare("fleurs-ko-val", candidate, baseline, reference_digits=False)),
     ]
@@ -360,7 +355,7 @@ def verdict(baseline: str, candidate: str, require_interval: bool = True) -> str
     in_domain = (
         overall["relative"] <= IN_DOMAIN_RELATIVE
         and no_digits["relative"] <= IN_DOMAIN_NO_DIGITS_RELATIVE
-        # Stage 3: not an improvement when the paired interval of the no-digit difference includes 0.
+        # 3단계: 숫자 발화 제외 차이의 짝지은 구간이 0을 포함하면 개선이 아니다.
         and (not require_interval or no_digits["delta_interval"][1] < 0)
     )
     kept = other["delta"] <= OUT_OF_DOMAIN_MAX_INCREASE
@@ -380,7 +375,7 @@ def verdict(baseline: str, candidate: str, require_interval: bool = True) -> str
 def loops(
     set_name: str, reports: list[str], harmonized: bool = False, scoring: str | None = None
 ) -> dict[str, list[str]]:
-    """Utterances with more edits than reference characters (a phrase repeated to the end), per report."""
+    """리포트마다 편집 수가 정답 글자 수보다 많은 발화(한 구절을 끝까지 되풀이한 발화)."""
     found: dict[str, list[str]] = {}
     for name in reports:
         rows = load_rows(name, set_name, harmonized, scoring)
@@ -405,7 +400,7 @@ def show(label: str, result: dict) -> None:
 # 맞춘 CER이 기준선보다 상대 20% 이상 낮고 L2보다 0.3%p를 넘게 높지 않다. 조건 2: FLEURS 한국어가 기준선보다
 # 1.0%p를 넘게 나빠지지 않는다. FLEURS는 정답의 숫자 유무로 나눈 수치도 함께 찍는다.
 def verdict6(baseline: str, previous: str, candidate: str) -> str:
-    """Stage 6: harmonized CER on Zeroth validation against the base model and the stage 3 model."""
+    """6단계: Zeroth validation의 맞춘 CER을 기준 모델, 3단계 모델과 비교한다."""
     overall = compare("zeroth-val", candidate, baseline, harmonized=True)
     against_previous = compare("zeroth-val", candidate, previous, harmonized=True)
     other = compare("fleurs-ko-val", candidate, baseline)
@@ -443,10 +438,10 @@ def _loop_ids(rows: dict[str, dict]) -> set[str]:
 # - changed_outside_loops: 되풀이가 아니던 발화 중 바뀐 것. loops_before·loops_after: 전후의 되풀이 발화.
 #   empty: 빈 가설.
 def changes(set_name: str, base: str, reports: list[str], scoring: str | None = None) -> dict[str, dict]:
-    """What a fallback decoding changed against a recorded greedy report (stage 8), per report.
+    """리포트마다 재시도 디코딩이 기록된 greedy 리포트에 비해 바꾼 것(8단계).
 
-    Decoded again: the report's final temperature is above 0. A hypothesis that changed without being decoded
-    again means the first (greedy) pass did not repeat the recorded one.
+    다시 디코딩됨: 리포트의 마지막 temperature가 0보다 크다. 다시 디코딩되지 않았는데 가설이 바뀌었다면 첫
+    (greedy) 디코딩이 기록된 것을 그대로 재현하지 못했다는 뜻이다.
     """
     before = load_rows(base, set_name, scoring=scoring)
     found: dict[str, dict] = {}
@@ -483,7 +478,7 @@ def changes(set_name: str, base: str, reports: list[str], scoring: str | None = 
 # CER의 짝지은 차이 구간 상한이 모두 +0.1%p 이하. FLEURS 영어는 보고만 한다.
 # tested: 기록된 되풀이가 실제로 다시 디코딩되어 재시도를 시험할 수 있었는지.
 def stage8_arm(models: list[str], arm: str) -> dict:
-    """The stage 8 conditions for one fallback arm: reports `<model>-<arm>` against the greedy `<model>`."""
+    """재시도 후보 하나의 8단계 조건: 리포트 `<model>-<arm>`을 greedy `<model>`과 비교한다."""
     recorded_loops, untested, loops_left, upper_ends = 0, [], 0, []
     for model in models:
         for set_name, scoring in STAGE8_SETS.items():
@@ -526,7 +521,7 @@ def stage8_arm(models: list[str], arm: str) -> dict:
 # 기록된 되풀이가 첫 디코딩에서 되풀이하지 않아 다시 디코딩되지 않았으면 재시도를 시험하지 못한 것이므로
 # 판정하지 않고 멈춘다(2026-10-02 CTranslate2 측정과 같은 처리, docs/experiments.md 8단계).
 def verdict8(models: list[str], arms: list[str]) -> str | None:
-    """Stage 8: the first arm (simplest first) that stops the recorded loops without costing accuracy."""
+    """8단계: 정확도를 잃지 않고 기록된 되풀이를 막는 첫 후보(단순한 것부터)."""
     results = {arm: stage8_arm(models, arm) for arm in arms}
     if not all(result["tested"] for result in results.values()):
         print("판정: 하지 않는다 (기록된 되풀이가 첫 디코딩에서 나오지 않아 재시도를 시험하지 못했다)")
@@ -554,7 +549,7 @@ def itn8_label(fleurs_upper: float, zeroth_delta: float) -> str:
 # 주의: 이 효과는 규칙을 적기 전에 사후 계산으로 이미 알려져 있었다. 그래서 이 판정은 눈을 가린 측정이 아니라
 # 미리 정한 규칙으로 다시 계산한 확인이다(README 8단계).
 def itn8(model: str, baseline: str, fleurs: str = "fleurs-ko-val", zeroth: str = "zeroth-val") -> str:
-    """Stage 8 output post-processing: `model` post-processed against itself; the rest is reported."""
+    """8단계 출력 후처리: 후처리한 `model`을 원래 `model`과 비교한다. 나머지는 보고만 한다."""
     other = compare(fleurs, model, model, scoring="itn", baseline_scoring=None)
     same = compare(zeroth, model, model, scoring="itn-harmonized", baseline_scoring="harmonized")
     show(f"{fleurs} {model}, post-processed", other)
@@ -600,7 +595,7 @@ def itn8(model: str, baseline: str, fleurs: str = "fleurs-ko-val", zeroth: str =
 # evaluate_qwen --out으로 쓴 파일(fp16 점검, 체크포인트 고르기)의 요약과 ID별 행. 이 파일들은 limit이 있어
 # load_rows를 거치지 않고 직접 읽는다.
 def _check_rows(path: str) -> tuple[dict, dict[str, dict]]:
-    """Summary and rows (by id) of a stage 9 fp16-check file, a raw report of a --limit run."""
+    """9단계 fp16 점검 파일(--limit 실행의 raw 리포트)의 요약과 ID별 행."""
     with open(path, encoding="utf-8") as file:
         data = json.load(file)
     return data["summary"], {row["id"]: row for row in data["utterances"]}
@@ -611,7 +606,7 @@ def _check_rows(path: str) -> tuple[dict, dict[str, dict]]:
 # 발화가 없으면 'fp16을 쓴다'. 아니면 fp32로 잰다. 가설이 다른 발화 수도 보고한다.
 # CPU와 GPU의 계산 차이도 fp16 쪽 차이로 세게 되므로 점검이 그만큼 엄격해질 뿐이다(docs/experiments.md 9단계).
 def gate9(fp16: str, fp32: str) -> bool:
-    """Stage 9: True when fp16 may be used (docs/experiments.md, 9단계 "fp16 점검")."""
+    """9단계: fp16을 써도 되면 True(docs/experiments.md 9단계 "fp16 점검")."""
     (half_summary, half), (full_summary, full) = _check_rows(fp16), _check_rows(fp32)
     if (half_summary.get("precision"), full_summary.get("precision")) != ("fp16", "fp32"):
         raise SystemExit("gate9 needs an fp16 file and an fp32 file (summary precision)")
@@ -642,7 +637,7 @@ def gate9(fp16: str, fp32: str) -> bool:
 # 9단계 판정 이름: FLEURS 한국어에서 (후보 − 기준선 turbo) 짝지은 구간의 상한 < 0이면 '더 나은 기준 모델',
 # 하한 > 0이면 '나쁘다', 0을 포함하면 '가리지 못했다'.
 def verdict9_label(low: float, high: float) -> str:
-    """Stage 9 rule on the paired 95% interval of (candidate - base turbo) on FLEURS Korean validation."""
+    """FLEURS 한국어 validation에서 (후보 - 기준선 turbo)의 짝지은 95% 구간에 적용하는 9단계 규칙."""
     if high < 0:
         return "다른 도메인에서 더 나은 기준 모델이다"
     if low > 0:
@@ -656,10 +651,10 @@ def verdict9_label(low: float, high: float) -> str:
 # 함께 보고: 숫자 유무 분리, 맞춘 CER·표기 무관 CER, 파인튜닝한 모델들(--others)과의 비교, Zeroth 맞춘
 # CER(숫자 발화 제외 포함), 영어 WER, 공식 반복 제거(fixed)가 바꾼 것, 세 묶음의 되풀이 발화.
 def verdict9(candidate: str, baseline: str, others: list[str]) -> str:
-    """Stage 9: the candidate's raw output against the base turbo on FLEURS Korean validation (original CER).
+    """9단계: FLEURS 한국어 validation(원래 CER)에서 후보의 raw 출력을 기준선 turbo와 비교한다.
 
-    Everything else is reported: the Zeroth numbers next to the base turbo and the fine-tuned models, other
-    scorings, English, loops, and what the official repetition fix (`<candidate>-fixed`) changes.
+    나머지는 모두 보고만 한다: 기준선 turbo와 파인튜닝한 모델들에 견준 Zeroth 수치, 다른 채점 방식, 영어,
+    되풀이, 그리고 공식 반복 제거(`<candidate>-fixed`)가 바꾸는 것.
     """
     fixed = f"{candidate}-fixed"
     rule = compare("fleurs-ko-val", candidate, baseline)
@@ -700,7 +695,7 @@ def verdict9(candidate: str, baseline: str, others: list[str]) -> str:
 # 같은지 본다. 어댑터 병합 경로와 하네스가 9단계와 같은 조건임을 확인하려는 것이다. 한쪽만 어댑터가 있어야
 # 하고, 정밀도·묶음·limit과 발화 순서가 같아야 비교한다. 가설이 하나라도 다르면 실패다.
 def gate10(path: str, recorded: str) -> bool:
-    """Stage 10 gate (a): a fresh adapter merged into the base decodes what the stage 9 fp16 check did."""
+    """10단계 관문 (a): 새 어댑터를 기본 가중치에 합친 모델이 9단계 fp16 점검과 같은 것을 디코딩하는지."""
     (summary, rows), (base_summary, base_rows) = _check_rows(path), _check_rows(recorded)
     if not summary.get("adapter") or base_summary.get("adapter"):
         raise SystemExit("gate10 compares a run with an adapter against the recorded run without one")
@@ -723,10 +718,11 @@ def gate10(path: str, recorded: str) -> bool:
     return not differ
 
 
-# train_qwen의 steps.jsonl에서 스텝 줄만 스텝 번호별로 읽는다(이벤트 줄은 뺀다). 이어 한 실행이 같은 스텝을 두
-# 번 기록하면 나중 것을 쓴다.
 def read_steps(path: str) -> dict[int, dict]:
-    """Step entries of a train_qwen log by step; a resumed run logs some steps twice, the later one counts."""
+    """train_qwen의 steps.jsonl에서 스텝 줄만 스텝 번호별로 읽는다(이벤트 줄은 뺀다).
+
+    이어 한 실행이 같은 스텝을 두 번 기록하면 나중 것을 쓴다.
+    """
     steps = {}
     with open(path, encoding="utf-8") as file:
         for line in file:
@@ -736,12 +732,10 @@ def read_steps(path: str) -> dict[int, dict]:
     return steps
 
 
-# 스모크 중 5초마다 남긴 GPU 메모리 표본 CSV(저장소 밖의 감시 스크립트가 쓴다)를 읽는다. 숫자 열은 float로
-# 바꾸고, 카운터가 비어 있던 칸은 None으로 둔다.
 def read_memwatch(path: str) -> list[dict]:
-    """GPU memory samples of the smoke run (a CSV written by a monitoring script kept outside the repository).
+    """스모크 중 5초마다 남긴 GPU 메모리 표본 CSV(저장소 밖에 둔 감시 스크립트가 쓴다)를 읽는다.
 
-    The MiB counters become numbers, and None where a counter was missing.
+    MiB 카운터 열은 float로 바꾸고, 카운터 값이 비어 있던 칸은 None으로 둔다.
     """
     with open(path, encoding="utf-8") as file:
         rows = list(csv.DictReader(file))
@@ -756,7 +750,7 @@ def read_memwatch(path: str) -> list[dict]:
 # 스텝 시간 중앙값은 규칙대로 21번째 스텝부터, 가장 긴 스텝을 빼고 낸다. 기록된 결과는 13.70초 × 1,500 =
 # 5.71시간이라 1,500스텝이었다(docs/experiments.md 10단계 결과).
 def smoke10(steps_path: str, mem_path: str, expected_steps: int = 50) -> dict:
-    """Stage 10 gate (c): the smoke run against the registered limits, and the number of steps to train."""
+    """10단계 관문 (c): 스모크 실행을 등록한 한계에 비춰 보고, 학습할 스텝 수를 정한다."""
     steps = read_steps(steps_path)
     samples = read_memwatch(mem_path)
     shared = [row["shared_mb"] for row in samples if row["shared_mb"] is not None]
@@ -766,7 +760,7 @@ def smoke10(steps_path: str, mem_path: str, expected_steps: int = 50) -> dict:
     late_skips = sorted(s for s, e in steps.items() if e["skipped"] and s > STAGE10_SKIP_GRACE)
     nonfinite = sorted(s for s, e in steps.items() if not math.isfinite(e["loss"]))
     longest = [s for s, e in steps.items() if e["longest"]]
-    peak = max(e["peak_allocated_mb"] or 0 for e in steps.values())  # None on the CPU
+    peak = max(e["peak_allocated_mb"] or 0 for e in steps.values())  # CPU 실행에서는 None
     times = [e["seconds"] for s, e in steps.items() if s > STAGE10_SKIP_GRACE and not e["longest"]]
     median = statistics.median(times) if times else float("nan")
     hours = median * STAGE10_STEPS / 3600
@@ -812,8 +806,8 @@ def smoke10(steps_path: str, mem_path: str, expected_steps: int = 50) -> dict:
 # 맞춘 CER로 고르는 이유: Qwen은 한글 숫자를 붙여 쓰는 일이 있어, 판정과 같은 채점으로
 # 고른다(docs/experiments.md 10단계 '체크포인트 고르기'). --limit 파일과 발화가 다른 파일은 거부한다.
 def pick10(paths: list[str]) -> str:
-    """Stage 10: the checkpoint whose zeroth-val500 run has the lowest harmonized CER; on a tie the earliest
-    (the files are given in step order)."""
+    """10단계: zeroth-val500 실행의 맞춘 CER이 가장 낮은 체크포인트. 같으면 가장 이른 것(파일은 스텝
+    순서로 받는다)."""
     loaded = []
     for path in paths:
         summary, rows = _check_rows(path)
@@ -838,7 +832,7 @@ def pick10(paths: list[str]) -> str:
 # 10단계 판정 표(docs/experiments.md 10단계): 조건 1(Zeroth에서 N만큼)과 조건 2(FLEURS 한국어에서 N보다
 # 낫다)의 조합으로 이름을 정한다. 기록된 결과는 조건 1만 만족한 'N을 유지한다 (다른 도메인 이득 없음)'이다.
 def verdict10_label(zeroth_ok: bool, fleurs_ok: bool) -> str:
-    """Stage 10 verdict from condition 1 (Zeroth against N) and condition 2 (FLEURS Korean against N)."""
+    """조건 1(Zeroth에서 N과 비교)과 조건 2(FLEURS 한국어에서 N과 비교)로 정하는 10단계 판정."""
     if zeroth_ok and fleurs_ok:
         return "정확도 기준으로 N을 대신하는 범용 모델이다"
     if zeroth_ok:
@@ -859,10 +853,10 @@ def _summary(report: str, set_name: str) -> dict:
 # 줄로 미리 정해 함께 찍는다(판정은 바꾸지 않는다). 나머지(학습 전 Qwen·다른 모델과의 비교, 숫자 분리, 표기
 # 무관 CER, 영어, 전화 음질, fixed, 되풀이, 요약 개수)는 보고만 한다.
 def verdict10(candidate: str, n: str, untrained: str, others: list[str]) -> str:
-    """Stage 10: the LoRA-trained Qwen (raw output) against N on Zeroth (harmonized) and FLEURS Korean.
+    """10단계: LoRA로 학습한 Qwen(raw 출력)을 Zeroth(맞춘 CER)와 FLEURS 한국어에서 N과 비교한다.
 
-    Reported with it: the forgetting line against the untrained Qwen, the other models, digit splits, the
-    notation-agnostic scoring, English, the telephone channel, the official repetition fix and loops.
+    함께 보고하는 것: 학습 전 Qwen에 대한 망각 줄, 다른 모델들, 숫자 유무 분리, 표기 무관 채점, 영어, 전화
+    채널, 공식 반복 제거, 되풀이.
     """
     zeroth = compare("zeroth-val", candidate, n, harmonized=True)
     fleurs = compare("fleurs-ko-val", candidate, n)
@@ -949,59 +943,59 @@ def main() -> None:
     tab.add_argument("--set", required=True, dest="set_name")
     tab.add_argument("--reports", nargs="+", required=True)
     tab.add_argument("--baseline")
-    tab.add_argument("--no-digit-split", action="store_true", help="FLEURS sets have no digit list")
-    tab.add_argument("--harmonized", action="store_true", help="score again after itn.harmonize (Korean)")
+    tab.add_argument("--no-digit-split", action="store_true", help="FLEURS 묶음에는 숫자 발화 목록이 없다")
+    tab.add_argument("--harmonized", action="store_true", help="itn.harmonize 뒤에 다시 채점한다(한국어)")
     tab.add_argument(
-        "--scoring", choices=list(SCORINGS), help="score the stored texts again (Korean, stage 8)"
+        "--scoring", choices=list(SCORINGS), help="저장된 글을 다른 방식으로 다시 채점한다(한국어, 8단계)"
     )
     ver = commands.add_parser("verdict")
     ver.add_argument("--baseline", required=True)
     ver.add_argument("--candidate", required=True)
-    ver.add_argument("--no-interval-rule", action="store_true", help="stage 2 rules (no interval condition)")
+    ver.add_argument("--no-interval-rule", action="store_true", help="2단계 규칙(구간 조건 없음)")
     ver6 = commands.add_parser("verdict6")
     ver6.add_argument("--baseline", required=True)
-    ver6.add_argument("--previous", required=True, help="the stage 3 model trained on the original notation")
+    ver6.add_argument("--previous", required=True, help="원래 표기로 학습한 3단계 모델")
     ver6.add_argument("--candidate", required=True)
     loop = commands.add_parser("loops")
     loop.add_argument("--set", required=True, dest="set_name")
     loop.add_argument("--reports", nargs="+", required=True)
-    loop.add_argument("--harmonized", action="store_true", help="score again after itn.harmonize (Korean)")
+    loop.add_argument("--harmonized", action="store_true", help="itn.harmonize 뒤에 다시 채점한다(한국어)")
     loop.add_argument("--scoring", choices=list(SCORINGS))
     chg = commands.add_parser("changes")
     chg.add_argument("--set", required=True, dest="set_name")
-    chg.add_argument("--base", required=True, help="the recorded greedy report")
+    chg.add_argument("--base", required=True, help="기록된 greedy 리포트")
     chg.add_argument("--reports", nargs="+", required=True)
     chg.add_argument("--scoring", choices=list(SCORINGS))
     ver8 = commands.add_parser("verdict8")
-    ver8.add_argument("--models", nargs="+", required=True, help="greedy reports; arms are <model>-<arm>")
-    ver8.add_argument("--arms", nargs="+", required=True, help="in order of preference (simplest first)")
+    ver8.add_argument("--models", nargs="+", required=True, help="greedy 리포트들. 후보는 <model>-<arm>")
+    ver8.add_argument("--arms", nargs="+", required=True, help="선호 순서(단순한 것부터)")
     itn = commands.add_parser("itn8")
     itn.add_argument("--model", required=True)
     itn.add_argument("--baseline", required=True)
     itn.add_argument("--fleurs", default="fleurs-ko-val")
     itn.add_argument("--zeroth", default="zeroth-val")
     gate = commands.add_parser("gate9")
-    gate.add_argument("--fp16", required=True, help="raw report file of the fp16 run")
-    gate.add_argument("--fp32", required=True, help="raw report file of the fp32 run")
+    gate.add_argument("--fp16", required=True, help="fp16 실행의 raw 리포트 파일")
+    gate.add_argument("--fp32", required=True, help="fp32 실행의 raw 리포트 파일")
     ver9 = commands.add_parser("verdict9")
-    ver9.add_argument("--candidate", required=True, help="raw output; <candidate>-fixed is reported")
+    ver9.add_argument("--candidate", required=True, help="raw 출력. <candidate>-fixed도 보고한다")
     ver9.add_argument("--baseline", required=True)
-    ver9.add_argument("--others", nargs="*", default=[], help="fine-tuned models shown next to it")
+    ver9.add_argument("--others", nargs="*", default=[], help="나란히 보일 파인튜닝한 모델들")
     gate_a = commands.add_parser("gate10")
-    gate_a.add_argument("--file", required=True, help="raw report file of the fresh-adapter run")
-    gate_a.add_argument("--recorded", required=True, help="the stage 9 fp16 check file")
+    gate_a.add_argument("--file", required=True, help="새 어댑터 실행의 raw 리포트 파일")
+    gate_a.add_argument("--recorded", required=True, help="9단계 fp16 점검 파일")
     smoke = commands.add_parser("smoke10")
-    smoke.add_argument("--steps", required=True, help="outputs/<smoke run>/steps.jsonl")
-    smoke.add_argument("--mem", required=True, help="the memwatch CSV of the smoke run")
+    smoke.add_argument("--steps", required=True, help="outputs/<스모크 실행>/steps.jsonl")
+    smoke.add_argument("--mem", required=True, help="스모크 실행의 메모리 감시(memwatch) CSV")
     smoke.add_argument("--expected-steps", type=int, default=50)
     pick = commands.add_parser("pick10")
     pick.add_argument(
-        "--files", nargs="+", required=True, help="zeroth-val500 raw report files, in step order"
+        "--files", nargs="+", required=True, help="zeroth-val500 raw 리포트 파일들(스텝 순서로)"
     )
     ver10 = commands.add_parser("verdict10")
-    ver10.add_argument("--candidate", required=True, help="raw output; <candidate>-fixed is reported")
-    ver10.add_argument("--n", required=True, help="the model it would replace")
-    ver10.add_argument("--untrained", required=True, help="the base model before training")
+    ver10.add_argument("--candidate", required=True, help="raw 출력. <candidate>-fixed도 보고한다")
+    ver10.add_argument("--n", required=True, help="후보가 대신할 모델")
+    ver10.add_argument("--untrained", required=True, help="학습 전 기본 모델")
     ver10.add_argument("--others", nargs="*", default=[])
     args = parser.parse_args()
 

@@ -1,7 +1,6 @@
-"""Stage 10: LoRA training on Qwen3-ASR (docs/experiments.md, 10단계). A tiny random model, no weights.
+"""10단계: Qwen3-ASR LoRA 학습(docs/experiments.md 10단계). 가중치 없이 작은 무작위 모델로 확인한다.
 
-The tests that need the real processor or config read them from the Hugging Face cache and are skipped
-where it is empty (CI).
+실제 처리기나 설정이 필요한 테스트는 Hugging Face 캐시에서 읽고, 캐시가 비어 있으면(CI) 건너뛴다.
 """
 
 # [테스트 묶음] train_qwen.py(10단계 Qwen3-ASR LoRA 학습)를 작은 무작위 모델로 CPU에서 확인한다: 고정된 데이터
@@ -24,10 +23,11 @@ from whisper_ko_ft.evaluate_qwen import DEFAULT_MODEL, REGISTERED
 from whisper_ko_ft.store import SAMPLE_RATE
 
 
-# 작은 모델용 배치 하나를 만든다: 1초·2초 발화(오디오 토큰 13·26개), 처리기처럼 왼쪽을 채운 프롬프트, 정답
-# 4·2토큰(끝 토큰 포함)을 assemble로 이은 것. seed로 특징 값을 바꿔 서로 다른 배치를 만든다.
 def tiny_batch(seed: int = 0) -> dict[str, torch.Tensor]:
-    """Utterances of 1 and 2 seconds (13 and 26 audio tokens), prompts left-padded as the processor does."""
+    """작은 모델용 배치: 1초·2초 발화(오디오 토큰 13·26개), 처리기처럼 왼쪽을 채운 프롬프트.
+
+    정답 4·2토큰(끝 토큰 포함)을 assemble로 잇는다. seed로 특징 값을 바꿔 서로 다른 배치를 만든다.
+    """
     generator = torch.Generator().manual_seed(seed)
     features = torch.randn(2, 128, 200, generator=generator)
     features_mask = torch.zeros(2, 200, dtype=torch.long)
@@ -47,7 +47,7 @@ def tiny_batch(seed: int = 0) -> dict[str, torch.Tensor]:
     }
 
 
-# --- the data schedule ---
+# --- 데이터 일정 ---
 
 
 # StepBatches: 마이크로 배치 수와 크기가 맞고, 한 에폭 안에서 모든 발화가 한 번씩 나오며, 같은 시드면 같은
@@ -57,7 +57,7 @@ def test_steps_take_fixed_micro_batches_from_seeded_epochs():
     seen = list(batches)
     assert len(seen) == len(batches) == 10 and all(len(b) == 2 for b in seen)
     first_epoch = sorted(i for b in seen[:5] for i in b)
-    assert first_epoch == list(range(10))  # each utterance once per epoch
+    assert first_epoch == list(range(10))  # 에폭마다 발화가 한 번씩
     assert seen == list(train_qwen.StepBatches(10, 2, 2, seed=0, first_step=1, last_step=5))
     assert seen != list(train_qwen.StepBatches(10, 2, 2, seed=1, first_step=1, last_step=5))
 
@@ -91,7 +91,7 @@ def test_longest_indices_order_by_audio_then_text():
     assert train_qwen.longest_indices(utterances, 3) == [1, 3, 2]
 
 
-# --- inputs and labels ---
+# --- 입력과 라벨 ---
 
 
 # assemble: 프롬프트의 왼쪽 패딩을 떼고 정답을 이어 오른쪽으로 채우며, 라벨은 정답 위치에만 있고 프롬프트와
@@ -109,9 +109,8 @@ def test_rows_are_prompt_then_answer_right_padded_and_only_the_answer_is_labelle
     ]
 
 
-# Qwen 토크나이저 대역: 글자마다 토큰 하나. 특수 토큰을 붙이지 않는지와 끝 토큰 이름을 확인한다.
 class Tokenizer:
-    """Stands in for the Qwen tokenizer: one id per character."""
+    """Qwen 토크나이저 대역: 글자마다 토큰 하나. 특수 토큰을 붙이지 않는지와 끝 토큰 이름을 확인한다."""
 
     pad_token_id = PAD
 
@@ -129,9 +128,11 @@ def test_the_answer_is_the_transcript_and_the_end_token():
     assert train_qwen.answer_ids(Tokenizer(), "ab") == [ord("a") % 90, ord("b") % 90, END]
 
 
-# 처리기 대역: apply_transcription_request 호출(발화별 표본 수, 언어)을 기록하고 고정된 프롬프트를 돌려준다.
 class Processor:
-    """Stands in for Qwen3ASRProcessor.apply_transcription_request: a fixed prompt per utterance."""
+    """Qwen3ASRProcessor.apply_transcription_request 대역: 발화마다 고정된 프롬프트.
+
+    호출(발화별 표본 수, 언어)을 기록한다.
+    """
 
     def __init__(self):
         self.tokenizer = Tokenizer()
@@ -168,7 +169,7 @@ def test_the_collator_uses_the_inference_prompt_and_the_first_30_seconds():
     assert {"input_features", "input_features_mask", "attention_mask"} <= set(batch)
 
 
-# --- LoRA on the tiny model ---
+# --- 작은 모델의 LoRA ---
 
 
 # LoRA가 붙은 층 이름 목록(PEFT 접두사를 뗀 것).
@@ -211,14 +212,14 @@ def test_lora_goes_on_encoder_attention_and_mlp_and_language_model_attention_and
             "mlp.down_proj",
         )
     }
-    assert names == encoder | language  # not the projector, conv_out or lm_head
+    assert names == encoder | language  # 프로젝터, conv_out, lm_head에는 없다
     summary = train_qwen.lora_summary(model)
     assert summary["modules"] == train_qwen.expected_lora_modules(model.config) == 26
     assert summary["encoder_modules"] == 12 and summary["language_model_modules"] == 14
-    assert summary["trainable_dtypes"] == ["torch.float32"]  # fp32 adapter on an fp16 base
+    assert summary["trainable_dtypes"] == ["torch.float32"]  # fp16 기본 가중치 위의 fp32 어댑터
     assert summary["other_trainable"] == []
     assert {str(p.dtype) for n, p in model.named_parameters() if "lora_" not in n} == {"torch.float16"}
-    train_qwen.check_lora(summary, model.config)  # does not raise
+    train_qwen.check_lora(summary, model.config)  # 예외가 나지 않는다
 
 
 # check_lora는 층 수가 다르거나, 어댑터가 fp32가 아니거나, 어댑터 밖의 가중치가 학습되면 ValueError로 멈춘다.
@@ -244,7 +245,7 @@ def test_a_fresh_adapter_changes_nothing_and_checkpointing_covers_both_towers():
     model.eval()
     with torch.no_grad():
         after = model(**batch).loss
-    assert torch.equal(before, after)  # lora_B starts at zero
+    assert torch.equal(before, after)  # lora_B는 0에서 시작한다
     layers = [
         m for n, m in model.named_modules() if n.endswith(("audio_tower.layers.0", "language_model.layers.1"))
     ]
@@ -258,8 +259,8 @@ def test_the_answer_loss_is_the_models_own_loss_on_the_answer_tokens():
     model = tiny_model()
     with torch.no_grad():
         total, count = train_qwen.answer_loss(model, batch)
-        official = model(**batch).loss  # mean over the labelled positions
-    assert count == 6  # 4 + 2 answer tokens, end token included
+        official = model(**batch).loss  # 라벨이 있는 위치의 평균
+    assert count == 6  # 정답 토큰 4 + 2개, 끝 토큰 포함
     assert torch.allclose(total / count, official, atol=1e-6)
 
 
@@ -277,7 +278,7 @@ def test_one_step_trains_only_the_adapter_in_both_towers():
     assert all(p.grad is None for n, p in model.named_parameters() if not p.requires_grad)
 
 
-# --- the optimizer step and the loop ---
+# --- 옵티마이저 스텝과 학습 루프 ---
 
 
 # optimizer_step: 기울기에 inf가 있으면 GradScaler가 그 스텝을 건너뛰고(가중치 그대로, 배율 8 → 4) 건너뜀으로
@@ -287,15 +288,15 @@ def test_optimizer_step_reports_a_step_that_gradscaler_skipped():
     weight = torch.nn.Parameter(torch.ones(3))
     optimizer = torch.optim.SGD([weight], lr=0.1)
     scaler = torch.amp.GradScaler("cpu", init_scale=8.0)
-    scaler.scale(torch.tensor(0.0))  # GradScaler sets up its scale on the first scale()
+    scaler.scale(torch.tensor(0.0))  # GradScaler는 첫 scale()에서 배율을 준비한다
     weight.grad = torch.tensor([1.0, float("inf"), 1.0])
     norm, scale, skipped = train_qwen.optimizer_step(scaler, optimizer, [weight], max_grad_norm=1.0)
     assert skipped and scale == 8.0 and not np.isfinite(norm)
-    assert torch.equal(weight.detach(), torch.ones(3))  # not updated
-    weight.grad = torch.tensor([8.0, 0.0, 0.0])  # the scale is now 4: the true gradient is (2, 0, 0)
+    assert torch.equal(weight.detach(), torch.ones(3))  # 갱신되지 않았다
+    weight.grad = torch.tensor([8.0, 0.0, 0.0])  # 이제 배율이 4라 실제 기울기는 (2, 0, 0)
     norm, scale, skipped = train_qwen.optimizer_step(scaler, optimizer, [weight], max_grad_norm=1.0)
-    assert not skipped and scale == 4.0 and norm == pytest.approx(2.0)  # the norm before clipping
-    assert weight.detach().tolist() == pytest.approx([0.9, 1.0, 1.0])  # clipped to (1, 0, 0)
+    assert not skipped and scale == 4.0 and norm == pytest.approx(2.0)  # 자르기 전 기울기 크기
+    assert weight.detach().tolist() == pytest.approx([0.9, 1.0, 1.0])  # (1, 0, 0)으로 잘렸다
 
 
 # GradScaler를 끈 경우(CPU, fp32)는 배율 1.0이고 건너뜀이 없다.
@@ -405,7 +406,7 @@ def test_the_schedule_warms_up_then_decays_to_zero():
     assert rates == [0.0, 0.5, 1.0, 0.5] and optimizer.param_groups[0]["lr"] == 0.0
 
 
-# --- the real model's files (Hugging Face cache; skipped when it is empty) ---
+# --- 실제 모델 파일(Hugging Face 캐시. 비어 있으면 건너뛴다) ---
 
 
 # 실제 모델 파일을 캐시에서만 읽고(local_files_only), 없으면 테스트를 건너뛴다. CI에는 캐시가 없어 이 두
@@ -413,7 +414,7 @@ def test_the_schedule_warms_up_then_decays_to_zero():
 def cached(loader):
     try:
         return loader()
-    except OSError:  # not in the cache
+    except OSError:  # 캐시에 없다
         pytest.skip("Qwen3-ASR-1.7B-hf is not in the Hugging Face cache")
 
 
@@ -457,12 +458,12 @@ def test_on_the_real_processor_inputs_are_the_chat_template_without_its_last_new
     ]
     official = processor.apply_chat_template(conversation, tokenize=True, return_dict=True)["input_ids"][0]
     row = batch["input_ids"][0][batch["attention_mask"][0].bool()].tolist()
-    assert row == official.tolist()[:-1]  # ends with <|im_end|>; the template adds "\n"
+    assert row == official.tolist()[:-1]  # <|im_end|>로 끝난다. 템플릿은 "\n"을 더 붙인다
     kept = [t for t in batch["labels"][0].tolist() if t != train_qwen.IGNORE]
     assert processor.tokenizer.decode(kept) == f"{text}<|im_end|>"
 
 
-# --- the command line ---
+# --- 명령줄 ---
 
 
 # parse_args 기본값이 10단계 규칙과 같고(revision, 2 × 16, 1e-4, warmup 500, 1,500스텝, 500스텝마다 저장, LoRA

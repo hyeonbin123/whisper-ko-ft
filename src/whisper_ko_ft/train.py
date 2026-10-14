@@ -1,13 +1,13 @@
-"""Fine-tune a Whisper model on a prepared set: full fine-tuning or LoRA, fp16 mixed precision.
+"""준비한 묶음으로 Whisper 모델을 파인튜닝한다: 전체 파인튜닝 또는 LoRA, fp16 혼합 정밀도.
 
-Usage:
+사용법:
     uv run python -m whisper_ko_ft.train --run-name small-a --model openai/whisper-small --learning-rate 1e-5
     uv run python -m whisper_ko_ft.train --run-name turbo-l1 --learning-rate 1e-4 --lora-r 16 ...
 
-Settings that candidates share are the defaults here and are fixed in docs/experiments.md.
-Writes outputs/<run-name>/: checkpoints, `best/` (lowest val-500 CER: the model, or the LoRA adapter when
---lora-r or --init-adapter is set, plus the processor) and `run.json`.
---init-adapter takes rank, alpha, dropout and targets from the saved adapter; --lora-* are ignored.
+후보들이 함께 쓰는 설정이 여기의 기본값이며, docs/experiments.md에 고정되어 있다.
+outputs/<run-name>/에 쓴다: 체크포인트, `best/`(val-500 CER이 가장 낮은 것: 모델, 또는 --lora-r이나
+--init-adapter를 주면 LoRA 어댑터, 그리고 처리기), `run.json`.
+--init-adapter는 저장된 어댑터에서 rank, alpha, dropout, 대상 층을 가져오며 --lora-*는 무시한다.
 """
 
 # [파일 역할] Whisper 학습 스크립트. 2단계(whisper-small 전체 파인튜닝), 3단계(turbo LoRA L1·L2), 4단계(전화
@@ -60,14 +60,14 @@ LANGUAGE_NAMES = {"ko": "korean", "en": "english"}
 # docs/experiments.md 4단계). 매번 새로 뽑으므로 같은 발화도 에폭마다 깨끗한 판과 전화 음질 판이 섞인다.
 # 호출 위치: main(학습·평가 데이터셋), train_qwen.main.
 class UtteranceDataset(Dataset):
-    """Raw audio and text; features are computed in the collator so each model can use its own mel size."""
+    """원본 오디오와 글. 특징은 콜레이터에서 계산해 모델마다 자기 멜 수를 쓸 수 있게 한다."""
 
     def __init__(self, utterances: list[Utterance], telephone_prob: float = 0.0) -> None:
         self.utterances = utterances
         self.telephone_prob = telephone_prob
         # 저장소 memmap은 처음 읽을 때 연다. DataLoader 워커로 데이터셋을 넘길 때 피클로 보내는데, 열린
-        # memmap은 넘길 수 없어 빈 dict 상태로 넘긴다(옆 주석).
-        self._stores: dict[str, AudioStore] = {}  # opened lazily: a memmap can't be pickled to workers
+        # memmap은 넘길 수 없어 빈 dict 상태로 넘긴다.
+        self._stores: dict[str, AudioStore] = {}  # 처음 읽을 때 연다: memmap은 워커로 피클해 보낼 수 없다
 
     def __len__(self) -> int:
         return len(self.utterances)
@@ -78,13 +78,10 @@ class UtteranceDataset(Dataset):
         if utterance.store not in self._stores:
             self._stores[utterance.store] = AudioStore(utterance.store)
         audio = self._stores[utterance.store].read(utterance)
-        # 전화 음질 적용 여부를 torch 난수로 정한다. Trainer의 seed(0)에서 워커마다 시드가 정해지므로 같은
-        # 실행 설정이면 같은 선택이 나온다.
-        # getattr로 읽는 이유(옆 주석): Windows의 DataLoader 워커는 모듈을 다시 import한다. 학습 도중 코드가
-        # 바뀌면 예전 코드로 만든 데이터셋 객체가 새 코드로 풀릴 수 있어, 속성이 없어도 죽지 않게 기본값을
-        # 둔다.
-        # torch seeds every loader worker from the run's seed, so the draw is repeatable per run.
-        # getattr: loader workers re-import this module, and may unpickle a dataset made by older code.
+        # 전화 음질 적용 여부를 torch 난수로 정한다. torch가 실행의 seed(Trainer의 0)에서 DataLoader 워커마다
+        # 시드를 정하므로, 같은 실행 설정이면 같은 선택이 나온다.
+        # getattr로 읽는 이유: Windows의 DataLoader 워커는 이 모듈을 다시 import하고, 예전 코드로 만든
+        # 데이터셋 객체를 풀 수 있다. 학습 도중 코드가 바뀌어도 속성이 없다고 죽지 않게 기본값을 둔다.
         telephone_prob = getattr(self, "telephone_prob", 0.0)
         if telephone_prob and torch.rand(1).item() < telephone_prob:
             audio = telephone(audio)
@@ -101,9 +98,8 @@ class Collator:
     processor: WhisperProcessor
     decoder_start_token_id: int
     # features_dtype: LoRA 실행은 fp16, 전체 파인튜닝은 fp32(main이 정한다). LoRA 평가에서 dtype이 맞지 않아
-    # 실패한 것을 고친 설정이다(커밋 6905b6e).
-    # A LoRA run keeps the base model in fp16. Training runs under autocast, but generation during
-    # evaluation does not, so the features must already have the model's dtype.
+    # 실패한 것을 고친 설정이다(커밋 6905b6e). LoRA 실행은 기본 모델을 fp16으로 둔다. 학습은 autocast 아래에서
+    # 돌지만 평가 중의 생성(generate)은 그렇지 않으므로, 특징이 처음부터 모델의 dtype이어야 한다.
     features_dtype: torch.dtype = torch.float32
 
     def __call__(self, rows: list[dict]) -> dict[str, torch.Tensor]:
@@ -122,7 +118,6 @@ class Collator:
         ids = labels.input_ids.masked_fill(labels.attention_mask.ne(1), -100)
         # 맨 앞이 디코더 시작 토큰이면 떼어 낸다. 모델이 labels를 오른쪽으로 밀어 디코더 입력을 만들 때 시작
         # 토큰을 스스로 붙이므로, 남겨 두면 두 번 들어간다.
-        # The model prepends the start token itself when it shifts the labels right.
         if (ids[:, 0] == self.decoder_start_token_id).all():
             ids = ids[:, 1:]
         return {
@@ -139,7 +134,7 @@ class Collator:
 # 기본 모델 전체를 fp32로 학습했다(커밋 8ad5a18). 기록된 7단계 실행은 --lora-r 16을 함께 줘서 영향이 없었다.
 # 호출 위치: main, tests/test_train_args.py.
 def resolve_lora_args(args: argparse.Namespace) -> None:
-    """Fill the LoRA settings actually used, so run.json records them and --init-adapter implies LoRA."""
+    """실제로 쓸 LoRA 설정을 채운다. run.json에 그 값이 남고, --init-adapter만 줘도 LoRA로 학습한다."""
     if args.init_adapter:
         from peft import PeftConfig
 
@@ -164,21 +159,21 @@ def main() -> None:
     parser.add_argument("--run-name", required=True)
     parser.add_argument("--model", default="openai/whisper-small")
     parser.add_argument("--learning-rate", type=float, required=True)
-    parser.add_argument("--spec-augment", action="store_true", help="mask_time_prob=0.05 (candidate C)")
-    parser.add_argument("--lora-r", type=int, default=0, help="LoRA rank; 0 trains every weight")
-    parser.add_argument("--lora-alpha", type=int, help="defaults to 2 x rank")
+    parser.add_argument("--spec-augment", action="store_true", help="mask_time_prob=0.05(후보 C)")
+    parser.add_argument("--lora-r", type=int, default=0, help="LoRA rank. 0이면 모든 가중치를 학습한다")
+    parser.add_argument("--lora-alpha", type=int, help="기본값은 2 x rank")
     parser.add_argument("--lora-dropout", type=float, default=0.05)
     parser.add_argument("--lora-targets", nargs="+", default=["q_proj", "v_proj"])
     parser.add_argument(
         "--init-adapter",
-        help="continue from this saved LoRA adapter (implies LoRA; its own rank, alpha, dropout and targets "
-        "are used, --lora-* are ignored)",
+        help="이 저장된 LoRA 어댑터에서 이어서 학습한다(LoRA 학습이 된다. 어댑터 자체의 rank, alpha, "
+        "dropout, 대상 층을 쓰고 --lora-*는 무시한다)",
     )
     parser.add_argument(
         "--telephone-prob",
         type=float,
         default=0.0,
-        help="share of training audio sent through the telephone channel",
+        help="학습 음성 중 전화 채널을 통과시킬 비율",
     )
     parser.add_argument("--train-set", default="zeroth-train")
     parser.add_argument("--eval-set", default="zeroth-val500")
@@ -188,8 +183,8 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--grad-accum", type=int, default=2)
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--limit-train", type=int, help="smoke runs only")
-    parser.add_argument("--limit-eval", type=int, help="smoke runs only")
+    parser.add_argument("--limit-train", type=int, help="스모크 실행 전용: 학습 발화를 앞의 N개로 줄인다")
+    parser.add_argument("--limit-eval", type=int, help="스모크 실행 전용: 평가 발화를 앞의 N개로 줄인다")
     args = parser.parse_args()
     resolve_lora_args(args)
 
@@ -205,9 +200,8 @@ def main() -> None:
     # 같은 접두로 시작하게 한다.
     processor = WhisperProcessor.from_pretrained(args.model)
     processor.tokenizer.set_prefix_tokens(language=LANGUAGE_NAMES[language], task="transcribe")
-    # LoRA는 얼린 기본 가중치를 fp16으로 올려 11GB GPU에 맞추고(옆 주석), 전체 파인튜닝은 fp32 마스터 가중치로
-    # 올린 뒤 Trainer의 fp16 혼합 정밀도로 학습한다.
-    # LoRA keeps the frozen base in fp16 to fit 11 GB; PEFT creates the adapter weights in fp32.
+    # LoRA는 얼린 기본 가중치를 fp16으로 올려 11GB GPU에 맞추고(PEFT가 만드는 어댑터 가중치는 fp32다), 전체
+    # 파인튜닝은 fp32 마스터 가중치로 올린 뒤 Trainer의 fp16 혼합 정밀도로 학습한다.
     model = WhisperForConditionalGeneration.from_pretrained(
         args.model, dtype=torch.float16 if args.lora_r else torch.float32
     )
@@ -219,7 +213,7 @@ def main() -> None:
     model.generation_config.forced_decoder_ids = None
     model.generation_config.max_new_tokens = MAX_NEW_TOKENS
     model.generation_config.max_length = None
-    model.config.use_cache = False  # not compatible with gradient checkpointing
+    model.config.use_cache = False  # gradient checkpointing과 함께 쓸 수 없다
     # 후보 C: SpecAugment(시간 축 마스킹 비율 0.05)를 켠다.
     if args.spec_augment:
         model.config.apply_spec_augment = True
@@ -300,8 +294,8 @@ def main() -> None:
         logging_steps=25,
         dataloader_num_workers=args.workers,
         # 7단계 첫 실행이 500스텝 평가의 DataLoader 워커를 띄우다가 멈춘 뒤 넣은 설정이다(커밋 30e739b,
-        # docs/experiments.md 7단계 결과). 학습 결과에는 영향이 없다.
-        # Windows starts workers by spawning; keep them so a run spawns them once, not at every evaluation.
+        # docs/experiments.md 7단계 결과). 학습 결과에는 영향이 없다. Windows는 워커를 spawn으로 띄우므로,
+        # 워커를 유지해 평가 때마다가 아니라 실행마다 한 번만 띄우게 한다.
         dataloader_persistent_workers=args.workers > 0,
         remove_unused_columns=False,
         label_names=["labels"],

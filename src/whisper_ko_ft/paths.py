@@ -1,4 +1,4 @@
-"""Folders the scripts read and write. `data/` and `outputs/` are git-ignored; `reports/` is committed."""
+"""스크립트들이 읽고 쓰는 폴더. `data/`와 `outputs/`는 git에서 제외하고, `reports/`는 커밋한다."""
 
 # [파일 역할] 스크립트들이 읽고 쓰는 폴더 경로를 한곳에 모은 모듈이다.
 # download·prepare·prepare_itn·evaluate·evaluate_ct2·evaluate_qwen·train·train_qwen·analyze가 모두 여기서

@@ -14,9 +14,8 @@ import pytest
 from whisper_ko_ft import evaluate
 
 
-# 인자 검사를 통과해 묶음을 읽으려던 순간에 던지는 예외(아래 fixture가 load_set·load_model을 이것으로 바꾼다).
 class Reached(Exception):
-    """The argument checks passed and the set was about to be loaded."""
+    """인자 검사를 통과했고 묶음을 불러오려던 참이다(아래 fixture가 load_set·load_model을 이것으로 바꾼다)."""
 
 
 # 리포트 폴더와 저장소 루트를 임시 폴더로 바꾸고, 묶음·모델 불러오기를 Reached로 바꾸는 fixture. 실제
@@ -42,7 +41,7 @@ def run(monkeypatch, *args):
 # --adapter인데 --name이 없으면 parser.error로 멈추고(오류 메시지에 --name), --name을 주면 측정 단계까지 간다.
 def test_adapter_needs_a_report_name(reports, monkeypatch, capsys):
     adapter = ["--model", "openai/whisper-large-v3-turbo", "--adapter", "x", "--set", "zeroth-val"]
-    # Without --name the report would land in the base model's folder.
+    # --name이 없으면 리포트가 기본 모델의 폴더에 들어간다.
     with pytest.raises(SystemExit):
         run(monkeypatch, *adapter)
     assert "--name" in capsys.readouterr().err
@@ -86,7 +85,7 @@ def test_commit_is_marked_dirty_only_for_uncommitted_code(tmp_path):
 
     clean = evaluate.git_commit(tmp_path)
     assert clean and not clean.endswith("+dirty")
-    (tmp_path / "reports" / "r.json").write_text('{"a": 1}\n', encoding="utf-8")  # reports do not count
+    (tmp_path / "reports" / "r.json").write_text('{"a": 1}\n', encoding="utf-8")  # 리포트는 세지 않는다
     assert evaluate.git_commit(tmp_path) == clean
     (tmp_path / "src" / "a.py").write_text("x = 2\n", encoding="utf-8")
     assert evaluate.git_commit(tmp_path) == f"{clean}+dirty"
@@ -108,7 +107,7 @@ SMOKE = ["--model", "m", "--set", "zeroth-val", "--fallback", "ratio"]
 # 스모크용으로 기준값을 낮추면 --no-report가 있어야 한다. 등록하지 않은 기준으로 만든 리포트가 남지 않게
 # 하려는 것이다.
 def test_threshold_overrides_are_for_smoke_runs_only(reports, monkeypatch, capsys):
-    # A lowered threshold is not a registered candidate, so it must not leave a report behind.
+    # 낮춘 기준값은 등록한 후보가 아니므로 리포트를 남기면 안 된다.
     with pytest.raises(SystemExit):
         run(monkeypatch, *SMOKE, "--compression-ratio-threshold", "1.0")
     assert "--no-report" in capsys.readouterr().err
@@ -121,8 +120,8 @@ def test_threshold_overrides_are_for_smoke_runs_only(reports, monkeypatch, capsy
 @pytest.mark.parametrize(
     "args",
     [
-        ["--model", "m", "--set", "zeroth-val", "--compression-ratio-threshold", "1.0"],  # no fallback
-        [*SMOKE, "--logprob-threshold", "-0.5"],  # D1a has no log-probability threshold
+        ["--model", "m", "--set", "zeroth-val", "--compression-ratio-threshold", "1.0"],  # 재시도 없음
+        [*SMOKE, "--logprob-threshold", "-0.5"],  # D1a에는 로그확률 기준이 없다
     ],
 )
 def test_threshold_overrides_need_the_matching_fallback(reports, monkeypatch, args):
@@ -139,12 +138,12 @@ def test_fallback_runs_reach_the_measurement(reports, monkeypatch):
 
 
 # score_rows가 기록된 리포트와 같은 필드를 채우는지: 편집 수·길이·가설의 숫자 여부, 정규화하면 비는 정답은 0과
-# 0으로 두고 그 수를 돌려준다. 9단계에서 main 밖으로 옮긴 함수라 동작이 그대로인지 고정한다(옆 주석).
+# 0으로 두고 그 수를 돌려준다. 9단계에서 Qwen3-ASR 하네스와 함께 쓰려고 main 밖으로 옮긴 함수라, 행이 기록된
+# 리포트와 같은 모양으로 나오는지 고정한다.
 def test_rows_are_scored_as_before():
-    # Moved out of main for the Qwen3-ASR harness (stage 9); rows must come out as recorded reports have them.
     rows = [
         {"id": "a", "reference": "오는 오 월", "hypothesis": "오는 5월"},
-        {"id": "b", "reference": "...", "hypothesis": "아무 말"},  # empty after normalization: skipped
+        {"id": "b", "reference": "...", "hypothesis": "아무 말"},  # 정규화하면 비어 건너뛴다
         {"id": "c", "reference": "문장", "hypothesis": "문장"},
     ]
     assert evaluate.score_rows(rows, "ko") == 1
@@ -155,7 +154,7 @@ def test_rows_are_scored_as_before():
 
 # 배치 시간의 중앙값과 90번째 백분위(numpy 선형 보간: 0.4와 1.0 사이 → 0.76), 빈 목록이면 None.
 def test_batch_times_in_the_summary():
-    # Per-utterance latency at batch size 1 (stage 9 speed check).
+    # 배치 크기 1에서의 발화당 지연(9단계 속도 확인).
     assert evaluate.batch_seconds_summary([0.1, 0.2, 0.3, 0.4, 1.0]) == {
         "batch_seconds_median": 0.3,
         "batch_seconds_p90": 0.76,

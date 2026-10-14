@@ -1,9 +1,9 @@
-"""Rewrite spelled-out Korean numbers as Arabic digits ("이천 십 팔 년" -> "2018년").
+"""한글로 풀어 쓴 한국어 숫자를 아라비아 숫자로 바꾼다("이천 십 팔 년" -> "2018년").
 
-Zeroth-Korean spells numbers out token by token; Whisper and FLEURS write digits. This is a rule-based
-inverse text normalization for that one convention, not a general one. A run of number tokens is rewritten
-only when the next token is a counting unit, because most single number words are also ordinary words
-("이" this, "일" work, "사", "구"). Rules and known gaps: docs/experiments.md, "6단계".
+Zeroth-Korean은 숫자를 토큰마다 한글로 풀어 쓰고, Whisper와 FLEURS는 아라비아 숫자로 적는다. 이 모듈은 그
+한 가지 표기 관례만 다루는 규칙 기반 역정규화(inverse text normalization)이며 범용 변환기가 아니다. 숫자 토큰
+묶음은 바로 다음 토큰이 세는 단위일 때만 바꾼다. 숫자 낱말 하나하나는 대부분 보통 낱말이기도 하기
+때문이다("이"(지시어), "일"(업무), "사", "구"). 규칙과 알려진 빈틈은 docs/experiments.md "6단계".
 """
 
 # [파일 역할] Zeroth-Korean식으로 띄어 쓴 한국어 숫자 낱말을 아라비아 숫자로 바꾸는 규칙 기반 역정규화(ITN)다.
@@ -42,8 +42,7 @@ NATIVE_TENS = {
     "아흔": 90,
 }
 # NATIVE_SAFE_ALONE: 혼자 나와도 숫자로 바꿔도 되는 고유어 수사(다섯~아홉, 열·스물 …). 한·두·세·네는 관형사나
-# 대답('네')과 겹쳐 혼자서는 바꾸지 않는다.
-# "한", "두", "세", "네" alone are left as they are: "한 관계자", "세 부담", "네" (yes).
+# 대답('네')과 겹쳐 혼자서는 바꾸지 않는다. 예: '한 관계자', '세 부담', '네'(대답)는 그대로 남는다.
 NATIVE_SAFE_ALONE = {"다섯", "여섯", "일곱", "여덟", "아홉"} | set(NATIVE_TENS)
 
 # UNITS: 숫자 묶음 바로 뒤에 와야 하는 단위. 토큰이 단위로 시작하고 나머지가 AFTER_UNIT(조사·접미사)이면
@@ -59,7 +58,6 @@ UNITS = (
 )  # fmt: skip
 # AFTER_UNIT: 같은 토큰 안에서 단위 뒤에 붙어도 되는 조사·접미사. 빈 문자열은 단위만 있는 토큰('년')이다.
 # '년에는', '번째' 같은 형태를 받는다.
-# What may follow a unit inside the same token: particles and a few suffixes.
 AFTER_UNIT = {
     "", "에", "의", "은", "는", "이", "가", "을", "를", "로", "으로", "부터", "까지", "도", "만", "과", "와",
     "에서", "에는", "에도", "이다", "입니다", "째", "간", "쯤", "씩", "여", "경", "께", "보다", "이나", "나",
@@ -70,7 +68,6 @@ AFTER_UNIT = {
 # STRICT_UNITS 앞에서만 바꾼다.
 # STRICT_UNITS: 그런 애매한 숫자 뒤에서도 숫자로 읽어도 될 만큼 좁은 단위(년, 월, 퍼센트 …). 예: '이 년'은
 # '2년'이 되지만 '이 분'은 '분'이 좁은 단위가 아니라 그대로 남는다.
-# A run that is only one of these is an ordinary word far more often than a number.
 AMBIGUOUS_ALONE = {"이", "일", "사", "구", "오", "천", "백", "십", "만"}
 STRICT_UNITS = {
     "년",
@@ -90,13 +87,13 @@ STRICT_UNITS = {
 }
 # MONTH_FORMS: 소리가 바뀐 달 이름. '시 월'은 10월, '유 월'은 6월이다. '시', '유'는 숫자 글자가 아니라서 숫자
 # 읽기와 따로 처리한다.
-MONTH_FORMS = {"시": 10, "유": 6}  # "시 월" (10월), "유 월" (6월)
+MONTH_FORMS = {"시": 10, "유": 6}  # "시 월"은 10월, "유 월"은 6월
 
 
 # 만 아래 토큰 하나의 (값, 채운 가장 낮은 자리)를 돌려준다. 예: '삼' → (3, 1), '십' → (10, 10), '이천' →
 # (2000, 1000). 숫자가 아니면 None. '가장 낮은 자리'는 _read_sino가 자리가 내려가는지 확인하는 데 쓴다.
 def _small_value(token: str) -> tuple[int, int] | None:
-    """(value, lowest place filled) of a token like "삼", "십", "이천", or None."""
+    """토큰("삼", "십", "이천" 같은 것)의 (값, 채운 가장 낮은 자리). 숫자가 아니면 None."""
     if token in DIGITS:
         return DIGITS[token], 1
     if token in SMALL_UNITS:
@@ -122,9 +119,9 @@ def _unit_of(token: str, strict: bool) -> str | None:
 # 자리가 내려가는 동안만 한 묶음으로 더한다(이천 → 십 → 팔). 만·억·조가 오면 그 묶음을 '<값>만'으로 적고 다음
 # 묶음을 읽는다.
 def _read_sino(tokens: list[str], start: int) -> tuple[str, int] | None:
-    """Digits for the longest valid number starting at `start`, and the index after it.
+    """`start`에서 시작하는 가장 긴 올바른 숫자를 아라비아 숫자로, 그리고 그 다음 위치를 돌려준다.
 
-    Groups below 10,000 become digits; 만/억/조 stay as words ("일 만 칠 천" -> "1만 7000").
+    10,000 아래의 묶음은 아라비아 숫자가 되고, 만/억/조는 글자로 남는다("일 만 칠 천" -> "1만 7000").
     """
     parts: list[str] = []
     index = start
@@ -134,7 +131,7 @@ def _read_sino(tokens: list[str], start: int) -> tuple[str, int] | None:
         value, lowest, begin = 0, 10_000, index
         while index < len(tokens):
             small = _small_value(tokens[index])
-            if small is None or small[1] >= lowest:  # places must go down: "팔 일" is 8 then the unit 일
+            if small is None or small[1] >= lowest:  # 자리는 내려가야 한다: "팔 일"은 8 다음에 단위 '일'
                 break
             value, lowest = value + small[0], small[1]
             index += 1
@@ -196,7 +193,7 @@ def to_digits(text: str) -> str:
         # 뒤에 단위가 없으면 첫 토큰만 그대로 내보내고 한 칸만 나아간다. 다음 토큰부터 다시 숫자 묶음을
         # 찾는다.
         if _unit_of(unit_token, strict=alone) is None:
-            out.append(token)  # not followed by a unit: leave the words as they are
+            out.append(token)  # 뒤에 단위가 없으면 낱말을 그대로 둔다
             index += 1
             continue
         # 숫자와 단위 토큰(조사 포함)을 붙여 한 토큰으로 내보내고 단위 다음으로 건너뛴다.
@@ -211,5 +208,5 @@ def to_digits(text: str) -> str:
 # 가설에만 '%' → '퍼센트'를 적용하면 정답 표기와 반대 방향이 된다(docs/experiments.md 8단계).
 # 호출 위치: analyze의 harmonized·itn-harmonized·agnostic 채점.
 def harmonize(text: str) -> str:
-    """One notation for references and hypotheses alike: "%" as a word, then numbers as digits."""
+    """정답과 가설을 같은 표기로 맞춘다: "%"를 낱말로 바꾼 뒤 숫자를 아라비아 숫자로 바꾼다."""
     return to_digits(text.replace("%", "퍼센트"))

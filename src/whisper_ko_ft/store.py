@@ -1,7 +1,8 @@
-"""Audio stores: one int16 file per source split plus a JSON index, read through a memmap.
+"""오디오 저장소: 원천 split마다 int16 파일 하나와 JSON 색인을 두고, memmap으로 읽는다.
 
-A store keeps 16 kHz mono samples back to back. Random access is a slice of the memmap, which is what
-training needs; reading rows out of parquet at random would decode a whole row group each time.
+저장소는 16 kHz 모노 표본을 발화 순서대로 이어 붙여 둔다. 아무 발화나 바로 읽는 일은 memmap의 한 구간을
+잘라 내는 것으로 끝나며, 학습에는 이것이 필요하다. parquet에서 행을 무작위로 꺼내면 그때마다 행 묶음(row
+group) 전체를 디코딩해야 한다.
 """
 
 # [파일 역할] prepare.py가 만든 오디오 저장소(int16 원시 파일)와 묶음 목록(JSON)을 읽는 쪽이다. 학습(train.py,
@@ -60,7 +61,7 @@ class AudioStore:
         self._samples = np.memmap(root / f"{name}.int16", dtype=np.int16, mode="r")
 
     def read(self, utterance: Utterance) -> np.ndarray:
-        """Float32 samples in [-1, 1]."""
+        """[-1, 1] 범위의 float32 표본."""
         # offset부터 length개 표본을 잘라 float32로 바꾸고 32768로 나눠 -1~1 범위로 맞춘다(prepare.decode가
         # 곱한 값의 역). 슬라이스는 복사 없이 memmap을 가리키고, astype이 그 구간만 읽어 새 배열을 만든다.
         chunk = self._samples[utterance.offset : utterance.offset + utterance.length]
@@ -71,6 +72,6 @@ class AudioStore:
 # 언어와 채점 방식(CER 또는 WER)을 정하는 데 쓰인다.
 # 호출 위치: evaluate, evaluate_ct2, evaluate_qwen, train, train_qwen의 main.
 def load_set(name: str, root: Path = CACHE) -> tuple[str, list[Utterance]]:
-    """Language and utterances of a set written by `whisper_ko_ft.prepare`."""
+    """`whisper_ko_ft.prepare`가 쓴 묶음의 언어와 발화 목록."""
     data = json.loads((root / "sets" / f"{name}.json").read_text(encoding="utf-8"))
     return data["language"], [Utterance(**entry) for entry in data["utterances"]]

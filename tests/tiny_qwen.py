@@ -1,4 +1,4 @@
-"""A tiny random Qwen3-ASR for tests: the real classes and module names, no weights to download."""
+"""테스트용 작은 무작위 Qwen3-ASR: 실제 클래스와 모듈 이름을 쓰고, 내려받을 가중치는 없다."""
 
 # [파일 역할] 테스트용 작은 무작위 Qwen3-ASR. transformers의 실제 클래스와 같은 모듈 이름(audio_tower,
 # language_model, lm_head 등)을 가지되 층과 차원을 아주 작게 해, 4GB 가중치를 내려받지 않고 CPU에서 순식간에
@@ -13,7 +13,7 @@ from transformers import Qwen3ASRConfig, Qwen3ASRForConditionalGeneration
 
 # 작은 모델의 특수 토큰 번호: 오디오 자리 표시(AUDIO), 패딩(PAD), 끝(END). 끝 토큰 목록에 PAD와 END를 함께
 # 둔다.
-AUDIO = 100  # the tiny model's audio placeholder token
+AUDIO = 100  # 작은 모델의 오디오 자리 표시 토큰
 PAD, END = 101, 102
 
 

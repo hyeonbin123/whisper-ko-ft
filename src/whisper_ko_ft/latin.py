@@ -1,10 +1,10 @@
-"""Rewrite Latin letters spelled with their Korean names as the letters ("에이아이" -> "AI").
+"""한글 이름으로 적힌 라틴 글자를 라틴 글자로 바꾼다("에이아이" -> "AI").
 
-The training references (Zeroth-Korean) have no Latin letters, so the fine-tuned models write an initialism as
-the names of its letters ("유에스오씨"). A run of tokens is rewritten only when every token is made of letter
-names (a particle may follow the last one), the run has at least two letters, and at least one name in it is
-not also an everyday syllable or word: "비디오", "오디오", "이유", "티비" are left alone. A rule, not a list
-of known abbreviations; it misses initialisms made only of such names. docs/experiments.md, stage 8.
+학습 정답(Zeroth-Korean)에는 라틴 글자가 없어서, 파인튜닝한 모델은 약어를 글자 이름으로 적는다("유에스오씨").
+연속된 토큰 묶음은 다음 조건을 모두 만족할 때만 바꾼다: 모든 토큰이 글자 이름으로만 이루어지고(마지막 토큰
+뒤에는 조사가 붙어도 된다), 글자가 둘 이상이며, 일상 음절·낱말과 겹치지 않는 이름이 하나 이상 있다. 그래서
+"비디오", "오디오", "이유", "티비"는 그대로 남는다. 알려진 약어 목록이 아니라 규칙이므로, 그런 겹치는
+이름만으로 된 약어는 놓친다. 근거는 docs/experiments.md 8단계.
 """
 
 # [파일 역할] 8단계의 보조 후보(판정 없음)인 '영문 글자 이름 변환'. 한글로 적힌 영문 약어('에이아이', '에프
@@ -31,11 +31,9 @@ LETTER_NAMES = {
 }  # fmt: skip
 # COMMON_NAMES: 흔한 음절·낱말과 겹치는 이름. 이것들만으로 된 묶음은 바꾸지 않아 '비디오'(비·디·오),
 # '이유'(이·유), '티비'(티·비)가 그대로 남는다. 대신 이런 이름만으로 된 약어는 놓친다.
-# Names that are also everyday syllables or words; a run of only these is not rewritten.
 COMMON_NAMES = {"비", "씨", "디", "이", "지", "아이", "오", "피", "티", "유", "알", "엔"}
 # PARTICLES: 묶음의 마지막 토큰 뒤에 붙을 수 있는 조사. 앞에서부터 처음 맞는 것을 쓰므로 긴 것('이라는')을
 # 짧은 것('이')보다 먼저 둔다.
-# Particles that may follow the last token of a run, longest first.
 PARTICLES = (
     "이라는", "에서", "으로", "라는", "의", "는", "은", "가", "를",
     "을", "와", "과", "에", "로", "도", "만", "이",
@@ -51,7 +49,7 @@ _TRAILING = re.compile(r"^(.*?)(\W*)$")
 # 방법: 동적 계획법. best[i]는 word의 앞 i글자를 이루는 가장 짧은 이름 목록(못 만들면 None)이다. 끝 위치마다
 # 길이 _LONGEST 이하의 마지막 조각을 모두 시도한다.
 def _spell(word: str) -> list[str] | None:
-    """The fewest letter names that make up the whole word, or None."""
+    """단어 전체를 이루는 가장 적은 수의 글자 이름 목록. 그렇게 읽을 수 없으면 None."""
     best: list[list[str] | None] = [[]] + [None] * len(word)
     for end in range(1, len(word) + 1):
         for start in range(max(0, end - _LONGEST), end):
@@ -69,7 +67,7 @@ def _spell(word: str) -> list[str] | None:
 # 먼저 문장부호를 뺀 본문 전체를 읽어 보고, 안 되면 끝의 조사를 떼고 다시 읽는다. 조사나 문장부호가 붙은
 # 토큰은 묶음의 마지막이 된다.
 def _read(token: str) -> tuple[list[str], str, bool] | None:
-    """(letter names, what follows them, whether a particle ended the run) of a spelled token, or None."""
+    """글자 이름으로 읽히는 토큰의 (글자 이름 목록, 그 뒤에 붙은 것, 조사로 묶음이 끝났는지). 아니면 None."""
     word, tail = _TRAILING.match(token).groups()
     names = _spell(word)
     if names:
@@ -101,7 +99,7 @@ def letters_to_latin(text: str) -> str:
             names += read[0]
             tail = read[1]
             end += 1
-            if read[2]:  # a particle or punctuation closes the run
+            if read[2]:  # 조사나 문장부호가 붙으면 묶음이 여기서 닫힌다
                 break
         # 바꿀 조건을 만족하면 묶음 전체를 '라틴 글자 + 꼬리' 한 토큰으로 내보내고 묶음 뒤로 건너뛴다.
         if len(names) >= 2 and any(name not in COMMON_NAMES for name in names):

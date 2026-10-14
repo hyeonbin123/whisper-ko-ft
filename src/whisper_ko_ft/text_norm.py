@@ -1,4 +1,4 @@
-"""Text normalization for error rates (rules in docs/experiments.md, "지표")."""
+"""오류율을 재기 위한 텍스트 정규화(규칙은 docs/experiments.md "지표")."""
 
 # [파일 역할] 오류율(CER·WER)을 재기 전에 정답과 가설을 같은 형태로 맞추는 정규화 함수다. metrics.score가 모든
 # 채점에서 정답·가설 양쪽에 이 함수를 적용한다.
@@ -11,20 +11,19 @@
 import re
 
 # _PUNCTUATION: 공백으로 바꿀 문자. [^\w\s']는 글자·숫자·공백·작은따옴표가 아닌 모든 것이고, 뒤의 |_는 \w에
-# 포함되는 밑줄(_)도 문장부호로 다루려고 따로 더한 것이다. 모듈을 불러올 때 한 번만 컴파일한다.
-# Anything that isn't a letter, digit, whitespace or apostrophe. `\w` covers Hangul.
+# 포함되는 밑줄(_)도 문장부호로 다루려고 따로 더한 것이다. `\w`는 한글도 포함하므로 한글은 지워지지 않는다.
+# 모듈을 불러올 때 한 번만 컴파일한다.
 _PUNCTUATION = re.compile(r"[^\w\s']|_")
 
 
 # 한 문장을 채점용 형태로 바꾼다. 입력: 원문과 언어 코드('ko' 또는 'en'). 출력: 정규화된 문자열.
 # 호출 위치: metrics.score. 같은 함수를 정답과 가설 양쪽에 적용해야 표기 차이가 상쇄된다.
 def normalize(text: str, language: str) -> str:
-    """Lowercase and drop punctuation; Korean also drops every space and apostrophe.
+    """소문자로 바꾸고 문장부호를 없앤다. 한국어는 공백과 작은따옴표도 모두 없앤다.
 
-    Korean CER is measured on characters without spaces, so a spacing difference
-    ("할 수" vs "할수") doesn't count as an error. Apostrophes are kept only for English
-    contractions ("it's"); in Korean they are quotation marks and count as punctuation.
-    English keeps single spaces for WER.
+    한국어 CER은 공백을 뺀 글자로 재므로 띄어쓰기 차이("할 수"와 "할수")는 오류로 세지 않는다.
+    작은따옴표는 영어 축약형("it's")에서만 남긴다. 한국어에서는 인용 부호이므로 문장부호로 센다.
+    영어는 WER을 재야 하므로 단어 사이 공백을 하나씩 남긴다.
     """
     # 1) 소문자로 바꾸고 문장부호를 공백으로 바꾼다. 지우지 않고 공백으로 바꾸므로 문장부호로만 나뉜 영어
     #    단어가 하나로 붙지 않는다.

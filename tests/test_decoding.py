@@ -1,4 +1,4 @@
-"""Stage 8: the temperature fallback of transformers' Whisper generate, and how the harness records it."""
+"""8단계: transformers Whisper generate의 temperature 재시도와, 하네스가 그것을 기록하는 방식."""
 
 # [테스트 묶음] 8단계의 재시도 디코딩을 하네스가 어떻게 넘기고 기록하는지 확인한다: 재시도 없는 greedy 인자가
 # 1~7단계와 같은지, 등록한 후보(D1a, D1)의 설정, generate 출력 모양, 재시도 결정 기록(final_temperatures,
@@ -21,9 +21,8 @@ TEMPERATURES = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
 EOS = 89
 
 
-# 모델 대역: generate에 넘어온 인자를 그대로 저장하고 고정된 토큰을 돌려준다.
 class Recorder:
-    """Stands in for the model: keeps the arguments of generate."""
+    """모델 대역: generate에 넘어온 인자를 그대로 저장하고 고정된 토큰을 돌려준다."""
 
     def __init__(self) -> None:
         self.kwargs: dict | None = None
@@ -33,9 +32,11 @@ class Recorder:
         return torch.tensor([[5, 6], [7, EOS]])
 
 
-# 처리기 대역: 토큰 번호를 공백으로 이은 글로 바꾸고 끝 토큰은 뺀다(skip_special_tokens가 켜져 있어야 한다).
 class Ids:
-    """Stands in for the processor: token ids as text, end-of-text dropped."""
+    """처리기 대역: 토큰 번호를 공백으로 이은 글로 바꾸고 끝 토큰은 뺀다.
+
+    skip_special_tokens가 켜져 있어야 한다.
+    """
 
     def batch_decode(self, ids, skip_special_tokens):
         assert skip_special_tokens
@@ -45,7 +46,7 @@ class Ids:
 # --fallback 없이 transcribe가 generate에 넘기는 인자가 정확히 공통 규칙의 greedy 설정뿐인지(temperature 같은
 # 추가 인자가 없다). 재시도 기능을 넣은 뒤에도 1~7단계 리포트와 같은 조건으로 잰다는 보장이다.
 def test_greedy_decoding_passes_the_recorded_arguments():
-    # Stages 1 to 7 ("디코딩" in docs/experiments.md): without --fallback a report is measured the same way.
+    # 1~7단계(docs/experiments.md "디코딩"): --fallback이 없으면 리포트를 같은 방식으로 잰다.
     model = Recorder()
     settings = evaluate.decoding_settings(None)
     texts, decisions = evaluate.transcribe(model, Ids(), "features", "mask", "ko", settings)
@@ -74,10 +75,10 @@ def test_fallback_settings_are_the_registered_candidates():
         "compression_ratio_threshold": 1.35,
         "logprob_threshold": -1.0,
     }
-    lowered = evaluate.decoding_settings("ratio", compression_ratio_threshold=1.0)  # smoke runs
+    lowered = evaluate.decoding_settings("ratio", compression_ratio_threshold=1.0)  # 스모크 실행
     assert lowered["compression_ratio_threshold"] == 1.0
     with pytest.raises(ValueError):
-        evaluate.decoding_settings("ratio", logprob_threshold=-0.5)  # D1a has no log-probability threshold
+        evaluate.decoding_settings("ratio", logprob_threshold=-0.5)  # D1a에는 로그확률 기준이 없다
     with pytest.raises(ValueError):
         evaluate.decoding_settings(None, compression_ratio_threshold=1.0)
 
@@ -97,9 +98,9 @@ def test_final_temperatures_follow_the_order_of_the_fallback_calls():
         (0.0, False),
         (0.0, True),
         (0.0, False),
-        (0.0, True),  # first pass: utterances 1 and 3 are decoded again
+        (0.0, True),  # 첫 단계: 발화 1과 3을 다시 디코딩한다
         (0.2, True),
-        (0.2, False),  # utterance 1 once more
+        (0.2, False),  # 발화 1을 한 번 더
         (0.4, False),
     ]
     assert evaluate.final_temperatures(calls, 4, TEMPERATURES) == [
@@ -123,10 +124,10 @@ def test_final_temperatures_mark_utterances_still_failing_at_the_last_temperatur
 @pytest.mark.parametrize(
     "calls",
     [
-        [(0.0, False)],  # fewer calls than utterances
-        [(0.0, True), (0.0, False), (0.2, False), (0.2, False)],  # more calls than utterances left
-        [(0.0, True), (0.0, False)],  # decoded again at 0.0 but never at a higher temperature
-        [(0.0, True), (0.2, False)],  # two temperatures inside one pass
+        [(0.0, False)],  # 결정 수가 발화 수보다 적다
+        [(0.0, True), (0.0, False), (0.2, False), (0.2, False)],  # 결정 수가 남은 발화보다 많다
+        [(0.0, True), (0.0, False)],  # 0.0에서 다시 디코딩한다면서 더 높은 temperature가 없다
+        [(0.0, True), (0.2, False)],  # 한 단계 안에 temperature가 둘이다
     ],
 )
 def test_final_temperatures_refuse_calls_they_cannot_place(calls):
@@ -134,11 +135,13 @@ def test_final_temperatures_refuse_calls_they_cannot_place(calls):
         evaluate.final_temperatures(calls, 2, TEMPERATURES)
 
 
-# 무작위로 초기화한 아주 작은 Whisper(어휘 100, 층 1개, 멜 8개). 실제 generate 경로를 CPU에서 순식간에
-# 돌리려고 쓴다. 언어(ko)·task 토큰 번호를 generation_config에 넣어 언어 고정 디코딩이 되게 한다. seed 0이라
-# 항상 같은 모델이다.
+# 언어(ko)·task 토큰 번호를 generation_config에 넣어 언어 고정 디코딩이 되게 한다. seed 0이라 항상 같은
+# 모델이다.
 def tiny_whisper() -> WhisperForConditionalGeneration:
-    """A randomly initialized Whisper small enough to decode 256 tokens on a CPU in a moment."""
+    """무작위로 초기화한 아주 작은 Whisper(어휘 100, 층 1개, 멜 8개).
+
+    CPU에서 256토큰을 순식간에 디코딩할 만큼 작아, 실제 generate 경로를 테스트에서 돌릴 수 있다.
+    """
     torch.manual_seed(0)
     config = WhisperConfig(
         vocab_size=100,
@@ -191,7 +194,7 @@ def test_the_trace_follows_transformers_on_a_tiny_model():
     def decide(
         seek_sequence, seek_outputs, index, logits_processor, generation_config, vocab_size, temperature
     ):
-        # utterances 1 and 3 fail the first pass, everything passes after that
+        # 발화 1과 3만 첫 단계에서 기준을 넘고, 그 뒤로는 모두 통과한다
         return temperature == 0.0 and index in (1, 3), False
 
     model._need_fallback = decide
@@ -200,7 +203,7 @@ def test_the_trace_follows_transformers_on_a_tiny_model():
     texts, decisions = evaluate.transcribe(model, Ids(), features, mask, "ko", settings, trace)
 
     assert decisions == [(0.0, False), (0.2, False), (0.0, False), (0.2, False)]
-    assert (texts[0], texts[2]) == (greedy[0], greedy[2])  # the first pass is the greedy decoding
+    assert (texts[0], texts[2]) == (greedy[0], greedy[2])  # 첫 단계가 곧 greedy 디코딩이다
 
 
 # 진짜 기준 판단으로 두 극단을 본다. 어떤 디코딩도 통과할 수 없는 기준이면 모든 발화가 마지막
@@ -212,7 +215,7 @@ def test_the_real_thresholds_on_a_tiny_model(fallback):
     features, mask = inputs(3)
     logprob = fallback == "ratio-logprob"
 
-    # Thresholds no decoding can meet: every utterance is decoded at every temperature, the last one is kept.
+    # 어떤 디코딩도 통과할 수 없는 기준: 모든 발화를 모든 temperature로 디코딩하고 마지막 것을 남긴다.
     never = evaluate.decoding_settings(
         fallback, compression_ratio_threshold=0.0, logprob_threshold=0.0 if logprob else None
     )
@@ -222,7 +225,7 @@ def test_the_real_thresholds_on_a_tiny_model(fallback):
     assert decisions == [(1.0, True)] * 3
     assert len(texts) == 3
 
-    # Thresholds every decoding meets: nothing is decoded again and the result is the greedy one.
+    # 모든 디코딩이 통과하는 기준: 아무것도 다시 디코딩하지 않고 결과는 greedy와 같다.
     always = evaluate.decoding_settings(
         fallback, compression_ratio_threshold=1e9, logprob_threshold=-1e9 if logprob else None
     )
@@ -240,7 +243,7 @@ def test_counts_for_the_summary():
         {"hypothesis": "가나", "edits": 0, "length": 2, "temperature": 0.0, "fallback_exhausted": False},
         {"hypothesis": "라니" * 30, "edits": 70, "length": 5, "temperature": 1.0, "fallback_exhausted": True},
         {"hypothesis": "", "edits": 3, "length": 3, "temperature": 0.4, "fallback_exhausted": False},
-        {"hypothesis": "", "edits": 0, "length": 0},  # empty reference: not scored, not counted
+        {"hypothesis": "", "edits": 0, "length": 0},  # 정답이 비어 채점하지 않고 세지도 않는다
     ]
     assert evaluate.decoding_counts(rows, fallback=True) == {
         "redecoded": 2,

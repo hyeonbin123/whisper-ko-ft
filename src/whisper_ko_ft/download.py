@@ -1,11 +1,11 @@
-"""Download the parquet files of Zeroth-Korean and FLEURS (Korean, English) from Hugging Face.
+"""Zeroth-Korean과 FLEURS(한국어, 영어)의 parquet 파일을 Hugging Face에서 내려받는다.
 
-Usage:
-    uv run python -m whisper_ko_ft.download            # everything, about 4 GB
-    uv run python -m whisper_ko_ft.download --dry-run  # list the files and sizes only
+사용법:
+    uv run python -m whisper_ko_ft.download            # 전부 받는다. 약 4 GB
+    uv run python -m whisper_ko_ft.download --dry-run  # 파일 목록과 크기만 보여 준다
 
-Writes data/raw/<dataset>/<config>/<split>/<n>.parquet (git-ignored). These are the parquet
-conversions Hugging Face serves for kresnik/zeroth_korean and google/fleurs (both CC BY 4.0).
+data/raw/<데이터셋>/<config>/<split>/<n>.parquet에 쓴다(git 제외). Hugging Face가 kresnik/zeroth_korean과
+google/fleurs(둘 다 CC BY 4.0)에 대해 제공하는 parquet 변환본이다.
 """
 
 # [파일 역할] 0단계(기반)의 첫 단계. Hugging Face가 제공하는 parquet 변환본을 data/raw/에 받는다. 다음 단계
@@ -35,7 +35,7 @@ API = "https://huggingface.co/api/datasets/{repo}/parquet"
 # SOURCES: 받을 데이터. Zeroth-Korean은 train(학습과 validation의 원천)과 test, FLEURS는 한국어(ko_kr)와
 # 영어(en_us)의 validation·test만 받는다. FLEURS는 다른 도메인과 영어를 확인하는 평가에만 쓰므로 train이 필요
 # 없다(docs/plan.md 데이터 표). 라이선스는 둘 다 CC BY 4.0이다.
-# dataset folder -> (repo, {config: splits})
+# 형식: 데이터셋 폴더 이름 -> (Hugging Face 저장소, {config: split 목록})
 SOURCES = {
     "zeroth": ("kresnik/zeroth_korean", {"default": ("train", "test")}),
     "fleurs": ("google/fleurs", {"ko_kr": ("validation", "test"), "en_us": ("validation", "test")}),
@@ -77,8 +77,8 @@ def download(url: str, target: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--datasets", nargs="+", choices=list(SOURCES), default=list(SOURCES))
-    parser.add_argument("--dry-run", action="store_true", help="list files and sizes, download nothing")
-    parser.add_argument("--force", action="store_true", help="download even if the file exists")
+    parser.add_argument("--dry-run", action="store_true", help="파일 목록과 크기만 보여 주고 받지 않는다")
+    parser.add_argument("--force", action="store_true", help="파일이 이미 있어도 다시 받는다")
     args = parser.parse_args()
 
     for name in args.datasets:

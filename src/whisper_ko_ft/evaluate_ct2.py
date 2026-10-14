@@ -1,14 +1,14 @@
-"""Transcribe a set with faster-whisper (CTranslate2), with or without its decoding fallback.
+"""faster-whisper(CTranslate2)로 묶음을 받아 적는다. 디코딩 재시도(fallback)를 켜거나 끌 수 있다.
 
-Usage (needs `uv sync --group ct2` and a model converted with ct2-transformers-converter):
+사용법(`uv sync --group ct2`와 ct2-transformers-converter로 변환한 모델이 필요하다):
     uv run python -m whisper_ko_ft.evaluate_ct2 --model outputs/small-a/ct2 --name a-ct2 --set zeroth-val
-    (add --fallback, with another --name, to turn on the decoding fallback)
+    (디코딩 재시도를 켜려면 다른 --name과 함께 --fallback을 더한다)
 
-One utterance at a time, greedy, fixed language, no timestamps, no VAD (docs/experiments.md, "5단계").
---fallback turns on faster-whisper's defaults: when the text compresses too well (a repeated phrase) or the
-average log probability is low, it decodes again at a higher temperature.
-The number of mel bins comes from the converted model (128 for large-v3 and turbo, see `ct2_features`), and
-the model is loaded before any audio of the set is read.
+한 발화씩, greedy, 언어 고정, 타임스탬프 없음, VAD 없음(docs/experiments.md "5단계").
+--fallback은 faster-whisper 기본값을 켠다: 글이 너무 잘 압축되거나(같은 구절의 반복) 평균 로그확률이 낮으면
+더 높은 temperature로 다시 디코딩한다.
+멜 필터 수는 변환된 모델에서 가져오고(large-v3와 turbo는 128개, `ct2_features` 참고), 모델은 묶음의 오디오를
+읽기 전에 띄운다.
 """
 
 # [파일 역할] 5단계(되풀이 오류와 추론 엔진)와 2026-10-02 추가 측정에서 쓴 faster-whisper(CTranslate2) 측정
@@ -43,10 +43,10 @@ from whisper_ko_ft.metrics import error_rate, interval, score
 from whisper_ko_ft.paths import REPORTS, ROOT
 from whisper_ko_ft.store import AudioStore, load_set
 
-# Windows에서 CTranslate2가 CUDA 12 DLL을 찾을 수 있게, torch 휠에 들어 있는 lib 폴더를 DLL 검색 경로와 PATH
-# 앞에 넣는다. 이 설정이 ctranslate2를 불러오기 전에 끝나야 하므로 아래 import들이 모듈 중간에 있고, 그래서
-# 줄마다 E402(모듈 중간 import) 검사를 끈다.
-# CTranslate2 needs the CUDA 12 libraries; on Windows the ones that ship with torch are used.
+# CTranslate2는 CUDA 12 라이브러리가 필요하다. Windows에서는 torch 휠에 들어 있는 것을 쓴다. 그래서
+# CTranslate2가 CUDA 12 DLL을 찾을 수 있게 torch의 lib 폴더를 DLL 검색 경로와 PATH 앞에 넣는다. 이 설정이
+# ctranslate2를 불러오기 전에 끝나야 하므로 아래 import들이 모듈 중간에 있고, 그래서 줄마다 E402(모듈 중간
+# import) 검사를 끈다.
 _TORCH_LIB = os.path.join(os.path.dirname(torch.__file__), "lib")
 if os.name == "nt":
     os.add_dll_directory(_TORCH_LIB)
@@ -73,14 +73,14 @@ FALLBACK = {
 # 묶음 보호(--allow-test)와 덮어쓰기 보호(--overwrite)는 evaluate.py와 같다. --no-report는 속도만 볼 때 쓴다.
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", required=True, help="CTranslate2 model folder")
-    parser.add_argument("--name", required=True, help="report name")
+    parser.add_argument("--model", required=True, help="CTranslate2 모델 폴더")
+    parser.add_argument("--name", required=True, help="리포트 이름(reports/<이름>/)")
     parser.add_argument("--set", required=True, dest="set_name")
     parser.add_argument("--fallback", action="store_true")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--allow-test", action="store_true")
-    parser.add_argument("--overwrite", action="store_true", help="replace an existing report")
-    parser.add_argument("--no-report", action="store_true", help="print the summary only (speed runs)")
+    parser.add_argument("--overwrite", action="store_true", help="이미 있는 리포트를 바꿔 쓴다")
+    parser.add_argument("--no-report", action="store_true", help="요약만 찍고 리포트는 안 쓴다(속도 측정)")
     args = parser.parse_args()
     if args.set_name.endswith("-test") and not args.allow_test:
         parser.error("test sets are measured once per stage; pass --allow-test when the stage is done")
@@ -94,7 +94,7 @@ def main() -> None:
     # 바로 멈춘다. 2026-09-20 시도는 특징을 다 만든 뒤 첫 발화에서 멈췄다(docs/experiments.md '추가 측정').
     model = WhisperModel(args.model, device="cuda", compute_type="float16")
     # 기본 특징 추출기를 변환된 모델의 멜 수(model.model.n_mels, turbo는 128)에 맞춘 것으로 바꾼다.
-    # faster-whisper makes 80 mel bins unless the folder has a preprocessor_config.json (ct2_features).
+    # faster-whisper는 폴더에 preprocessor_config.json이 없으면 멜 80개로 특징을 만든다(ct2_features).
     model.feature_extractor = FeatureExtractor(**feature_kwargs(Path(args.model), model.model.n_mels))
     language, utterances = load_set(args.set_name)
     if args.limit:

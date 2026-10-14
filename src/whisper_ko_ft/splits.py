@@ -1,4 +1,4 @@
-"""Speaker-based validation split of Zeroth-Korean train (rules in docs/experiments.md, "데이터 분리")."""
+"""Zeroth-Korean train을 화자 기준으로 나눠 validation을 만든다(규칙은 docs/experiments.md "데이터 분리")."""
 
 # [파일 역할] Zeroth-Korean train을 화자 기준으로 나누는 규칙이다. validation으로 뗄 화자 10명과, 학습 중
 # 체크포인트를 고를 작은 묶음(val-500)의 발화를 정한다. prepare.py가 이 두 함수로 zeroth-val, zeroth-val500
@@ -26,7 +26,7 @@ VAL500_PER_SPEAKER = 50
 # 왜 해시인가: ID 번호 순서와 무관하게 고르면서도 실행할 때마다 같은 화자가 나온다.
 # 입력은 발화마다 화자 ID 하나씩이라 중복이 많다. 호출 위치: prepare.main.
 def validation_speakers(speakers: Iterable[str], count: int = VALIDATION_SPEAKERS) -> list[str]:
-    """The `count` speakers whose SHA-256 of the speaker ID sorts first."""
+    """화자 ID의 SHA-256 값으로 정렬했을 때 앞에 오는 `count`명의 화자."""
     # set으로 중복 화자를 없앤다. 그 뒤 해시 값으로 다시 정렬해 앞의 count명을 자른다.
     unique = sorted(set(speakers))
     return sorted(unique, key=lambda s: hashlib.sha256(s.encode("utf-8")).hexdigest())[:count]
@@ -39,7 +39,7 @@ def validation_speakers(speakers: Iterable[str], count: int = VALIDATION_SPEAKER
 # 주의: 작은 묶음이라 전체 validation과 순위가 다를 수 있다. 2단계에서 이 묶음으로는 학습률 3e-5가 나았지만
 # 전체 2,214발화에서는 차이가 없었다(README 결과).
 def val500_ids(entries: Sequence[dict], per_speaker: int = VAL500_PER_SPEAKER) -> list[str]:
-    """For each speaker, the first `per_speaker` utterance IDs in sorted order."""
+    """화자마다 정렬 순서로 앞의 `per_speaker`개 발화 ID."""
     by_speaker: dict[str, list[str]] = {}
     for entry in entries:
         by_speaker.setdefault(entry["speaker"], []).append(entry["id"])

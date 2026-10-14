@@ -1,28 +1,28 @@
-"""Train a LoRA adapter on Qwen3-ASR (stage 10): fp16 base, fp32 adapter, fp16 autocast and GradScaler.
+"""Qwen3-ASR에 LoRA 어댑터를 학습한다(10단계): fp16 기본 가중치, fp32 어댑터, fp16 autocast와 GradScaler.
 
-Usage:
+사용법:
     uv run --no-sync python -m whisper_ko_ft.train_qwen --run-name qwen-qn > outputs/qwen-qn/train.log 2>&1
-    smoke (a gate of 10단계): --run-name qwen-qn-smoke --max-steps 50 --longest-at 25 --save-steps 0
-    the initial adapter only, no training (CPU is enough): --run-name qwen-qn-init --max-steps 0 --device cpu
-    a stopped run continues from its last saved state with the same command and --resume
+    스모크(10단계의 관문): --run-name qwen-qn-smoke --max-steps 50 --longest-at 25 --save-steps 0
+    학습 없이 처음 어댑터만(CPU로 충분): --run-name qwen-qn-init --max-steps 0 --device cpu
+    멈춘 실행은 같은 명령에 --resume을 더하면 마지막으로 저장한 상태에서 이어 간다
 
-Settings are fixed in docs/experiments.md (10단계). This is a plain loop, not the Trainer of train.py, so that
-every optimizer step is logged with its loss, gradient norm, loss scale, whether GradScaler skipped it and its
-GPU memory, and so that a run can pause: no step starts while outputs/<run>/PAUSE exists (a watcher creates it
-when Windows moves GPU memory to shared system memory), and paused time is not part of any step time. The
-settings the Trainer gave the stage 6 model N are kept: AdamW (fused on the GPU, betas 0.9/0.999, eps 1e-8, no
-weight decay), linear warmup then linear decay to zero, gradient clipping at 1.0, GradScaler's defaults,
-and no scheduler step on a step that GradScaler skipped.
+설정은 docs/experiments.md(10단계)에 고정되어 있다. train.py의 Trainer가 아니라 직접 쓴 단순한 루프다.
+옵티마이저 스텝마다 손실, 기울기 크기, 손실 배율, GradScaler가 그 스텝을 건너뛰었는지, GPU 메모리를 기록하고,
+실행을 일시 정지할 수 있게 하려는 것이다: outputs/<run>/PAUSE가 있는 동안에는 새 스텝을 시작하지
+않으며(Windows가 GPU 메모리를 공유 시스템 메모리로 옮기면 감시 스크립트가 이 파일을 만든다), 멈춘 시간은
+어느 스텝 시간에도 들어가지 않는다. 6단계 모델 N에 Trainer가 준 설정은 그대로 지킨다: AdamW(GPU에서
+fused, betas 0.9/0.999, eps 1e-8, weight decay 없음), 선형 warmup 뒤 0까지 선형 감소, 기울기 자르기 1.0,
+GradScaler 기본값, 그리고 GradScaler가 건너뛴 스텝에서는 학습률 일정을 진행하지 않는 것.
 
-The loss is the model's causal LM loss on the transcript tokens and the end token <|im_end|> only. The prompt
-is the one inference uses (`apply_transcription_request`, ending in "language Korean<asr_text>"), so the
-template, the audio placeholders and the forced language are masked, as is the padding. Logits are computed at
-those positions only (the same value as the model's own loss without vocabulary-sized logits for every
-position). A step sums the loss over the tokens of all its micro-batches and divides by their number.
+손실은 정답 글의 토큰과 끝 토큰 <|im_end|>에 대해서만 계산한 모델의 인과 언어 모델 손실이다. 프롬프트는
+추론과 같은 것(`apply_transcription_request`, "language Korean<asr_text>"로 끝남)이므로 템플릿, 오디오 자리
+표시, 고정한 언어 표시는 패딩과 함께 가린다. 로짓은 그 위치에서만 계산한다(모든 위치에 어휘 크기의 로짓을
+만들지 않으면서 모델 자체의 손실과 같은 값이 나온다). 한 스텝은 모든 마이크로 배치의 토큰에 대한 손실을
+더해 그 토큰 수로 나눈다.
 
-Writes outputs/<run>/: run.json, steps.jsonl (one line per step and per event; a resumed run appends),
-checkpoint-<step>/ (the adapter, every --save-steps) and resume/ (the adapter and the optimizer, scaler,
-scheduler and random states, every --resume-every steps and at the end).
+outputs/<run>/에 쓴다: run.json, steps.jsonl(스텝마다, 사건마다 한 줄. 이어 한 실행은 뒤에 덧붙인다),
+checkpoint-<step>/(어댑터, --save-steps마다), resume/(어댑터와 옵티마이저·scaler·일정·난수 상태,
+--resume-every 스텝마다와 끝에서).
 """
 
 # [파일 역할] 10단계: Qwen3-ASR-1.7B에 LoRA를 학습해, 6단계 N(turbo + LoRA)을 대신할 범용 모델이 되는지 보려는
@@ -71,14 +71,12 @@ from whisper_ko_ft.paths import OUTPUTS
 from whisper_ko_ft.store import SAMPLE_RATE, load_set
 from whisper_ko_ft.train import UtteranceDataset
 
-# LORA_TARGETS: LoRA를 붙일 층을 고르는 정규식(옆 주석). 오디오 인코더 24층의 q/k/v/out_proj와 fc1·fc2, 언어
-# 모델 28층의 q/k/v/o_proj와 gate/up/down_proj. 이름 목록으로 주면 인코더와 언어 모델 양쪽의 q_proj가 함께
-# 잡히므로 경로까지 적은 정규식을 쓴다.
+# LORA_TARGETS: LoRA를 붙일 층을 고르는 정규식. 오디오 인코더 24층의 q/k/v/out_proj와 fc1·fc2, 언어 모델
+# 28층의 q/k/v/o_proj와 gate/up/down_proj. N의 어댑터가 붙은 층 종류(6단계: Whisper 인코더·디코더의 어텐션과
+# MLP)에 맞춘 것이며, 프로젝터·합성곱·출력층에는 붙이지 않는다. 인코더의 어텐션에도 q_proj/k_proj/v_proj가
+# 있어 이름 목록으로 주면 인코더와 언어 모델 양쪽이 함께 잡히므로 경로까지 적은 정규식을 쓴다.
 # ENCODER_TARGETS_PER_LAYER(6), LANGUAGE_MODEL_TARGETS_PER_LAYER(7): 층마다 붙어야 할 LoRA 수. 6 × 24 + 7 × 28
 # = 340개가 관문 (b)의 기대값이다.
-# The kinds of layers N's adapter is on (stage 6: attention and MLP of the Whisper encoder and decoder): the
-# audio encoder's attention and fc1/fc2 and the language model's attention and MLP. Not the projector, the
-# convolutions or the output layer. A regex, because the encoder's attention has q_proj/k_proj/v_proj too.
 LORA_TARGETS = (
     r"model\.audio_tower\.layers\.\d+\.(self_attn\.(q_proj|k_proj|v_proj|out_proj)|fc1|fc2)"
     r"|model\.language_model\.layers\.\d+\."
@@ -95,7 +93,7 @@ MODEL_INPUTS = ("input_ids", "attention_mask", "input_features", "input_features
 DTYPES = {"fp16": torch.float16, "fp32": torch.float32}
 
 
-# --- data ---
+# --- 데이터 ---
 
 
 # DataLoader의 batch_sampler. 스텝마다 쓸 마이크로 배치들의 발화 인덱스를 미리 정해진 순서로 내놓는다.
@@ -105,12 +103,12 @@ DTYPES = {"fp16": torch.float16, "fp32": torch.float32}
 # longest_at(스모크 전용): 그 스텝 하나만 가장 긴 발화들로 채워 메모리가 가장 많이 드는 경우를 미리 돌려 본다.
 # 그 스텝의 원래 마이크로 배치는 건너뛰므로 다른 스텝의 데이터는 바뀌지 않는다.
 class StepBatches:
-    """The index lists of the micro-batches, step by step: a fixed schedule, so a resumed run sees the same
-    data.
+    """스텝마다 마이크로 배치들의 인덱스 목록을 내놓는다. 일정이 고정되어 있어 이어 한 실행도 같은 데이터를
+    본다.
 
-    Epoch e is a permutation seeded with seed + e, cut into micro-batches (the remainder is dropped). Step s
-    takes micro-batches (s-1)*accum ... s*accum-1 of that endless sequence. `longest_at` (smoke runs) gives
-    that one step the `longest` utterances instead; its usual micro-batches are skipped.
+    에폭 e는 seed + e로 시드를 정한 순열을 마이크로 배치로 자른 것이다(나머지는 버린다). 스텝 s는 그 끝없는
+    열의 (s-1)*accum ... s*accum-1번째 마이크로 배치를 쓴다. `longest_at`(스모크 실행)은 그 스텝 하나에만 대신
+    `longest` 발화들을 주고, 그 스텝의 원래 마이크로 배치는 건너뛴다.
     """
 
     def __init__(
@@ -170,17 +168,17 @@ class StepBatches:
             yield from self.step(step)
 
 
-# 오디오 길이, 다음으로 글자 수가 긴 순으로 count개의 발화 인덱스. 스모크의 가장 긴 스텝(학습 데이터에서 가장
-# 긴 32발화, 17.4~20.7초)에 쓴다.
 def longest_indices(utterances, count: int) -> list[int]:
-    """The `count` longest utterances (audio length, then text length), longest first."""
+    """가장 긴 발화 `count`개의 인덱스(오디오 길이, 다음으로 글자 수 기준). 긴 것부터 놓는다.
+
+    스모크의 가장 긴 스텝(학습 데이터에서 가장 긴 32발화, 17.4~20.7초)에 쓴다.
+    """
     order = sorted(range(len(utterances)), key=lambda i: (utterances[i].length, len(utterances[i].text)))
     return order[::-1][:count]
 
 
-# 모델이 프롬프트 뒤에 만들어야 할 토큰: 정답 글의 토큰(특수 토큰 없이)과 끝 토큰 <|im_end|>.
 def answer_ids(tokenizer, text: str) -> list[int]:
-    """What the model should generate after the prompt: the transcript, then the end token."""
+    """모델이 프롬프트 뒤에 만들어야 할 토큰: 정답 글의 토큰(특수 토큰 없이), 그다음 끝 토큰 <|im_end|>."""
     return tokenizer(text, add_special_tokens=False)["input_ids"] + [
         tokenizer.convert_tokens_to_ids(END_TOKEN)
     ]
@@ -194,8 +192,8 @@ def answer_ids(tokenizer, text: str) -> list[int]:
 def assemble(
     prompt_ids: torch.Tensor, prompt_mask: torch.Tensor, answers: list[list[int]], pad_id: int
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Right-padded input ids, attention mask and labels: each row is its prompt (left padding removed) and
-    its answer, and only the answer is labelled (aligned with the inputs; the model shifts the labels)."""
+    """오른쪽으로 채운 입력 ID, attention mask, 라벨. 행마다 프롬프트(왼쪽 패딩을 뗀 것)와 정답을 잇고,
+    정답에만 라벨을 둔다(라벨은 입력과 같은 위치에 두며, 한 칸 미는 것은 모델 쪽이 한다)."""
     prompts = [ids[mask.bool()].tolist() for ids, mask in zip(prompt_ids, prompt_mask, strict=True)]
     width = max(len(p) + len(a) for p, a in zip(prompts, answers, strict=True))
     input_ids = torch.full((len(prompts), width), pad_id, dtype=torch.long)
@@ -216,7 +214,7 @@ def assemble(
 # 처리기로 확인한다(모델 캐시가 있을 때만).
 @dataclass
 class QwenCollator:
-    """Audio and transcripts to model inputs, with the prompt and audio window of `evaluate_qwen`."""
+    """오디오와 정답 글을 모델 입력으로 바꾼다. 프롬프트와 오디오 창은 `evaluate_qwen`과 같다."""
 
     processor: object
     language: str = "Korean"
@@ -239,14 +237,15 @@ class QwenCollator:
         }
 
 
-# --- model ---
+# --- 모델 ---
 
 
 # 새 LoRA를 붙인다. 먼저 KV 캐시를 끄고 오디오 인코더·언어 모델 모두 gradient checkpointing을 켜 활성값
 # 메모리를 줄인다. PEFT는 기본 가중치가 fp16이어도 어댑터를 fp32로 만든다(check_lora가 확인).
 # 호출 위치: main(처음 학습), tests.
 def add_lora(model, r: int = 16, alpha: int = 32, dropout: float = 0.05):
-    """Gradient checkpointing on both towers, then a fresh LoRA adapter (fp32 even on an fp16 base)."""
+    """두 탑(오디오 인코더, 언어 모델)에 gradient checkpointing을 켠 뒤 새 LoRA 어댑터를 붙인다(기본 가중치가
+    fp16이어도 어댑터는 fp32)."""
     from peft import LoraConfig, get_peft_model
 
     model.config.use_cache = False
@@ -255,10 +254,11 @@ def add_lora(model, r: int = 16, alpha: int = 32, dropout: float = 0.05):
     return get_peft_model(model, config)
 
 
-# 이어 하기: 저장된 어댑터를 학습 가능한 상태로 불러오고, add_lora와 같은 설정(캐시 끔, checkpointing)을
-# 적용한다.
 def resume_model(model, folder: Path):
-    """The base model with a saved adapter, trainable, as `add_lora` would have left it."""
+    """이어 하기: 저장된 어댑터를 학습 가능한 상태로 붙인 기본 모델.
+
+    `add_lora`와 같은 설정(캐시 끔, gradient checkpointing)을 적용해, `add_lora`가 남겼을 상태와 같게 한다.
+    """
     from peft import PeftModel
 
     model.config.use_cache = False
@@ -275,7 +275,7 @@ def expected_lora_modules(config) -> int:
 # 관문 (b)의 기록: LoRA가 붙은 층 수(인코더·언어 모델 나눠서), 학습하는 파라미터 수(1.7B에서 24,510,464개),
 # 학습하는 파라미터의 dtype, 어댑터가 아닌데 학습되는 가중치. run.json에 남는다.
 def lora_summary(model) -> dict:
-    """Where the adapter is and what trains (gate (b) of stage 10)."""
+    """어댑터가 어디에 붙었고 무엇이 학습되는지(10단계 관문 (b))."""
     modules = {name.split(".lora_A.")[0] for name, _ in model.named_parameters() if ".lora_A." in name}
     trainable = [(name, p) for name, p in model.named_parameters() if p.requires_grad]
     return {
@@ -305,7 +305,7 @@ def check_lora(summary: dict, config) -> None:
 # 받고, 다음 토큰이 정답인 위치에서만 lm_head를 계산해 메모리를 아낀다(위 docstring). 합으로 돌려주므로
 # run_steps가 스텝 전체 토큰 수로 나눌 수 있다.
 def answer_loss(model, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, int]:
-    """Summed cross-entropy of the labelled tokens and their number = the model's loss x that number."""
+    """라벨이 있는 토큰의 교차 엔트로피 합과 그 토큰 수. 합은 모델의 손실 x 그 토큰 수와 같다."""
     inner = model.get_base_model() if hasattr(model, "get_base_model") else model
     hidden = inner.model(**{key: batch[key] for key in MODEL_INPUTS}, use_cache=False).last_hidden_state
     # 위치 t의 은닉 상태가 t+1의 토큰을 맞히도록 라벨을 한 칸 민다. 가리지 않은 위치(keep)만 남긴다.
@@ -316,7 +316,7 @@ def answer_loss(model, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, in
     return F.cross_entropy(logits.float(), targets[keep], reduction="sum"), int(keep.sum())
 
 
-# --- one optimizer step, the loop, saved state ---
+# --- 옵티마이저 한 스텝, 학습 루프, 저장 상태 ---
 
 
 # warmup 동안 0에서 학습률까지 선형으로 올리고 그 뒤 0까지 선형으로 내리는 일정. N의 Trainer와 같은
@@ -330,7 +330,7 @@ def linear_schedule(optimizer, warmup: int, total: int):
 # 돌려주는 값: 자르기 전 기울기 크기(건너뛴 스텝은 nan일 수 있다), 이번에 쓴 배율, 건너뛰었는지. 건너뛰면
 # update가 배율을 절반으로 줄이므로, 배율이 줄었는지로 건너뜀을 안다.
 def optimizer_step(scaler, optimizer, params, max_grad_norm: float) -> tuple[float, float, bool]:
-    """Unscale, clip, step: (gradient norm before clipping, loss scale used, whether GradScaler skipped)."""
+    """배율 풀기, 자르기, 스텝: (자르기 전 기울기 크기, 쓴 손실 배율, GradScaler가 건너뛰었는지)."""
     scaler.unscale_(optimizer)
     norm = torch.nn.utils.clip_grad_norm_(params, max_grad_norm)
     scale = scaler.get_scale()
@@ -344,7 +344,7 @@ def optimizer_step(scaler, optimizer, params, max_grad_norm: float) -> tuple[flo
 # 저장소 밖의 메모리 감시 스크립트가 넘침과 다른 프로그램의 GPU 사용을 보고 이 파일을 만들거나
 # 지운다(docs/experiments.md 10단계 '학습 중'). 스텝 사이에서만 멈추므로 가중치와 손실에는 영향이 없다.
 def wait_while_paused(flag: Path, sleep: Callable[[float], None] = time.sleep, poll: float = 5.0) -> float:
-    """Seconds spent waiting for `flag` to disappear (0 when it was not there)."""
+    """`flag`가 사라지기를 기다린 초(처음부터 없었으면 0)."""
     if not flag.exists():
         return 0.0
     started = time.perf_counter()
@@ -385,7 +385,7 @@ def run_steps(
     log: Callable[[dict], None],
     after_step: Callable[[int], None] = lambda step: None,
 ) -> dict:
-    """Optimizer steps first_step..last_step, `accum` micro-batches each; one log entry per step."""
+    """옵티마이저 스텝 first_step..last_step을 돈다. 스텝마다 마이크로 배치 `accum`개, 로그 한 줄."""
     params = [p for p in model.parameters() if p.requires_grad]
     cuda = settings.device == "cuda"
     summary = {"steps": 0, "skipped_steps": [], "nonfinite_steps": [], "peak_allocated_mb": 0}
@@ -466,11 +466,12 @@ def run_steps(
     return summary
 
 
-# 이어 하기용 난수 상태(python, numpy, torch CPU, CUDA). 일반 자료형과 텐서만 담아
-# torch.load(weights_only=True)로 읽을 수 있게 한다. weights_only는 임의의 파이썬 객체를 풀지 않는 안전한 읽기
-# 방식이다.
 def _random_states() -> dict:
-    """Plain types and tensors only, so that the state loads with torch.load(weights_only=True)."""
+    """이어 하기용 난수 상태(python, numpy, torch CPU, CUDA).
+
+    일반 자료형과 텐서만 담는다. 그래야 torch.load(weights_only=True)로 상태를 읽을 수 있다. weights_only는
+    임의의 파이썬 객체를 풀지 않는 안전한 읽기 방식이다.
+    """
     name, keys, position, has_gauss, gauss = np.random.get_state()
     states = {
         "python": random.getstate(),
@@ -493,11 +494,13 @@ def _set_random_states(states: dict) -> None:
         torch.cuda.set_rng_state_all(states["cuda"])
 
 
-# 이어 하기 상태를 저장한다: 어댑터와 state.pt(마친 스텝, 옵티마이저, GradScaler, 학습률 일정, 난수 상태).
-# 먼저 <folder>.tmp에 다 쓴 뒤 원래 폴더를 지우고 이름을 바꾼다. 저장 도중에 죽어도 이전 상태나 완성된 .tmp 중
-# 하나는 남는다.
 def save_state(folder: Path, model, optimizer, scaler, scheduler, step: int) -> None:
-    """The adapter and everything a resumed run needs, written next to `folder` and then moved into place."""
+    """이어 하기 상태를 `folder` 옆에 다 쓴 뒤 제자리로 옮긴다.
+
+    내용은 어댑터와 state.pt(마친 스텝, 옵티마이저, GradScaler, 학습률 일정, 난수 상태)다. 먼저
+    <folder>.tmp에 다 쓴 뒤 원래 폴더를 지우고 이름을 바꾸므로, 저장 도중에 죽어도 이전 상태나 완성된 .tmp 중
+    하나는 남는다.
+    """
     partial = folder.with_name(folder.name + ".tmp")
     shutil.rmtree(partial, ignore_errors=True)
     model.save_pretrained(str(partial))
@@ -513,10 +516,12 @@ def save_state(folder: Path, model, optimizer, scaler, scheduler, step: int) -> 
     partial.rename(folder)
 
 
-# 이어 할 상태 폴더를 찾는다. resume을 먼저 보고, 없으면 이름을 바꾸기 직전에 죽어 남은 resume.tmp를 본다.
-# 어댑터와 state.pt가 모두 있어야 완성된 상태로 본다.
 def resume_folder(run_dir: Path) -> Path | None:
-    """The last complete saved state of a run (a crash while moving it into place leaves it as resume.tmp)."""
+    """실행의 마지막 완성된 저장 상태 폴더. 없으면 None.
+
+    resume을 먼저 보고, 없으면 제자리로 옮기기(이름 바꾸기) 직전에 죽어 남은 resume.tmp를 본다. 어댑터와
+    state.pt가 모두 있어야 완성된 상태로 본다.
+    """
     for name in ("resume", "resume.tmp"):
         folder = run_dir / name
         if (folder / "state.pt").exists() and (folder / "adapter_model.safetensors").exists():
@@ -524,16 +529,16 @@ def resume_folder(run_dir: Path) -> Path | None:
     return None
 
 
-# 저장 상태의 마지막으로 끝낸 스텝 번호만 읽는다(데이터 순서를 그다음 스텝부터 잇는 데 쓴다).
 def saved_step(folder: Path) -> int:
-    """The last finished step of a saved state."""
+    """저장 상태에서 마지막으로 끝낸 스텝 번호만 읽는다(데이터 순서를 그다음 스텝부터 잇는 데 쓴다)."""
     return int(torch.load(folder / "state.pt", weights_only=True)["step"])
 
 
-# 옵티마이저·GradScaler·학습률 일정·난수 상태를 복원하고 마지막 스텝 번호를 돌려준다. 어댑터 가중치는
-# resume_model이 따로 불러온다.
 def restore_state(folder: Path, optimizer, scaler, scheduler) -> int:
-    """Load the optimizer, scaler, scheduler and random states; returns the last finished step."""
+    """옵티마이저·GradScaler·학습률 일정·난수 상태를 복원하고, 마지막으로 끝낸 스텝을 돌려준다.
+
+    어댑터 가중치는 resume_model이 따로 불러온다.
+    """
     state = torch.load(folder / "state.pt", weights_only=True)
     optimizer.load_state_dict(state["optimizer"])
     scaler.load_state_dict(state["scaler"])
@@ -542,7 +547,7 @@ def restore_state(folder: Path, optimizer, scaler, scheduler) -> int:
     return int(state["step"])
 
 
-# --- the run ---
+# --- 실행 ---
 
 
 # 명령줄 인자. 기본값이 10단계 규칙의 값이다: zeroth-train-itn, 학습률 1e-4, warmup 500, 1,500스텝,
@@ -554,12 +559,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-name", required=True)
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--revision", help="defaults to the pinned revision of a registered model")
+    parser.add_argument("--revision", help="기본값은 등록한 모델의 고정 revision")
     parser.add_argument("--train-set", default="zeroth-train-itn")
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--warmup-steps", type=int, default=500)
-    parser.add_argument("--max-steps", type=int, default=1_500, help="0 saves the initial adapter and stops")
-    parser.add_argument("--save-steps", type=int, default=500, help="adapter checkpoints; 0 for none")
+    parser.add_argument("--max-steps", type=int, default=1_500, help="0이면 처음 어댑터만 저장하고 멈춘다")
+    parser.add_argument("--save-steps", type=int, default=500, help="어댑터 저장 간격. 0이면 저장 안 함")
     parser.add_argument("--resume-every", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--grad-accum", type=int, default=16)
@@ -569,11 +574,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lora-dropout", type=float, default=0.05)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--longest-at", type=int, help="smoke: this step gets the longest utterances")
-    parser.add_argument("--limit-train", type=int, help="CPU checks only")
+    parser.add_argument("--longest-at", type=int, help="스모크: 이 스텝에 가장 긴 발화들을 넣는다")
+    parser.add_argument("--limit-train", type=int, help="CPU 확인 전용: 학습 발화를 앞의 N개로 줄인다")
     parser.add_argument("--device", choices=["cuda", "cpu"], default="cuda")
-    parser.add_argument("--precision", choices=list(DTYPES), default="fp16", help="of the frozen base")
-    parser.add_argument("--resume", action="store_true", help="continue from outputs/<run>/resume")
+    parser.add_argument("--precision", choices=list(DTYPES), default="fp16", help="얼린 기본 가중치의 정밀도")
+    parser.add_argument("--resume", action="store_true", help="outputs/<run>/resume에서 이어 간다")
     args = parser.parse_args(argv)
     # 등록한 모델이면 고정한 revision을 쓰고, 아니면 --revision을 요구한다.
     if args.revision is None:
@@ -626,7 +631,7 @@ def main(argv: list[str] | None = None) -> None:
     if state_folder is not None:
         model = resume_model(model, state_folder)
     else:
-        model = add_lora(model, args.lora_r, args.lora_alpha, args.lora_dropout)  # initialised on the CPU
+        model = add_lora(model, args.lora_r, args.lora_alpha, args.lora_dropout)  # CPU에서 초기화한다
     lora = lora_summary(model)
     check_lora(lora, model.config)
     model.to(args.device)
@@ -696,13 +701,13 @@ def main(argv: list[str] | None = None) -> None:
         batch_sampler=sampler,
         collate_fn=QwenCollator(processor, LANGUAGES[language]),
         num_workers=args.workers,
-        # train.py와 같은 이유로 워커를 실행 동안 살려 둔다(Windows의 워커 생성 방식, 커밋 30e739b).
-        # Windows spawns workers; one iterator for the whole run starts them once.
+        # train.py와 같은 이유로 워커를 실행 동안 살려 둔다(커밋 30e739b). Windows는 워커를 spawn으로
+        # 띄우므로, 실행 전체에 이터레이터 하나를 써서 워커를 한 번만 띄운다.
         persistent_workers=args.workers > 0,
     )
-    # 이터레이터를 만들 때 워커 기본 시드가 torch 난수에서 뽑히므로(옆 주석), 저장된 난수 상태는 그 뒤에
-    # 복원한다. 그래야 복원한 상태가 학습 쪽 난수(dropout 등)로 그대로 이어진다.
-    batches = iter(loader)  # draws the workers' base seed, so it comes before the saved random state
+    # 이터레이터를 만들 때 워커 기본 시드가 torch 난수에서 뽑히므로, 저장된 난수 상태는 그 뒤에 복원한다.
+    # 그래야 복원한 상태가 학습 쪽 난수(dropout 등)로 그대로 이어진다.
+    batches = iter(loader)  # 워커 기본 시드를 뽑으므로 저장된 난수 상태 복원보다 앞에 둔다
     if state_folder is not None:
         restore_state(state_folder, optimizer, scaler, scheduler)
     steps_path = run_dir / "steps.jsonl"
@@ -741,7 +746,7 @@ def main(argv: list[str] | None = None) -> None:
     # 하나만 남긴다. 스텝 시간 중앙값은 가장 긴 스텝(스모크)을 빼고 낸다. 건너뛴 스텝, 손실이 유한하지 않은
     # 스텝, 최대 메모리, 일시 정지 시간을 run.json의 finished에 쓴다.
     entries = [json.loads(line) for line in steps_path.read_text(encoding="utf-8").splitlines()]
-    steps = {e["step"]: e for e in entries if "event" not in e}  # a resumed run logs some steps twice
+    steps = {e["step"]: e for e in entries if "event" not in e}  # 이어 한 실행은 일부 스텝을 두 번 남긴다
     times = [e["seconds"] for e in steps.values() if not e["longest"]]
     run["finished"] = {
         "time": now(),

@@ -25,9 +25,9 @@ def test_empty_reference_is_skipped():
     assert score("...", "무언가", "ko") is None
 
 
-# 오류율은 발화 평균이 아니라 '편집 수 합 ÷ 정답 길이 합'이다(옆 주석의 예).
+# 오류율은 발화 평균이 아니라 '편집 수 합 ÷ 정답 길이 합'이다.
 def test_error_rate_is_corpus_level():
-    # 1 error in 2 characters and 0 errors in 8: 1/10, not the mean of 0.5 and 0.
+    # 2글자 중 오류 1개, 8글자 중 오류 0개: 0.5와 0의 평균이 아니라 1/10이다.
     assert error_rate(np.array([1, 0]), np.array([2, 8])) == 0.1
 
 
