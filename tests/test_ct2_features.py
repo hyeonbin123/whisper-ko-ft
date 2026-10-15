@@ -5,7 +5,8 @@
 # 멈췄다(docs/experiments.md '추가 측정', 커밋 61b4b2f에서 고침). 같은 실패가 다시 나지 않게 고정한다.
 # evaluate_ct2 테스트는 고치기 전 코드에서 실패하는 것을 확인했다(커밋 61b4b2f 메시지).
 # [방법] 가중치 없이 설정 객체만 만들고, evaluate_ct2 테스트는 faster_whisper 모델을 가짜로 바꾼다.
-# faster-whisper는 선택 의존성(ct2 묶음)이라 없으면 evaluate_ct2 테스트는 건너뛴다(CI에는 설치하지 않는다).
+# faster-whisper는 선택 의존성(ct2 묶음)이라 없으면 evaluate_ct2 테스트는 건너뛴다. CI는 2026-10-15부터 ct2
+# 묶음을 설치해 이 테스트들도 돌린다(.github/workflows/ci.yml). 모델은 내려받지 않는다.
 
 import json
 import sys
@@ -84,7 +85,7 @@ class FakeWhisperModel:
 # evaluate_ct2.main이 묶음을 읽기 전에 특징 추출기를 128개로 바꿔 두는지. 리포트 위치·커밋·모델·묶음 읽기는
 # monkeypatch로 바꿔 실제 파일과 GPU를 쓰지 않는다.
 def test_evaluate_ct2_uses_128_mel_bins_for_turbo_before_reading_audio(tmp_path, monkeypatch):
-    pytest.importorskip("faster_whisper")  # ct2 의존성 묶음. CI에는 설치하지 않는다
+    pytest.importorskip("faster_whisper")  # ct2 의존성 묶음. CI는 설치한다, 없는 로컬 환경에서는 건너뛴다
     from whisper_ko_ft import evaluate_ct2
 
     def stop(*args, **kwargs):

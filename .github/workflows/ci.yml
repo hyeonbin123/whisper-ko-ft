@@ -1,3 +1,8 @@
+# [역할] push와 pull request마다 린트(ruff)와 테스트(pytest)를 돌린다. GPU가 없는 GitHub 러너에서 돌므로,
+# 모델을 내려받거나 GPU로 측정하는 일은 하지 않는다. 테스트는 작은 무작위 모델, 가짜 모델, 커밋된 리포트의 다시
+# 채점만으로 돈다(tests/ 각 파일 머리 주석).
+# [확인하는 것] 커밋된 리포트(reports/)를 지금 코드로 다시 채점해 기록된 수치와 같은지(tests/test_recorded_reports.py),
+# 판정 도구(analyze)와 측정 하네스의 동작, faster-whisper 경로의 멜 필터 수와 빈 가설 기준(tests/test_ct2_features.py).
 name: CI
 
 on:
@@ -6,32 +11,52 @@ on:
 
 jobs:
   test:
-    # Pinned rather than ubuntu-latest, which moves to Ubuntu 26 from 2026-10-19.
+    # ubuntu-latest는 2026-10-19부터 Ubuntu 26으로 바뀌므로, 실행 환경이 예고 없이 바뀌지 않게 버전을 고정한다.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      # setup-uv publishes no floating major tag since v8, so pin the exact release. Since v6 python-version
-      # no longer activates a venv on its own; the uv pip installs below need one, and uv run uses the same .venv.
+      # setup-uv는 v8부터 떠 있는 주 버전 태그(v10 같은)를 내지 않아 정확한 릴리스로 고정한다. v6부터
+      # python-version만으로는 가상환경이 켜지지 않는다. 아래 `uv pip install`은 켜진 가상환경이 필요하고,
+      # `uv run`도 같은 .venv를 쓰므로 activate-environment를 켠다.
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.11"
           activate-environment: true
-      # uv.lock pins torch to the CUDA 12.8 build for training. The tests need no GPU, so CI installs the CPU
-      # build of the locked torch version, then every other locked package except the linux-only CUDA wheels
-      # (nvidia-*, triton, cuda-*) that only the CUDA build needs. --locked fails when uv.lock is stale.
+      # 설치 방식과 이유:
+      # - uv.lock은 학습용으로 torch를 CUDA 12.8 빌드로 고정한다. 테스트에는 GPU가 필요 없으므로 잠긴 torch와
+      #   같은 버전의 CPU 빌드를 PyTorch CPU 인덱스에서 받는다(`+cu128` 꼬리를 떼고 버전만 남긴다). CUDA 빌드는
+      #   수 GB라 러너 디스크와 시간을 낭비한다.
+      # - 나머지는 잠긴 버전 그대로 설치하되, CUDA 빌드에만 필요한 리눅스 전용 휠(nvidia-*, triton, cuda-*)은
+      #   뺀다.
+      # - `--group ct2`: faster-whisper 묶음(faster-whisper, ctranslate2, onnxruntime, av 등 잠긴 버전)도
+      #   설치한다. 그래야 tests/test_ct2_features.py의 evaluate_ct2 테스트 3개(turbo의 멜 128개 경로, 속도
+      #   측정용 --no-report, 빈 가설 기준)가 건너뛰어지지 않고 CI에서 돈다. 이 테스트들은 faster_whisper의
+      #   WhisperModel을 가짜로 바꿔 쓰고 특징 추출기(numpy)만 실제로 만들어서, 모델을 내려받지 않고 GPU도
+      #   쓰지 않는다. ctranslate2 리눅스 휠은 CUDA 라이브러리를 실제로 GPU를 쓸 때만 불러오므로 CPU 러너에서
+      #   import가 된다. evaluate_ct2가 torch lib 폴더를 DLL 검색 경로에 넣는 처리는 Windows(os.name == "nt")에서만
+      #   돈다.
+      # - `--locked`: uv.lock이 pyproject.toml과 맞지 않으면(잠금 파일을 갱신하지 않고 의존성을 바꾸면) 여기서
+      #   실패한다.
+      # - 마지막 줄은 이 저장소 패키지(whisper_ko_ft)를 의존성 없이 편집 가능 모드로 설치한다(의존성은 위에서
+      #   잠긴 버전으로 이미 설치했다).
       - name: Install
         shell: bash
         run: |
-          uv export --locked --no-hashes --no-annotate --no-emit-project --group dev -o "$RUNNER_TEMP/locked.txt"
+          uv export --locked --no-hashes --no-annotate --no-emit-project --group dev --group ct2 -o "$RUNNER_TEMP/locked.txt"
           grep -E '^torch==' "$RUNNER_TEMP/locked.txt" | sed -E 's/\+cu[0-9]+//; s/ *;.*//' > "$RUNNER_TEMP/torch.txt"
           test -s "$RUNNER_TEMP/torch.txt"
           grep -vE '^(torch==|nvidia-|triton==|cuda-)' "$RUNNER_TEMP/locked.txt" > "$RUNNER_TEMP/rest.txt"
           uv pip install -r "$RUNNER_TEMP/torch.txt" --index-url https://download.pytorch.org/whl/cpu
           uv pip install -r "$RUNNER_TEMP/rest.txt"
           uv pip install --no-deps -e .
+      # 린트: 규칙 위반(ruff check)과 서식(ruff format --check). `--no-sync`는 uv run이 uv.lock대로 다시
+      # 설치하지 않게 한다(그러면 CUDA torch를 받으려 한다).
       - name: Lint
         run: |
           uv run --no-sync ruff check .
           uv run --no-sync ruff format --check .
+      # 테스트: 모든 pytest. 위에서 ct2 묶음을 설치했으므로 faster-whisper가 필요한 테스트도 건너뛰지 않는다.
+      # 건너뛰는 테스트는 Hugging Face 캐시에 실제 Qwen3-ASR 처리기가 있을 때만 도는 것뿐이다(러너에는 캐시가
+      # 없고, 모델을 내려받지 않는다).
       - name: Test
-        run: uv run --no-sync pytest
+        run: uv run --no-sync pytest -rs
