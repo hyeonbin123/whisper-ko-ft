@@ -155,7 +155,9 @@ LoRA 후보와 전화 음질 조건의 명령은 [docs/experiments.md](docs/expe
 
 10단계: `uv run python -m whisper_ko_ft.train_qwen --run-name qwen-qn`이 Qwen3-ASR-1.7B에 LoRA를 학습한다(fp16 기본 가중치, fp32 어댑터, GradScaler, 장치당 2 × 누적 16, 1,500스텝). 스텝마다 `outputs/<run>/steps.jsonl`에 손실·기울기 크기·배율·건너뜀·GPU 메모리를 남기고, `outputs/<run>/PAUSE`가 있는 동안은 다음 스텝을 시작하지 않으며, `--resume`으로 이어 한다. 평가는 `evaluate_qwen --adapter outputs/qwen-qn/checkpoint-<스텝> --name qwen3-asr-1.7b-qn`(어댑터를 병합, `--channel telephone` 가능), 관문은 `analyze gate10`·`smoke10`, 체크포인트 고르기는 `analyze pick10`, 판정은 `analyze verdict10 --candidate qwen3-asr-1.7b-qn --n turbo-n --untrained qwen3-asr-1.7b`.
 
-테스트: `uv run pytest`, `uv run ruff check .`
+속도·GPU 메모리(Windows 전용, `scripts/speed.py`): 쉬는 상태를 기다린 뒤 정해진 순서로 번갈아 재고, 실행마다 nvidia-smi와 CPU 표본을 `outputs/speed/`에 남긴다. 위 결과의 속도 비율을 만든 절차가 프리셋으로 들어 있다: `--preset ct2-n --speed-only`(2026-10-02, CTranslate2 1.46배), `--preset fallback-n`(8단계), `--preset qwen-turbo`(9단계, Qwen 약 6.5배 느림). `--dry-run`은 돌릴 명령만 찍는다. 다른 때에 재면 절대값은 달라지므로 번갈아 잰 비율을 본다.
+
+테스트: `uv run pytest`, `uv run ruff check .` (faster-whisper 테스트까지 돌리려면 `uv sync --group ct2`. CI는 이 묶음을 설치해 돌린다)
 
 ## 데이터와 모델
 
