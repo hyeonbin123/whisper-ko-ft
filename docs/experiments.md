@@ -1203,6 +1203,7 @@ test 비교(참고용), 판정 없이 보고만 한 비교, 점 추정만 쓰는
 - (a) s = 1.0으로 합쳐 zeroth-val500 전체(440발화)를 디코딩하면 10단계 체크포인트 고르기 파일(`reports/qwen3-asr-1.7b-qn-steps/zeroth-val500-step1500.json`)과 440발화의 가설이 모두 같아야 한다. 결과 파일 `reports/qwen3-asr-1.7b-qn-scale-gate/zeroth-val500-s100.json`
 - (b) s = 0으로 합쳐 zeroth-val500 앞 100발화를 디코딩하면 9단계 fp16 점검 파일(`reports/qwen3-asr-1.7b-gate/zeroth-val500-first100-fp16.json`)과 100발화의 가설이 모두 같아야 한다. 결과 파일 `reports/qwen3-asr-1.7b-qn-scale-gate/zeroth-val500-first100-s000.json`
 - 다르면 측정하지 않고 하네스를 고친 뒤 이 절에 날짜를 붙여 적고 다시 한다
+- (2026-10-15 추가, GPU로 재기 전 CPU 확인. 측정 아님, 리포트 없음) 실제 1.7B를 CPU fp32로 띄워 checkpoint-1500을 s = 0으로 합치고(LoRA 340층의 scaling을 바꿈) zeroth-val500 앞 8발화를 디코딩하자 9단계 fp32 CPU 점검 파일(`reports/qwen3-asr-1.7b-gate/zeroth-val500-first100-fp32-cpu.json`)과 가설 8개가 모두 같았다. 언어 모델만 0.5(196층)와 두 tower 0.5(340층)로 앞 4발화도 정상 종료했다(빈 가설·되풀이·256토큰 도달·넘침 0). 관문 (a)·(b)는 GPU fp16 조건이라 이것으로 대신하지 않는다
 
 ### 판정 규칙 (validation, `analyze verdict10 --candidate qwen3-asr-1.7b-qn-s050 --n turbo-n --untrained qwen3-asr-1.7b --others qwen3-asr-1.7b-qn turbo-n2-d1a whisper-large-v3-turbo`)
 - 10단계와 같은 규칙과 같은 명령이다. 짝지은 부트스트랩 1,000번(seed 0, 발화 단위)의 95% 구간
@@ -1241,6 +1242,7 @@ test 비교(참고용), 판정 없이 보고만 한 비교, 점 추정만 쓰는
 - 기록된 N의 CTranslate2 fp16 리포트: `reports/turbo-n-ct2/zeroth-val.json`(맞춘 CER 1.28%, 1,203/93,621), `reports/turbo-n-ct2/zeroth-val500.json`(원래 오류 683개/18,333글자). FLEURS의 CTranslate2 리포트는 없다
 - 엔진·정밀도가 바뀌면 되풀이에 빠지는 발화가 바뀐 기록이 있다(5단계, 2026-10-02). 되풀이 수를 함께 본다
 - 코드 변경(측정 전에 커밋): `evaluate_ct2 --compute-type`(기본 float16, 기록과 같다), `--device`(cpu는 `--no-report`만), 요약에 compute_type·device와 한 발화 지연의 중앙값·90번째 백분위(`evaluate`의 배치 1 지연과 같은 키)
+- (2026-10-15 추가, GPU로 재기 전 CPU 확인. 측정 아님) `evaluate_ct2 --device cpu --compute-type int8 --no-report --limit 4`로 같은 변환 폴더가 불러와져 멜 128개로 4발화를 받아 적고, 요약에 compute_type·device·한 발화 지연이 남는 것을 확인했다. int8_float16은 GPU 전용이라 CPU로는 확인하지 못한다
 
 ### 후보
 - **N + CTranslate2 int8_float16**, 재시도 끔(2026-10-02 `turbo-n-ct2`와 같은 디코딩: 한 발화씩, greedy, 언어 고정, 타임스탬프·VAD 없음). 후보는 하나다

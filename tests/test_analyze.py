@@ -767,3 +767,94 @@ def test_robust_comparisons_cover_the_registered_list():
     numbers = [spec[0] for spec in analyze.ROBUST_COMPARISONS]
     assert numbers == list(range(1, 26))
     assert all(spec[6] in analyze.ROBUST_CONDITIONS for spec in analyze.ROBUST_COMPARISONS)
+
+
+# --- 11단계 관문과 블록 보고, 12단계 판정 ---
+
+
+# 11단계 관문: 스케일을 정해 합친 실행이 기록된 실행과 가설이 모두 같아야 통과한다. 어댑터와 스케일이 없는
+# 파일은 관문의 대상이 아니라 거부한다.
+def test_gate11_passes_only_when_every_hypothesis_is_reproduced(tmp_path):
+    recorded = adapter_file(tmp_path / "step1500.json", ["가" * 100, "가" * 99])
+    scaled = adapter_file(tmp_path / "s100.json", ["가" * 100, "가" * 99])
+    data = json.loads(open(scaled, encoding="utf-8").read())
+    data["summary"]["adapter_scale"] = {"audio_tower": 1.0, "language_model": 1.0}
+    open(scaled, "w", encoding="utf-8").write(json.dumps(data))
+    assert analyze.gate11(scaled, recorded)
+    off = json.loads(open(scaled, encoding="utf-8").read())
+    off["utterances"][1]["hypothesis"] = "가" * 98
+    open(tmp_path / "off.json", "w", encoding="utf-8").write(json.dumps(off))
+    assert not analyze.gate11(str(tmp_path / "off.json"), recorded)
+    with pytest.raises(SystemExit, match="scale"):
+        analyze.gate11(recorded, recorded)
+
+
+# blocks: 비교 하나에 블록 단위 구간과 하나 빼기 값이 붙는다(보고만).
+def test_blocks_reports_one_comparison(reports, capsys):
+    ids = [f"{s}_003_{n:04d}" for s in ("101", "102") for n in range(3)]
+    write_report(
+        reports, "c", "zeroth-val", [{"id": i, "edits": 2, "length": 10, "reference": "문장"} for i in ids]
+    )
+    write_report(
+        reports, "b", "zeroth-val", [{"id": i, "edits": 1, "length": 10, "reference": "문장"} for i in ids]
+    )
+    result = analyze.blocks("zeroth-val", "c", "b", None, False)
+    assert result["blocks"] == 2 and result["block_interval"] == pytest.approx((0.1, 0.1))
+    assert "2 blocks" in capsys.readouterr().out
+
+
+# 12단계 판정용 가짜 speed.json: 실행마다 배속, 한 발화 지연 중앙값, nvidia-smi 증가.
+def speed_file(path, fp16, int8):
+    runs = []
+    for n in (1, 2):
+        for label, (memory, latency) in (
+            ("hf-b1", (2000, (0.4, 0.4))),
+            ("ct2-fp16", fp16),
+            ("ct2-int8", int8),
+        ):
+            summary = {
+                "audio_seconds_per_second": 20.0,
+                "batch_seconds_median": latency[n - 1],
+                "error_rate": 0.1,
+            }
+            runs.append(
+                {
+                    "label": f"{label}-{n}",
+                    "gpu_memory_added_mb": memory,
+                    "gpu_util_avg_during": 40,
+                    "summary": summary,
+                }
+            )
+    path.write_text(json.dumps({"preset": "ct2-int8", "idle_reached": False, "runs": runs}), encoding="utf-8")
+    return str(path)
+
+
+# 12단계 판정 표: 정확도를 지키고 메모리가 20% 넘게 줄거나 지연이 두 번 모두 5% 넘게 줄면 권하고, 정확도만
+# 지키면 '이득 없음', 정확도를 잃으면 메모리와 관계없이 'float16 유지'.
+@pytest.mark.parametrize(
+    ("int8_edits", "int8_speed", "label"),
+    [
+        (1, (1500, (0.40, 0.40)), "int8_float16을 서빙 기본으로 권한다"),  # 메모리 −25%
+        (1, (1900, (0.37, 0.37)), "int8_float16을 서빙 기본으로 권한다"),  # 지연 −7.5%
+        (1, (1900, (0.37, 0.39)), "정확도는 같지만 이득이 없다 (float16 유지)"),  # 한 번만 5% 넘게
+        (3, (1500, (0.30, 0.30)), "정확도를 잃는다 (float16 유지)"),
+    ],
+)
+def test_verdict12_follows_the_table(reports, tmp_path, int8_edits, int8_speed, label):
+    reference = "가나다라마바사아자차"  # 10글자. 맞춘 채점이 다시 채점하므로 글로 오류 수를 정한다
+
+    def utterances(ids, edits):
+        hypothesis = reference[: 10 - edits] + "카" * edits
+        return [
+            {"id": i, "edits": edits, "length": 10, "reference": reference, "hypothesis": hypothesis}
+            for i in ids
+        ]
+
+    for name, edits in (("fp", 1), ("int8", int8_edits)):
+        write_report(reports, name, "zeroth-val", utterances([f"101_003_{n:04d}" for n in range(20)], edits))
+        write_report(reports, name, "fleurs-ko-val", utterances([str(n) for n in range(5)], 1))
+    (reports / "fp" / "zeroth-val500.json").write_text(
+        json.dumps({"summary": {"error_rate": 0.1}, "utterances": []}), encoding="utf-8"
+    )
+    speed = speed_file(tmp_path / "speed.json", (2000, (0.40, 0.40)), int8_speed)
+    assert analyze.verdict12(speed, "int8", "fp") == label

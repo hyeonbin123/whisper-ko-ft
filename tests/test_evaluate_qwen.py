@@ -358,4 +358,79 @@ def test_reports_name_the_adapter_and_its_weights(tmp_path):
     weights = (tmp_path / "checkpoint-500" / "adapter_model.safetensors").read_bytes()
     assert info["adapter"].endswith("checkpoint-500")
     assert info["adapter_sha256"] == hashlib.sha256(weights).hexdigest()
-    assert evaluate_qwen.adapter_info(None) == {"adapter": None, "adapter_sha256": None}
+    assert (
+        info["adapter_config_sha256"]
+        == hashlib.sha256((tmp_path / "checkpoint-500" / "adapter_config.json").read_bytes()).hexdigest()
+    )
+    assert evaluate_qwen.adapter_info(None) == {
+        "adapter": None,
+        "adapter_sha256": None,
+        "adapter_config_sha256": None,
+    }
+
+
+# --- 11단계: 어댑터 갱신량을 줄여 합치기 ---
+
+
+# 같은 어댑터를 스케일만 바꿔 합친 가중치(state_dict). scale이 None이면 10단계와 같은 합치기다.
+def merged_weights(folder, scale=None, scope="all"):
+    model = evaluate_qwen.merge_adapter(tiny_model(torch.float16), str(folder), scale, scope)
+    return model.state_dict()
+
+
+# 스케일 0은 학습 전 가중치와 똑같고, 스케일 1.0을 직접 주면 10단계의 합치기와 똑같다(11단계 관문 (a)·(b)의
+# 전제). 0.5는 두 끝 사이의 가운데다(fp16으로 반올림하는 만큼만 다르다).
+def test_the_scale_interpolates_between_the_untrained_and_the_trained_weights(tmp_path):
+    save_adapter(tmp_path / "trained", train_b=True)
+    base = tiny_model(torch.float16).state_dict()
+    full = merged_weights(tmp_path / "trained")
+    assert all(torch.equal(merged_weights(tmp_path / "trained", 0.0)[k], base[k]) for k in base)
+    assert all(torch.equal(merged_weights(tmp_path / "trained", 1.0)[k], full[k]) for k in base)
+    half = merged_weights(tmp_path / "trained", 0.5)
+    key = "model.language_model.layers.0.mlp.down_proj.weight"
+    expected = base[key].float() + 0.5 * (full[key].float() - base[key].float())
+    assert not torch.equal(half[key], base[key]) and not torch.equal(half[key], full[key])
+    assert torch.allclose(half[key].float(), expected, atol=2e-3)
+
+
+# --adapter-scope language는 언어 모델 층에만 스케일을 쓰고 오디오 인코더 층은 1.0(10단계와 같은 합치기)으로
+# 둔다.
+def test_the_scope_limits_the_scale_to_one_tower(tmp_path):
+    save_adapter(tmp_path / "trained", train_b=True)
+    base = tiny_model(torch.float16).state_dict()
+    full = merged_weights(tmp_path / "trained")
+    language_off = merged_weights(tmp_path / "trained", 0.0, "language")
+    model = evaluate_qwen.merge_adapter(tiny_model(torch.float16), str(tmp_path / "trained"), 0.0, "language")
+    assert model.adapter_scaled_layers == 2 * 7  # 언어 모델 2층 × (q, k, v, o, gate, up, down)
+    assert torch.equal(
+        language_off["model.audio_tower.layers.1.fc1.weight"], full["model.audio_tower.layers.1.fc1.weight"]
+    )
+    lm = "model.language_model.layers.0.mlp.down_proj.weight"
+    assert torch.equal(language_off[lm], base[lm])
+
+
+# 요약에 남기는 tower별 스케일. 스케일을 주지 않으면 두 tower 모두 1.0, 어댑터가 없으면 None.
+def test_reports_record_the_scale_of_each_tower():
+    assert evaluate_qwen.adapter_scale_info("a", 0.5, "all") == {"audio_tower": 0.5, "language_model": 0.5}
+    assert evaluate_qwen.adapter_scale_info("a", 0.5, "language") == {
+        "audio_tower": 1.0,
+        "language_model": 0.5,
+    }
+    assert evaluate_qwen.adapter_scale_info("a", None, "all") == {"audio_tower": 1.0, "language_model": 1.0}
+    assert evaluate_qwen.adapter_scale_info(None, None, "all") is None
+
+
+# 인자 검사: 스케일은 어댑터와 함께만, 음수는 안 되고, --adapter-scope는 스케일과 함께만 준다.
+def test_the_adapter_scale_needs_an_adapter_and_is_not_negative(reports, monkeypatch, capsys):
+    named = ["--set", "zeroth-val", "--name", "qn-s050"]
+    with pytest.raises(SystemExit):
+        run(monkeypatch, *named, "--adapter-scale", "0.5")
+    assert "--adapter-scale needs --adapter" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        run(monkeypatch, *named, "--adapter", "a", "--adapter-scale", "-0.5")
+    assert "negative" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        run(monkeypatch, *named, "--adapter", "a", "--adapter-scope", "language")
+    assert "--adapter-scope needs --adapter-scale" in capsys.readouterr().err
+    with pytest.raises(Reached):
+        run(monkeypatch, *named, "--adapter", "a", "--adapter-scale", "0.5", "--adapter-scope", "language")

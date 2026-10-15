@@ -182,3 +182,49 @@ def test_evaluate_ct2_counts_empty_hypotheses_over_scored_utterances_only(tmp_pa
 
     summary = json.loads((tmp_path / "n" / "x.json").read_text(encoding="utf-8"))["summary"]
     assert (summary["utterances"], summary["empty_hypotheses"]) == (3, 2)
+
+
+# 12단계: --compute-type이 WhisperModel에 그대로 가고(기본 float16은 기록과 같다), 요약에 정밀도·장치와 한
+# 발화 지연(중앙값·90번째 백분위)이 남는다.
+def test_evaluate_ct2_passes_the_compute_type_and_records_latency(tmp_path, monkeypatch):
+    pytest.importorskip("faster_whisper")
+    from whisper_ko_ft import evaluate_ct2
+    from whisper_ko_ft.store import Utterance
+
+    seen = {}
+
+    class Recording(TranscribingModel):
+        def __init__(self, path, device, compute_type):
+            super().__init__(path, device, compute_type)
+            seen.update(device=device, compute_type=compute_type)
+
+    Recording.segments = {"a": [Segment("가나다")], "b": [Segment("라마")]}
+    utterances = [Utterance(i, "s", text, "x", 0, 16_000) for i, text in (("a", "가나다"), ("b", "라마"))]
+    monkeypatch.setattr(evaluate_ct2, "REPORTS", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "ROOT", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "git_commit", lambda: "test")
+    monkeypatch.setattr(evaluate_ct2, "WhisperModel", Recording)
+    monkeypatch.setattr(evaluate_ct2, "AudioStore", IdStore)
+    monkeypatch.setattr(evaluate_ct2, "load_set", lambda name: ("ko", utterances))
+    argv = ["evaluate_ct2", "--model", str(tmp_path), "--name", "n", "--set", "x"]
+    monkeypatch.setattr(sys, "argv", [*argv, "--compute-type", "int8_float16"])
+
+    evaluate_ct2.main()
+
+    summary = json.loads((tmp_path / "n" / "x.json").read_text(encoding="utf-8"))["summary"]
+    assert seen == {"device": "cuda", "compute_type": "int8_float16"}
+    assert (summary["compute_type"], summary["device"]) == ("int8_float16", "cuda")
+    assert summary["batch_seconds_median"] is not None and summary["batch_seconds_p90"] is not None
+
+
+# CPU 실행은 측정 조건이 아니라 리포트를 남기지 못한다(--no-report만).
+def test_a_cpu_ct2_run_needs_no_report(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("faster_whisper")
+    from whisper_ko_ft import evaluate_ct2
+
+    monkeypatch.setattr(evaluate_ct2, "REPORTS", tmp_path)
+    argv = ["evaluate_ct2", "--model", str(tmp_path), "--name", "n", "--set", "x", "--device", "cpu"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit):
+        evaluate_ct2.main()
+    assert "--no-report" in capsys.readouterr().err

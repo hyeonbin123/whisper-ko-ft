@@ -24,6 +24,10 @@
 합친다. --name이 필요하고, 리포트에 어댑터 폴더와 가중치의 SHA-256을 적는다. --out은 zeroth-val500에서
 체크포인트를 재는 실행에도 쓴다. --channel telephone은 앞 30초를 자르기 전에 오디오를 4단계의 전화 채널에
 통과시키고, 리포트는 <묶음>@telephone.json으로 간다.
+
+11단계(2026-10-15 규칙): --adapter-scale s는 합치기 전에 LoRA 갱신량을 s배로 줄이거나 키운다(W0 + s·ΔW,
+학습 전 가중치와 학습한 가중치의 선형 보간). --adapter-scope는 s를 쓸 tower(all, language, audio)를 고르고
+나머지는 1.0으로 둔다. 리포트 요약에 tower별 스케일과 adapter_config.json의 SHA-256이 남는다.
 """
 
 # [파일 역할] 9·10단계의 측정 하네스. 계열이 다른 공개 모델 Qwen3-ASR(오디오 인코더 + Qwen3 언어 모델)로
@@ -231,30 +235,95 @@ def report_payloads(rows: list[dict], language: str, meta: dict) -> dict[str, di
     return payloads
 
 
+# 11단계 --adapter-scope: 스케일을 쓸 tower를 LoRA 층 이름의 일부로 고른다. 오디오 인코더 층은 이름에
+# '.audio_tower.', 언어 모델 층은 '.language_model.'이 들어 있다(train_qwen.LORA_TARGETS의 두 갈래).
+SCOPES = {
+    "all": (".audio_tower.", ".language_model."),
+    "language": (".language_model.",),
+    "audio": (".audio_tower.",),
+}
+
+
+# 11단계: 고른 tower의 LoRA 층마다 PEFT의 set_scale로 scaling을 scale·alpha/r로 바꾼다. 합치기
+# (merge_and_unload)는 이 scaling으로 갱신량 B·A·scaling을 계산해 더하므로, 합친 가중치가 W0 + scale·ΔW가
+# 된다(PEFT 0.21.0 LoraLayer.set_scale, get_delta_weight). 돌려주는 것은 스케일을 바꾼 층 수다. 한 층도
+# 맞지 않으면 조용히 넘어가지 않고 멈춘다(층 이름 규칙이 바뀐 경우).
+def scale_adapter(peft_model, scale: float, scope: str) -> int:
+    """고른 tower의 LoRA 층 scaling을 처음 값(alpha/r)의 scale배로 바꾸고, 바꾼 층 수를 돌려준다."""
+    from peft.tuners.lora import LoraLayer
+
+    scaled = 0
+    for name, module in peft_model.named_modules():
+        if isinstance(module, LoraLayer) and any(part in name for part in SCOPES[scope]):
+            for adapter_name in list(module.scaling):
+                module.set_scale(adapter_name, scale)
+            scaled += 1
+    if not scaled:
+        raise ValueError(f"no LoRA layer matched the {scope!r} scope")
+    return scaled
+
+
 # 10단계: train_qwen이 저장한 LoRA 어댑터를 기본 가중치에 합친다. 기본 모델의 dtype(fp16) 그대로 합치므로,
 # Whisper의 N을 evaluate --adapter로 잴 때와 같은 방식이다(docs/experiments.md 10단계 '디코딩과 리포트').
+# 11단계: scale을 주면(None이 아니면) 합치기 전에 scale_adapter로 고른 tower의 갱신량을 scale배로 한다.
+# None이면 10단계와 똑같은 경로다. scale 1.0을 직접 주면 scaling을 같은 값(alpha/r)으로 다시 쓰므로 합친
+# 가중치가 같아야 한다(11단계 관문 (a)가 이 경로를 확인한다).
 # peft는 어댑터가 있을 때만 불러온다.
-def merge_adapter(model, adapter: str):
-    """LoRA 어댑터를 가중치에 합친 기본 모델(기본 모델의 dtype 그대로)."""
+def merge_adapter(model, adapter: str, scale: float | None = None, scope: str = "all"):
+    """LoRA 어댑터를 가중치에 합친 기본 모델(기본 모델의 dtype 그대로). scale이 있으면 갱신량을 scale배로."""
     from peft import PeftModel
 
-    return PeftModel.from_pretrained(model, adapter).merge_and_unload()
+    peft_model = PeftModel.from_pretrained(model, adapter)
+    scaled = 0
+    if scale is not None:
+        scaled = scale_adapter(peft_model, scale, scope)
+        print(f"adapter scale {scale} on {scaled} LoRA layers ({scope})", flush=True)  # 실행 로그에 남긴다
+    merged = peft_model.merge_and_unload()
+    # 스케일을 바꾼 LoRA 층 수를 합친 모델에 붙여 둔다(main이 요약의 adapter_scaled_layers로 옮긴다).
+    merged.adapter_scaled_layers = scaled
+    return merged
 
 
 # 리포트 요약에 남길 어댑터 폴더와 가중치 파일(adapter_model.safetensors)의 SHA-256. 체크포인트 폴더
 # 이름만으로는 같은 가중치인지 알 수 없어서, 어떤 가중치로 쟀는지 내용으로 확인할 수 있게 한다.
+# 2026-10-15부터 adapter_config.json(rank, alpha, 대상 층)의 SHA-256도 남긴다. 11단계처럼 같은 가중치를
+# 다른 스케일로 합친 실행은 스케일 항목(adapter_scale)으로 구분한다.
 def adapter_info(adapter: str | None) -> dict:
-    """리포트 요약에 넣을 어댑터 폴더와 그 가중치의 SHA-256."""
+    """리포트 요약에 넣을 어댑터 폴더와 그 가중치·설정의 SHA-256."""
     if adapter is None:
-        return {"adapter": None, "adapter_sha256": None}
+        return {"adapter": None, "adapter_sha256": None, "adapter_config_sha256": None}
     weights = (Path(adapter) / "adapter_model.safetensors").read_bytes()
-    return {"adapter": Path(adapter).as_posix(), "adapter_sha256": hashlib.sha256(weights).hexdigest()}
+    config = (Path(adapter) / "adapter_config.json").read_bytes()
+    return {
+        "adapter": Path(adapter).as_posix(),
+        "adapter_sha256": hashlib.sha256(weights).hexdigest(),
+        "adapter_config_sha256": hashlib.sha256(config).hexdigest(),
+    }
+
+
+# 요약에 남길 tower별 스케일(어댑터가 없으면 None). scale이 None이면 두 tower 모두 1.0(10단계와 같은
+# 합치기)이고, 주면 scope에 든 tower는 scale, 나머지는 1.0이다.
+def adapter_scale_info(adapter: str | None, scale: float | None, scope: str) -> dict | None:
+    if adapter is None:
+        return None
+    towers = {"audio_tower": ".audio_tower.", "language_model": ".language_model."}
+    return {
+        tower: scale if scale is not None and part in SCOPES[scope] else 1.0 for tower, part in towers.items()
+    }
 
 
 # 고정한 revision으로 처리기와 모델을 불러와 장치에 올린다. 어텐션은 SDPA(FlashAttention 2는 쓰지 않는다,
 # docs/experiments.md 9단계). 모델 클래스는 transformers 5.13부터 있어 이 함수 안에서 불러온다. --adapter면
 # 합친 뒤 올린다.
-def load_model(model_id: str, revision: str, dtype, device: str, adapter: str | None = None):
+def load_model(
+    model_id: str,
+    revision: str,
+    dtype,
+    device: str,
+    adapter: str | None = None,
+    adapter_scale: float | None = None,
+    adapter_scope: str = "all",
+):
     from transformers import AutoProcessor, Qwen3ASRForConditionalGeneration
 
     processor = AutoProcessor.from_pretrained(model_id, revision=revision)
@@ -262,14 +331,14 @@ def load_model(model_id: str, revision: str, dtype, device: str, adapter: str | 
         model_id, revision=revision, dtype=dtype, attn_implementation="sdpa"
     )
     if adapter:
-        model = merge_adapter(model, adapter)
+        model = merge_adapter(model, adapter, adapter_scale, adapter_scope)
     return model.to(device).eval(), processor
 
 
 # 명령줄 진입점. 주요 인자: --model(기본 1.7B), --revision, --set, --name(raw 리포트 이름, fixed는
-# <name>-fixed), --adapter(10단계), --channel, --precision(fp16/fp32), --device(cuda/cpu), --batch-size(기본
-# 16), --limit, --allow-test, --no-report, --out(raw만 지정한 파일에 쓰기: fp16 점검과 체크포인트 고르기),
-# --overwrite.
+# <name>-fixed), --adapter(10단계), --adapter-scale·--adapter-scope(11단계), --channel,
+# --precision(fp16/fp32), --device(cuda/cpu), --batch-size(기본 16), --limit, --allow-test, --no-report,
+# --out(raw만 지정한 파일에 쓰기: fp16 점검과 체크포인트 고르기), --overwrite.
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Hugging Face 모델 ID(-hf 체크포인트)")
@@ -278,6 +347,17 @@ def main() -> None:
     parser.add_argument("--name", help="raw 출력의 리포트 이름. fixed는 <이름>-fixed에 간다")
     parser.add_argument(
         "--adapter", help="--model에 합칠 LoRA 어댑터 폴더(10단계 train_qwen이 저장한 것. --name 필요)"
+    )
+    parser.add_argument(
+        "--adapter-scale",
+        type=float,
+        help="11단계: 합치기 전에 LoRA 갱신량을 이 배수로(0이면 학습 전, 1이면 그대로). --adapter 필요",
+    )
+    parser.add_argument(
+        "--adapter-scope",
+        choices=list(SCOPES),
+        default="all",
+        help="--adapter-scale을 쓸 tower(all, language: 언어 모델만, audio: 오디오 인코더만). 나머지는 1.0",
     )
     parser.add_argument(
         "--channel", choices=list(CHANNELS), help="오디오를 채널 흉내(전화 음질 등)에 통과시킨다"
@@ -298,6 +378,13 @@ def main() -> None:
         parser.error("test sets are measured once per stage; pass --allow-test when the stage is done")
     if args.adapter and not args.name:
         parser.error("--adapter needs --name (the default is the base model's report folder)")
+    # 11단계: 스케일은 어댑터를 합칠 때만 뜻이 있고, 음수 배수는 규칙에 없다.
+    if args.adapter_scale is not None and not args.adapter:
+        parser.error("--adapter-scale needs --adapter")
+    if args.adapter_scale is not None and args.adapter_scale < 0:
+        parser.error("--adapter-scale must not be negative")
+    if args.adapter_scope != "all" and args.adapter_scale is None:
+        parser.error("--adapter-scope needs --adapter-scale")
     # 등록한 모델이면 고정한 revision과 리포트 이름을 쓰고, 명령줄 값이 있으면 그것이 우선한다. 등록하지 않은
     # 모델은 둘 다 직접 줘야 한다.
     revision, name = REGISTERED.get(args.model, (args.revision, args.name))
@@ -333,7 +420,9 @@ def main() -> None:
         utterances = utterances[: args.limit]
     dtype, cuda = DTYPES[args.precision], args.device == "cuda"
     adapter = adapter_info(args.adapter)  # 커밋처럼 디코딩 전에 읽어 둔다
-    model, processor = load_model(args.model, revision, dtype, args.device, args.adapter)
+    model, processor = load_model(
+        args.model, revision, dtype, args.device, args.adapter, args.adapter_scale, args.adapter_scope
+    )
     watch = NonFiniteWatch(model.lm_head)
     stores: dict[str, AudioStore] = {}
 
@@ -377,6 +466,8 @@ def main() -> None:
         "model": args.model,
         "revision": revision,
         **adapter,
+        "adapter_scale": adapter_scale_info(args.adapter, args.adapter_scale, args.adapter_scope),
+        "adapter_scaled_layers": getattr(model, "adapter_scaled_layers", None),
         "engine": "transformers qwen3_asr",
         "set": args.set_name,
         "channel": args.channel,

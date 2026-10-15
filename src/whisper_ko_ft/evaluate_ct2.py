@@ -9,6 +9,11 @@
 더 높은 temperature로 다시 디코딩한다.
 멜 필터 수는 변환된 모델에서 가져오고(large-v3와 turbo는 128개, `ct2_features` 참고), 모델은 묶음의 오디오를
 읽기 전에 띄운다.
+
+12단계(2026-10-15 규칙): --compute-type은 CTranslate2가 모델을 불러올 때 쓸 정밀도다(기본 float16은 기록된
+측정과 같다. int8_float16은 가중치를 int8로 양자화하고 나머지 계산은 fp16). 변환을 다시 하지 않고 같은 폴더를
+쓴다. --device cpu는 확인용이라 --no-report가 있어야 한다. 요약에 정밀도·장치와 한 발화 지연의 중앙값·90번째
+백분위(batch_seconds_median, batch_seconds_p90. evaluate의 배치 1 지연과 같은 키)를 남긴다.
 """
 
 # [파일 역할] 5단계(되풀이 오류와 추론 엔진)와 2026-10-02 추가 측정에서 쓴 faster-whisper(CTranslate2) 측정
@@ -36,9 +41,10 @@ import numpy as np
 import torch
 
 # ct2_features.feature_kwargs: 변환된 모델의 멜 수에 맞춘 특징 설정. evaluate.git_commit: 측정 코드의 커밋
-# 기록(evaluate.py와 같은 방식). metrics: 채점. store: 묶음과 오디오.
+# 기록(evaluate.py와 같은 방식). evaluate.batch_seconds_summary: 지연의 중앙값·90번째 백분위(같은 키로 남겨
+# 두 하네스를 나란히 읽는다). metrics: 채점. store: 묶음과 오디오.
 from whisper_ko_ft.ct2_features import feature_kwargs
-from whisper_ko_ft.evaluate import git_commit
+from whisper_ko_ft.evaluate import batch_seconds_summary, git_commit
 from whisper_ko_ft.metrics import error_rate, interval, score
 from whisper_ko_ft.paths import REPORTS, ROOT
 from whisper_ko_ft.store import AudioStore, load_set
@@ -67,10 +73,15 @@ FALLBACK = {
     "compression_ratio_threshold": 2.4,
     "log_prob_threshold": -1.0,
 }
+# COMPUTE_TYPES: --compute-type 값. float16이 지금까지의 모든 기록(5단계, 2026-10-02)과 같은 기본값이고,
+# int8_float16이 12단계의 후보다(compute capability 7.0 이상, RTX 2080 Ti는 7.5). int8·int8_float32·float32는
+# CPU 확인용이다(CPU에는 float16 계산이 없다).
+COMPUTE_TYPES = ("float16", "int8_float16", "int8", "int8_float32", "float32")
 
 
 # 명령줄 진입점. --model은 변환된 CTranslate2 폴더, --name은 리포트 이름(필수), --fallback은 '재시도 켬'. test
 # 묶음 보호(--allow-test)와 덮어쓰기 보호(--overwrite)는 evaluate.py와 같다. --no-report는 속도만 볼 때 쓴다.
+# --compute-type과 --device는 12단계에서 더했다(기본값은 지금까지의 측정과 같다).
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True, help="CTranslate2 모델 폴더")
@@ -81,9 +92,21 @@ def main() -> None:
     parser.add_argument("--allow-test", action="store_true")
     parser.add_argument("--overwrite", action="store_true", help="이미 있는 리포트를 바꿔 쓴다")
     parser.add_argument("--no-report", action="store_true", help="요약만 찍고 리포트는 안 쓴다(속도 측정)")
+    parser.add_argument(
+        "--compute-type",
+        choices=COMPUTE_TYPES,
+        default="float16",
+        help="CTranslate2가 불러올 때 쓸 정밀도(기본 float16은 기록과 같다. 12단계 후보는 int8_float16)",
+    )
+    parser.add_argument(
+        "--device", choices=["cuda", "cpu"], default="cuda", help="cpu는 확인용(--no-report 필요)"
+    )
     args = parser.parse_args()
     if args.set_name.endswith("-test") and not args.allow_test:
         parser.error("test sets are measured once per stage; pass --allow-test when the stage is done")
+    # CPU 실행은 측정 조건이 아니므로 리포트를 남기지 못하게 한다(evaluate_qwen과 같은 보호).
+    if args.device == "cpu" and not args.no_report:
+        parser.error("a CPU run is not the measured condition; pass --no-report")
     target = REPORTS / args.name / f"{args.set_name}.json"
     if not args.no_report and target.exists() and not args.overwrite:
         parser.error(f"{target.relative_to(ROOT)} exists; pass --overwrite to measure it again")
@@ -92,7 +115,7 @@ def main() -> None:
 
     # 모델을 오디오보다 먼저 띄운다(위 docstring). 설정 파일의 멜 수가 모델과 맞지 않으면 오디오를 읽기 전에
     # 바로 멈춘다. 2026-09-20 시도는 특징을 다 만든 뒤 첫 발화에서 멈췄다(docs/experiments.md '추가 측정').
-    model = WhisperModel(args.model, device="cuda", compute_type="float16")
+    model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type)
     # 기본 특징 추출기를 변환된 모델의 멜 수(model.model.n_mels, turbo는 128)에 맞춘 것으로 바꾼다.
     # faster-whisper는 폴더에 preprocessor_config.json이 없으면 멜 80개로 특징을 만든다(ct2_features).
     model.feature_extractor = FeatureExtractor(**feature_kwargs(Path(args.model), model.model.n_mels))
@@ -104,10 +127,14 @@ def main() -> None:
     stores: dict[str, AudioStore] = {}
 
     rows: list[dict] = []
+    utterance_seconds: list[float] = []
     started = time.perf_counter()
     # 한 발화씩 처리한다(배치 없음). 5단계 규칙의 '한 발화씩'이고, 배치 1 속도를 Transformers와 비교하는
     # 조건이기도 하다.
     for n, utterance in enumerate(utterances):
+        # 한 발화의 지연: 오디오 읽기부터 구간을 끝까지 꺼낼 때까지(채점 제외). evaluate의 배치 시간과 같은
+        # 범위다.
+        utterance_started = time.perf_counter()
         audio = stores.setdefault(utterance.store, AudioStore(utterance.store)).read(utterance)
         # greedy(beam_size=1), 언어 고정, 타임스탬프 없음, 앞 구간의 글을 다음 디코딩에 이어 주지 않음, VAD
         # 없음(docs/experiments.md 5단계 설정). 재시도 관련 값만 options로 바뀐다.
@@ -122,6 +149,7 @@ def main() -> None:
         )
         # segments는 생성기라 끝까지 꺼내야 디코딩이 끝난다. 구간 글을 공백으로 이어 가설 하나로 만든다.
         segments = list(segments)
+        utterance_seconds.append(time.perf_counter() - utterance_started)
         text = " ".join(segment.text.strip() for segment in segments)
         # evaluate.py와 같은 채점. 정답이 비면 편집 수와 길이를 0으로 적는다.
         scored = score(utterance.text, text, language)
@@ -156,6 +184,8 @@ def main() -> None:
     summary = {
         "model": args.model,
         "engine": "faster-whisper",
+        "compute_type": args.compute_type,
+        "device": args.device,
         "fallback": args.fallback,
         "set": args.set_name,
         "metric": "cer" if language == "ko" else "wer",
@@ -169,6 +199,7 @@ def main() -> None:
         "audio_seconds": round(audio_seconds, 1),
         "wall_seconds": round(wall, 1),
         "audio_seconds_per_second": round(audio_seconds / wall, 1),
+        **batch_seconds_summary(utterance_seconds),
         "limit": args.limit,
         "commit": commit,
         "measured_at": datetime.now(UTC).isoformat(timespec="seconds"),

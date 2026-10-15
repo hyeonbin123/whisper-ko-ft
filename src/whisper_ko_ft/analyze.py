@@ -26,6 +26,11 @@
 스모크 실행의 스텝 기록과 GPU 메모리 표본을 관문에 비춰 읽고, `pick10`은 zeroth-val500의 맞춘 CER로
 체크포인트를 고르고, `verdict10`은 N에 대한 규칙을 적용한다.
 
+11단계(QN 어댑터를 줄여 합치기): `gate11`은 스케일 1.0과 0으로 합친 실행이 기록된 파일과 발화 단위로 같은지
+보고, 판정은 10단계와 같은 `verdict10`이다. `blocks`는 비교 하나의 블록 단위 구간을 찍는다(보고만).
+12단계(N을 CTranslate2 int8_float16으로): `verdict12`는 정확도 조건과 속도 파일(scripts/speed.py의
+speed.json)의 메모리·지연 조건을 적용한다.
+
 민감도 분석(2026-10-15): `robust`는 2~10단계의 판정·선택에 쓴 validation 구간 25개를 화자(Zeroth)·문장(FLEURS)
 단위 부트스트랩으로 다시 계산해, 블록 단위에서도 조건이 기록과 같은지 찍는다. 판정은 바꾸지 않는다.
 """
@@ -108,6 +113,12 @@ STAGE10_MAX_GPU_MB = 10_752  # 10.5 GiB(nvidia-smi가 세는 MiB 단위)
 STAGE10_MAX_ALLOCATED_MB = 7_168  # 7 GiB
 STAGE10_HOURS = 8.0
 STAGE10_STEPS, STAGE10_FEWER_STEPS = 1_500, 1_000
+# 12단계 판정(docs/experiments.md 12단계): 정확도는 Zeroth 맞춘 CER에서 int8 − fp16 상한 ≤ +0.10%p(8단계의
+# '정확도를 잃지 않는다'와 같은 값), 서빙 이득은 nvidia-smi 증가가 20% 넘게 작거나 한 발화 지연 중앙값이 두 번
+# 모두 5% 넘게 짧은 것.
+STAGE12_MAX_INCREASE = 0.001
+STAGE12_MEMORY_CUT = 0.20
+STAGE12_LATENCY_CUT = 0.05
 # 10단계 판정: 조건 1은 Zeroth 맞춘 CER에서 QN − N의 짝지은 95% 구간 상한 < +0.10%p. 망각 보고 줄은 FLEURS
 # 한국어에서 QN − 학습 전 Qwen 상한 ≤ +1.0%p(판정은 바꾸지 않는 보고용).
 # _DIGIT: 정답에 아라비아 숫자가 있는지(FLEURS를 숫자 유무로 나눌 때).
@@ -963,6 +974,138 @@ def verdict10(candidate: str, n: str, untrained: str, others: list[str]) -> str:
     return label
 
 
+# --- 11단계: QN 어댑터를 줄여 합치기 (규칙 2026-10-15) ---
+
+
+# gate11 명령(11단계 관문): 스케일을 정해 합친 실행(--out 파일)이 기록된 파일과 발화 단위로 같은지 본다. (a)는
+# 스케일 1.0을 10단계 체크포인트 고르기 파일(val-500 440발화)과, (b)는 스케일 0을 9단계 fp16 점검 파일(앞
+# 100발화)과 비교한다. 정밀도·묶음·limit과 발화 순서가 같아야 비교하고, 가설이 하나라도 다르면 실패다. 새
+# 파일에는 어댑터와 스케일이 있어야 한다(합치기 경로를 시험하는 관문이다).
+def gate11(path: str, recorded: str) -> bool:
+    """11단계 관문: 스케일을 정해 합친 실행이 기록된 실행과 같은 것을 디코딩하는지."""
+    (summary, rows), (base_summary, base_rows) = _check_rows(path), _check_rows(recorded)
+    if not summary.get("adapter") or not summary.get("adapter_scale"):
+        raise SystemExit("gate11 needs a run merged with an adapter at a given scale")
+    for key in ("precision", "set", "limit"):
+        if summary.get(key) != base_summary.get(key):
+            raise SystemExit(f"the two runs differ in {key}: {summary.get(key)} and {base_summary.get(key)}")
+    if list(rows) != list(base_rows):
+        raise SystemExit("the two runs did not decode the same utterances in the same order")
+    differ = [i for i in rows if rows[i]["hypothesis"] != base_rows[i]["hypothesis"]]
+    ids = [i for i, row in base_rows.items() if row["length"]]
+    edits, lengths = arrays(rows, ids)
+    base_edits, _ = arrays(base_rows, ids)
+    shown = f" ({', '.join(differ[:5])})" if differ else ""
+    print(
+        f"{len(rows)} utterances: {summary['adapter']} at {summary['adapter_scale']}"
+        f" {error_rate(edits, lengths) * 100:.2f}%, recorded {error_rate(base_edits, lengths) * 100:.2f}%"
+        f"; hypotheses that differ {len(differ)}{shown}"
+    )
+    print(f"판정: {'통과 (발화 단위로 같다)' if not differ else '실패'}")
+    return not differ
+
+
+# blocks 명령: 비교 하나의 차이, 발화 단위 구간, 블록(Zeroth 화자, FLEURS 문장) 단위 구간과 블록 하나 빼기
+# 범위를 찍는다. 11단계 판정 줄에 함께 보고하는 것이고 판정에는 쓰지 않는다(2026-10-15 추가 분석과 같은
+# 방법).
+def blocks(set_name: str, candidate: str, baseline: str, scoring: str | None, without_digits: bool) -> dict:
+    """비교 하나의 블록 단위 구간(보고만)."""
+    result = compare(
+        set_name, candidate, baseline, without_digits=without_digits, scoring=scoring, with_blocks=True
+    )
+    left_out = result["leave_one_out"]
+    low, high = min(left_out.values()), max(left_out.values())
+    print(
+        f"{set_name} {candidate} - {baseline}: {result['delta'] * 100:+.2f}%p"
+        f" utterance {_points(result['delta_interval'])} block {_points(result['block_interval'])}"
+        f" ({result['blocks']} blocks), leave one out {low * 100:+.2f} .. {high * 100:+.2f}"
+    )
+    return result
+
+
+# --- 12단계: N을 CTranslate2 int8_float16으로 (규칙 2026-10-15) ---
+
+
+# scripts/speed.py가 쓴 speed.json에서 라벨 → 실행 기록.
+def _speed_runs(path: str) -> dict[str, dict]:
+    with open(path, encoding="utf-8") as file:
+        data = json.load(file)
+    if data.get("preset") != "ct2-int8":
+        raise SystemExit(f"{path}: not a ct2-int8 run of scripts/speed.py")
+    return {run["label"]: run for run in data["runs"]}
+
+
+# 두 번 잰 값의 평균과, 두 번이 10% 넘게 다른지(규칙: 다르면 적는다).
+def _two_rounds(values: list[float]) -> tuple[float, bool]:
+    mean = sum(values) / len(values)
+    return mean, (max(values) - min(values)) / mean > 0.10 if mean else False
+
+
+# verdict12 명령(12단계 판정): 조건 1은 Zeroth 맞춘 CER에서 int8 − fp16(기록) 상한 ≤ +0.10%p, 조건 2는
+# 속도 파일에서 nvidia-smi 증가(두 번 평균)가 20% 넘게 작거나, 한 발화 지연 중앙값이 두 번 모두 5% 넘게 짧은
+# 것. 함께 보고: 원래 CER, FLEURS 한국어(새로 잰 fp16과 int8), 되풀이, 가설이 다른 발화, Transformers 배치
+# 1과의 배속 비율, 환경 확인(속도 실행의 fp16 val-500 오류율이 기록과 같은지), 쉬는 상태였는지.
+def verdict12(speed_path: str, candidate: str = "turbo-n-ct2-int8", baseline: str = "turbo-n-ct2") -> str:
+    """12단계: int8_float16이 정확도를 지키면서 메모리나 지연을 줄이는지."""
+    zeroth = compare("zeroth-val", candidate, baseline, harmonized=True)
+    show(f"zeroth-val harmonized {candidate} vs {baseline}", zeroth)
+    print("reported, no verdict:")
+    show("zeroth-val original CER", compare("zeroth-val", candidate, baseline))
+    show("fleurs-ko-val", compare("fleurs-ko-val", candidate, baseline))
+    for set_name, scoring in (("zeroth-val", "harmonized"), ("fleurs-ko-val", None)):
+        base_rows, cand_rows = load_rows(baseline, set_name), load_rows(candidate, set_name)
+        differ = sum(cand_rows[i]["hypothesis"] != base_rows[i]["hypothesis"] for i in base_rows)
+        print(f"{set_name}: hypotheses that differ {differ} of {len(base_rows)}")
+        loops(set_name, [baseline, candidate], scoring=scoring)
+        for report in (baseline, candidate):
+            summary = _summary(report, set_name)
+            counts = [summary.get(k) for k in ("compute_type", "empty_hypotheses", "decoded_again")]
+            print(f"  {report}: compute type, empty hypotheses, decoded again {counts}")
+
+    runs = _speed_runs(speed_path)
+    rounds = (1, 2)
+    memory, latency, speed = {}, {}, {}
+    for name in ("hf-b1", "ct2-fp16", "ct2-int8"):
+        picked = [runs[f"{name}-{n}"] for n in rounds]
+        speed[name] = _two_rounds([run["summary"]["audio_seconds_per_second"] for run in picked])
+        memory[name] = _two_rounds([run["gpu_memory_added_mb"] for run in picked])
+        latency[name] = [run["summary"]["batch_seconds_median"] for run in picked]
+        print(
+            f"{name}: speed {speed[name][0]:.1f}x, nvidia-smi +{memory[name][0]:.0f} MiB, latency median"
+            f" {latency[name]} s, gpu util {[run['gpu_util_avg_during'] for run in picked]}%"
+            f", cpu {[run.get('cpu_percent_avg_during') for run in picked]}%"
+            + (" (rounds differ by more than 10%)" if speed[name][1] or memory[name][1] else "")
+        )
+    print(f"ct2-fp16 / hf-b1 speed ratio {speed['ct2-fp16'][0] / speed['hf-b1'][0]:.2f}")
+    recorded = _summary(baseline, "zeroth-val500")["error_rate"]
+    measured = [runs[f"ct2-fp16-{n}"]["summary"]["error_rate"] for n in rounds]
+    print(f"environment check: ct2-fp16 val-500 error rate {measured}, recorded {recorded}")
+    with open(speed_path, encoding="utf-8") as file:
+        print(f"idle reached before the runs: {json.load(file).get('idle_reached')}")
+
+    accurate = zeroth["delta_interval"][1] <= STAGE12_MAX_INCREASE
+    smaller = memory["ct2-int8"][0] < (1 - STAGE12_MEMORY_CUT) * memory["ct2-fp16"][0]
+    faster = all(
+        latency["ct2-int8"][n] < (1 - STAGE12_LATENCY_CUT) * latency["ct2-fp16"][n]
+        for n in range(len(rounds))
+    )
+    if not accurate:
+        label = "정확도를 잃는다 (float16 유지)"
+    elif smaller or faster:
+        label = "int8_float16을 서빙 기본으로 권한다"
+    else:
+        label = "정확도는 같지만 이득이 없다 (float16 유지)"
+    limit = f"+{STAGE12_MAX_INCREASE * 100:.2f}%p"
+    print(f"1. zeroth-val 맞춘 CER 상한 {limit} 이하: {'만족' if accurate else '불만족'}")
+    print(
+        f"2. 메모리 {STAGE12_MEMORY_CUT:.0%} 넘게 감소 {'예' if smaller else '아니오'}"
+        f", 지연 중앙값 두 번 모두 {STAGE12_LATENCY_CUT:.0%} 넘게 감소 {'예' if faster else '아니오'}"
+        f": {'만족' if smaller or faster else '불만족'}"
+    )
+    print(f"판정: {label}")
+    return label
+
+
 # --- 민감도 분석: 화자·문장 단위 부트스트랩 (규칙 2026-10-15, docs/experiments.md '추가 분석') ---
 
 
@@ -1131,7 +1274,7 @@ def robust() -> list[dict]:
 
 # 명령줄 진입점. 하위 명령마다 인자를 정하고 해당 함수를 부른다. 명령과 단계: digits·table·loops(공통),
 # verdict(2·3단계), verdict6(6단계), changes·verdict8·itn8(8단계), gate9·verdict9(9단계),
-# gate10·smoke10·pick10·verdict10(10단계), robust(민감도 분석).
+# gate10·smoke10·pick10·verdict10(10단계), gate11·blocks(11단계), verdict12(12단계), robust(민감도 분석).
 def main() -> None:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1199,6 +1342,19 @@ def main() -> None:
     commands.add_parser(
         "robust", help="기록된 판정의 구간을 화자·문장 단위 부트스트랩으로 다시 본다(민감도 분석)"
     )
+    gate_s = commands.add_parser("gate11", help="11단계 관문: 스케일을 정해 합친 실행이 기록과 같은지")
+    gate_s.add_argument("--file", required=True, help="스케일을 정해 합친 실행의 raw 리포트 파일(--out)")
+    gate_s.add_argument("--recorded", required=True, help="비교할 기록 파일(10단계 고르기 또는 9단계 점검)")
+    blk = commands.add_parser("blocks", help="비교 하나의 블록 단위 구간(보고만)")
+    blk.add_argument("--set", required=True, dest="set_name")
+    blk.add_argument("--candidate", required=True)
+    blk.add_argument("--baseline", required=True)
+    blk.add_argument("--scoring", choices=list(SCORINGS))
+    blk.add_argument("--without-digits", action="store_true", help="Zeroth의 숫자 발화를 뺀다")
+    ver12 = commands.add_parser("verdict12", help="12단계 판정: CTranslate2 int8_float16")
+    ver12.add_argument("--speed", required=True, help="scripts/speed.py --preset ct2-int8이 쓴 speed.json")
+    ver12.add_argument("--candidate", default="turbo-n-ct2-int8")
+    ver12.add_argument("--baseline", default="turbo-n-ct2")
     args = parser.parse_args()
 
     if args.command == "digits":
@@ -1229,6 +1385,12 @@ def main() -> None:
         verdict10(args.candidate, args.n, args.untrained, args.others)
     elif args.command == "robust":
         robust()
+    elif args.command == "gate11":
+        gate11(args.file, args.recorded)
+    elif args.command == "blocks":
+        blocks(args.set_name, args.candidate, args.baseline, args.scoring, args.without_digits)
+    elif args.command == "verdict12":
+        verdict12(args.speed, args.candidate, args.baseline)
     else:
         table(
             args.set_name, args.reports, args.baseline, not args.no_digit_split, args.harmonized, args.scoring
