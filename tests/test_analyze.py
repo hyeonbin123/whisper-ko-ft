@@ -722,3 +722,48 @@ def test_verdict10_on_reports(reports, capsys, zeroth_candidate, fleurs_candidat
     out = capsys.readouterr().out
     assert f"망각 상한 +1.0%p {forgetting}" in out
     assert "zeroth-val@telephone" in out and "cand-fixed" in out and "fleurs-en-val" in out
+
+
+# --- 민감도 분석: 화자·문장 단위 부트스트랩 (robust) ---
+
+
+# 블록 이름: Zeroth는 화자(ID의 첫 '_' 앞), FLEURS는 문장(ID의 '#' 앞). 그 밖의 묶음은 규칙이 없어 거부한다.
+def test_blocks_are_speakers_for_zeroth_and_sentences_for_fleurs():
+    assert analyze.block_of("zeroth-val", "152_003_1752") == "152"
+    assert analyze.block_of("zeroth-val@telephone", "152_003_1752") == "152"
+    assert analyze.block_of("fleurs-ko-val", "1563#2") == analyze.block_of("fleurs-ko-val", "1563") == "1563"
+    with pytest.raises(ValueError):
+        analyze.block_of("other", "1")
+
+
+# compare에 with_blocks를 주면 같은 발화에서 블록 단위 구간과 하나 빼기 값이 붙고, 기본 결과는 그대로다.
+def test_compare_with_blocks_adds_block_results_and_keeps_the_rest(reports):
+    ids = [f"{s}_003_{n:04d}" for s in ("101", "102", "103") for n in range(4)]
+    cand = [
+        {"id": i, "edits": 1 + (n % 3 == 0), "length": 10, "reference": "문장"} for n, i in enumerate(ids)
+    ]
+    base = [{"id": i, "edits": 1, "length": 10, "reference": "문장"} for i in ids]
+    write_report(reports, "c", "zeroth-val", cand)
+    write_report(reports, "b", "zeroth-val", base)
+    plain = analyze.compare("zeroth-val", "c", "b")
+    blocked = analyze.compare("zeroth-val", "c", "b", with_blocks=True)
+    assert {k: blocked[k] for k in plain} == plain
+    assert blocked["blocks"] == 3 and set(blocked["leave_one_out"]) == {"101", "102", "103"}
+
+
+# 조건 이름이 기록된 규칙의 문장대로 판단하는지(경계값 포함).
+def test_robust_conditions_follow_the_recorded_rules():
+    conditions = analyze.ROBUST_CONDITIONS
+    assert conditions["contains 0"](-0.001, 0.0) and not conditions["contains 0"](0.0001, 0.002)
+    assert conditions["excludes 0"](-0.005, -0.001) and not conditions["excludes 0"](-0.001, 0.0)
+    assert conditions["upper <= +0.1%p"](-0.01, 0.001) and not conditions["upper <= +0.1%p"](0.0, 0.0011)
+    assert conditions["upper < +0.10%p"](-0.01, 0.0009) and not conditions["upper < +0.10%p"](0.0, 0.001)
+    assert conditions["upper <= +1.0%p"](0.0, 0.010) and not conditions["upper <= +1.0%p"](0.0, 0.0101)
+    assert conditions["verdict9"](-0.01, -0.001) and not conditions["verdict9"](-0.01, 0.0)
+
+
+# 규칙의 비교 목록: 번호가 1~25로 빠짐없이 한 번씩, 조건 이름은 모두 정의되어 있다.
+def test_robust_comparisons_cover_the_registered_list():
+    numbers = [spec[0] for spec in analyze.ROBUST_COMPARISONS]
+    assert numbers == list(range(1, 26))
+    assert all(spec[6] in analyze.ROBUST_CONDITIONS for spec in analyze.ROBUST_COMPARISONS)

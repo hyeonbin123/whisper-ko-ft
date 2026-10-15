@@ -1,7 +1,9 @@
-"""오류율과 발화 단위 부트스트랩 구간(규칙은 docs/experiments.md "지표")."""
+"""오류율과 발화 단위 부트스트랩 구간(규칙은 docs/experiments.md "지표"), 민감도 분석용 블록 단위 구간."""
 
 # [파일 역할] 채점의 핵심. 발화 하나의 편집 수(score), 묶음 전체의 오류율(error_rate), 발화 단위 부트스트랩
-# 신뢰구간(interval), 두 모델의 짝지은 차이 구간(difference_interval)을 계산한다.
+# 신뢰구간(interval), 두 모델의 짝지은 차이 구간(difference_interval)을 계산한다. 2026-10-15에 민감도
+# 분석용으로 블록(화자·문장) 단위 짝지은 구간(block_difference_interval)과 블록 하나 빼기
+# (leave_one_block_out)를 더했다. 기존 함수와 그 결과는 바뀌지 않는다.
 # [설계 이유] 오류율은 발화별 오류율의 평균이 아니라 '편집 수 합 ÷ 정답 길이 합'(묶음 전체
 # 기준)이다(docs/experiments.md 공통 규칙 '지표'). 그래서 짧은 발화 하나의 오류율이 긴 발화와 같은 무게를 갖지
 # 않는다. 리포트에는 발화별 edits와 length를 남기므로, 숫자 발화 제외 같은 어떤 부분집합의 오류율과 구간도
@@ -100,3 +102,53 @@ def difference_interval(edits_a: np.ndarray, edits_b: np.ndarray, lengths: np.nd
     deltas = edits_a[picks].sum(axis=1) / totals - edits_b[picks].sum(axis=1) / totals
     low, high = np.percentile(deltas, [2.5, 97.5])
     return float(low), float(high)
+
+
+# 발화별 배열을 블록(화자나 문장)별 합으로 접는다. 블록은 이름 순으로 번호를 매긴다(docs/experiments.md
+# '추가 분석: 화자·문장 단위 부트스트랩'의 규칙). 돌려주는 것: 블록 이름 목록과, 블록마다의 a 편집 합·b 편집
+# 합·정답 길이 합 배열. 블록 단위 재표집에서는 블록 안 발화가 늘 함께 뽑히므로 합만 있으면 된다.
+def _block_sums(
+    edits_a: np.ndarray, edits_b: np.ndarray, lengths: np.ndarray, blocks: list[str]
+) -> tuple[list[str], np.ndarray, np.ndarray, np.ndarray]:
+    if not len(blocks) == len(lengths) == len(edits_a) == len(edits_b):
+        raise ValueError("edits, lengths and blocks must describe the same utterances")
+    names = sorted(set(blocks))
+    position = {name: n for n, name in enumerate(names)}
+    index = np.array([position[block] for block in blocks])
+    sums = [
+        np.bincount(index, weights=values, minlength=len(names)) for values in (edits_a, edits_b, lengths)
+    ]
+    return names, *sums
+
+
+# 블록 단위 짝지은 부트스트랩: rate(a) − rate(b)의 95% 구간. 발화가 아니라 블록(Zeroth는 화자, FLEURS는
+# 문장)을 복원 추출하고, 뽑힌 블록의 발화를 모두(같은 블록이 두 번 뽑히면 두 번) 넣어 '편집 합 ÷ 길이
+# 합'의 차이를 구한다. 두 모델은 같은 블록을 함께 뽑는다.
+# 왜 따로 두었나: 같은 화자·같은 문장의 발화는 서로 닮아, 발화를 독립으로 보고 뽑는 difference_interval의
+# 구간이 실제보다 좁을 수 있다(arXiv 1912.09508, Liu & Peng). 기록된 판정을 이 구간으로 다시 보는 민감도
+# 분석에 쓴다. 기존 구간과 판정은 바꾸지 않는다.
+# 재현: 블록 K개를 이름 순으로 번호 매기고 default_rng(0).integers(0, K, size=(1,000, K))로 뽑는다. 블록
+# 하나에 발화 하나씩이고 발화가 블록 이름 순서대로 놓여 있으면 difference_interval과 같은 값이
+# 나온다(테스트로 고정).
+# 주의: 블록이 10개뿐이면(Zeroth 화자) 백분위 구간이 거칠고 불안정하다. leave_one_block_out을 함께 본다.
+def block_difference_interval(
+    edits_a: np.ndarray, edits_b: np.ndarray, lengths: np.ndarray, blocks: list[str]
+) -> tuple[float, float]:
+    """같은 발화들에서 rate(a) - rate(b)의 95% 구간(블록 단위 짝지은 재표집)."""
+    names, sum_a, sum_b, sum_length = _block_sums(edits_a, edits_b, lengths, blocks)
+    picks = _resample_indices(len(names))
+    totals = sum_length[picks].sum(axis=1)
+    deltas = sum_a[picks].sum(axis=1) / totals - sum_b[picks].sum(axis=1) / totals
+    low, high = np.percentile(deltas, [2.5, 97.5])
+    return float(low), float(high)
+
+
+# 블록 하나씩 빼고 계산한 rate(a) − rate(b)(점 추정). 블록 이름 → 그 블록을 뺀 차이. 블록이 적은 Zeroth(화자
+# 10명)에서 블록 부트스트랩 구간이 거친 것을 보완하려고, 어느 화자 하나가 차이를 만드는지 보여 준다.
+def leave_one_block_out(
+    edits_a: np.ndarray, edits_b: np.ndarray, lengths: np.ndarray, blocks: list[str]
+) -> dict[str, float]:
+    """블록마다, 그 블록의 발화를 모두 뺀 나머지에서 잰 rate(a) - rate(b)."""
+    names, sum_a, sum_b, sum_length = _block_sums(edits_a, edits_b, lengths, blocks)
+    rest_a, rest_b, rest_length = sum_a.sum() - sum_a, sum_b.sum() - sum_b, sum_length.sum() - sum_length
+    return {name: float((rest_a[n] - rest_b[n]) / rest_length[n]) for n, name in enumerate(names)}

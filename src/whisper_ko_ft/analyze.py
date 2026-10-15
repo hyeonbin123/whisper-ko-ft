@@ -25,6 +25,9 @@
 10단계(Qwen3-ASR에 LoRA): `gate10`은 새 어댑터(B=0)가 9단계 fp16 점검을 재현하는지 확인하고, `smoke10`은
 스모크 실행의 스텝 기록과 GPU 메모리 표본을 관문에 비춰 읽고, `pick10`은 zeroth-val500의 맞춘 CER로
 체크포인트를 고르고, `verdict10`은 N에 대한 규칙을 적용한다.
+
+민감도 분석(2026-10-15): `robust`는 2~10단계의 판정·선택에 쓴 validation 구간 25개를 화자(Zeroth)·문장(FLEURS)
+단위 부트스트랩으로 다시 계산해, 블록 단위에서도 조건이 기록과 같은지 찍는다. 판정은 바꾸지 않는다.
 """
 
 # [파일 역할] 커밋된 리포트(reports/)만 읽어 표와 판정을 내는 분석 도구. 모델을 다시 돌리지 않는다.
@@ -38,6 +41,7 @@
 # - 공통 도구: load_rows(리포트 읽기와 검사), compare(두 리포트의 짝지은 차이와 구간), table(표), loops(되풀이
 #   발화), changes(재시도가 바꾼 것).
 # - 단계별 판정: verdict(2·3단계), verdict6, verdict8·itn8, gate9·verdict9, gate10·smoke10·pick10·verdict10.
+# - 민감도 분석: robust(기록된 판정 구간을 화자·문장 단위 부트스트랩으로 다시 계산, 2026-10-15).
 # [연결] metrics(채점·구간), itn·latin(표기 변환), paths.REPORTS를 쓴다. tests/test_recorded_reports.py가
 # load_rows·arrays로 커밋된 리포트의 맞춘 CER 총합을 고정한다.
 
@@ -57,7 +61,14 @@ import numpy as np
 # paths.REPORTS: 리포트 폴더.
 from whisper_ko_ft.itn import harmonize, to_digits
 from whisper_ko_ft.latin import letters_to_latin
-from whisper_ko_ft.metrics import difference_interval, error_rate, interval, score
+from whisper_ko_ft.metrics import (
+    block_difference_interval,
+    difference_interval,
+    error_rate,
+    interval,
+    leave_one_block_out,
+    score,
+)
 from whisper_ko_ft.paths import REPORTS
 
 # BASE_MODELS: '숫자 발화' 목록을 정할 때 보는 기본 모델 두 개(1단계 기준선).
@@ -267,6 +278,18 @@ def table(
             print(line)
 
 
+# 민감도 분석(robust)의 블록 이름: Zeroth는 화자(발화 ID의 첫 '_' 앞, 리포트의 speaker 칸과 같다.
+# CTranslate2 리포트에는 speaker 칸이 없어 ID로 정한다), FLEURS는 문장(ID의 '#' 앞. 같은 문장의 두 번째·
+# 세 번째 녹음은 '1563#2'처럼 적혀 있다). 규칙은 docs/experiments.md '추가 분석: 화자·문장 단위 부트스트랩'.
+def block_of(set_name: str, utterance_id: str) -> str:
+    """발화 ID가 속한 블록: Zeroth는 화자, FLEURS는 문장."""
+    if set_name.startswith("zeroth"):
+        return utterance_id.split("_", 1)[0]
+    if set_name.startswith("fleurs"):
+        return utterance_id.split("#", 1)[0]
+    raise ValueError(f"{set_name}: no block rule for this set")
+
+
 # 판정 함수들이 공통으로 쓰는 비교. 두 리포트의 공통 발화에서 기준선·후보 오류율, 차이, 상대 변화, 짝지은
 # 부트스트랩 95% 구간을 돌려준다.
 # without_digits: Zeroth의 숫자 발화 제외. reference_digits: 정답에 숫자가 있는(True)/없는(False)
@@ -281,13 +304,15 @@ def compare(
     harmonized: bool = False,
     scoring: str | None = None,
     baseline_scoring: str | None = "same",
+    with_blocks: bool = False,
 ) -> dict:
     """두 리포트의 공통 발화에서 잰 오류율과, 그 차이의 짝지은 구간.
 
     `without_digits`는 Zeroth 묶음의 확정된 숫자 발화를 뺀다. `reference_digits`는 정답에 아라비아 숫자가
     있는(True) 또는 없는(False) 발화만 남긴다. FLEURS처럼 정답이 숫자를 아라비아 숫자로 적는 묶음용이다.
     `baseline_scoring`은 기준선을 후보와 다른 방식으로 채점한다(8단계: 한 리포트를 후처리한 것과 원래 것의
-    비교). 두 채점 모두 정답 길이를 같게 남겨야 한다.
+    비교). 두 채점 모두 정답 길이를 같게 남겨야 한다. `with_blocks`는 같은 발화에서 블록(화자·문장) 단위
+    구간과 블록 하나 빼기 값을 더한다(민감도 분석, `robust`).
     """
     scoring = "harmonized" if harmonized else scoring
     cand_rows = load_rows(candidate, set_name, scoring=scoring)
@@ -312,7 +337,7 @@ def compare(
             f"{set_name}: the two scorings give different reference lengths; compare rates instead"
         )
     base, cand = error_rate(base_edits, lengths), error_rate(cand_edits, lengths)
-    return {
+    result = {
         "utterances": len(ids),
         "baseline": base,
         "candidate": cand,
@@ -320,6 +345,14 @@ def compare(
         "relative": (cand - base) / base if base else float("nan"),
         "delta_interval": difference_interval(cand_edits, base_edits, lengths),
     }
+    # 민감도 분석(robust)일 때만: 같은 발화·같은 채점에서 블록 단위 구간과 블록 하나 빼기. 기본값에서는 결과가
+    # 예전과 똑같다.
+    if with_blocks:
+        blocks = [block_of(set_name, i) for i in ids]
+        result["blocks"] = len(set(blocks))
+        result["block_interval"] = block_difference_interval(cand_edits, base_edits, lengths, blocks)
+        result["leave_one_out"] = leave_one_block_out(cand_edits, base_edits, lengths, blocks)
+    return result
 
 
 # verdict 명령(2·3단계 판정): 후보를 기준선과 Zeroth validation(전체, 숫자 발화 제외)과 FLEURS 한국어
@@ -930,9 +963,175 @@ def verdict10(candidate: str, n: str, untrained: str, others: list[str]) -> str:
     return label
 
 
+# --- 민감도 분석: 화자·문장 단위 부트스트랩 (규칙 2026-10-15, docs/experiments.md '추가 분석') ---
+
+
+# 조건 이름 → (낮은 끝, 높은 끝)을 받아 조건이 성립하는지. 기록된 규칙의 문장 그대로다.
+ROBUST_CONDITIONS = {
+    "contains 0": lambda low, high: low <= 0 <= high,
+    "excludes 0": lambda low, high: not low <= 0 <= high,
+    "upper < 0": lambda low, high: high < 0,
+    "upper <= +0.1%p": lambda low, high: high <= STAGE8_MAX_INCREASE,
+    "upper < +0.10%p": lambda low, high: high < STAGE10_ZEROTH_MAX_ABOVE_N,
+    "upper <= +1.0%p": lambda low, high: high <= STAGE10_FORGETTING_MAX,
+    "verdict9": lambda low, high: verdict9_label(low, high) == "다른 도메인에서 더 나은 기준 모델이다",
+}
+# 구간이 판정·선택 조건에 들어간 validation 비교 전부(규칙의 표와 같은 순서·번호). 칸: 번호, 단계,
+# 후보, 기준, 묶음, compare에 넘길 인자, 조건 이름, 기록된 조건 결과. 5단계 리포트는 같은 묶음의 원래 CER이다.
+# 8단계 조건 2는 두 모델 × 두 후보 × 세 비교 = 12개, 출력 숫자 변환은 같은 리포트를 후처리 전후로 비교한다.
+ROBUST_COMPARISONS = [
+    (1, "2단계 선택", "small-b", "small-a", "zeroth-val", {}, "contains 0", True),
+    (2, "3단계 선택", "turbo-l2", "turbo-l1", "zeroth-val", {}, "excludes 0", True),
+    (
+        3,
+        "3단계 조건 1",
+        "turbo-l2",
+        "whisper-large-v3-turbo",
+        "zeroth-val",
+        {"without_digits": True},
+        "upper < 0",
+        True,
+    ),
+    (4, "4단계 조건 1", "turbo-t", "turbo-l2", "zeroth-val@telephone", {}, "upper < 0", True),
+    (
+        5,
+        "4단계 조건 1",
+        "turbo-t",
+        "turbo-l2",
+        "zeroth-val@telephone",
+        {"without_digits": True},
+        "upper < 0",
+        True,
+    ),
+    (6, "5단계", "small-a-ct2-fallback", "small-a-ct2", "zeroth-val", {}, "upper <= +0.1%p", True),
+    (7, "5단계", "small-b-ct2-fallback", "small-b-ct2", "zeroth-val", {}, "upper <= +0.1%p", True),
+    (8, "7단계 조건 1", "turbo-n2", "turbo-n", "zeroth-val", {"scoring": "harmonized"}, "upper < 0", False),
+    *[
+        (
+            9 + 6 * m + 3 * a + k,
+            "8단계 조건 2",
+            f"{model}-{arm}",
+            model,
+            set_name,
+            kwargs,
+            "upper <= +0.1%p",
+            True,
+        )
+        for m, model in enumerate(("turbo-n", "turbo-n2"))
+        for a, arm in enumerate(("d1a", "d1"))
+        for k, (set_name, kwargs) in enumerate(
+            (
+                ("zeroth-val", {"scoring": "harmonized"}),
+                ("zeroth-val", {"scoring": "harmonized", "without_digits": True}),
+                ("fleurs-ko-val", {}),
+            )
+        )
+    ],
+    (
+        21,
+        "8단계 출력 숫자 변환 조건 1",
+        "turbo-n",
+        "turbo-n",
+        "fleurs-ko-val",
+        {"scoring": "itn", "baseline_scoring": None},
+        "upper < 0",
+        True,
+    ),
+    (22, "9단계", "qwen3-asr-1.7b", "whisper-large-v3-turbo", "fleurs-ko-val", {}, "verdict9", True),
+    (
+        23,
+        "10단계 조건 1",
+        "qwen3-asr-1.7b-qn",
+        "turbo-n",
+        "zeroth-val",
+        {"scoring": "harmonized"},
+        "upper < +0.10%p",
+        True,
+    ),
+    (24, "10단계 조건 2", "qwen3-asr-1.7b-qn", "turbo-n", "fleurs-ko-val", {}, "upper < 0", False),
+    (
+        25,
+        "10단계 망각 보고 줄",
+        "qwen3-asr-1.7b-qn",
+        "qwen3-asr-1.7b",
+        "fleurs-ko-val",
+        {},
+        "upper <= +1.0%p",
+        False,
+    ),
+]
+
+
+# 구간 하나를 %p로 찍는 모양.
+def _points(pair: tuple[float, float]) -> str:
+    return f"[{pair[0] * 100:+.2f}, {pair[1] * 100:+.2f}]"
+
+
+# 비교 하나의 민감도 분석 결과. 기록된 조건 결과(recorded)는 발화 단위 구간으로 다시 계산한 것과도 맞춰
+# 본다(다르면 리포트나 코드가 기록과 달라진 것이라 멈춘다). 블록 단위 조건이 기록과 다르면 표시한다:
+# 기록이 만족인데 블록 단위에서 만족하지 않으면 '가리지 못함'.
+def robust_row(number, stage, candidate, baseline, set_name, kwargs, condition, recorded) -> dict:
+    result = compare(set_name, candidate, baseline, with_blocks=True, **kwargs)
+    holds = ROBUST_CONDITIONS[condition]
+    utterance_ok = holds(*result["delta_interval"])
+    if utterance_ok != recorded:
+        raise SystemExit(f"{number}: the utterance-level interval no longer gives the recorded result")
+    block_ok = holds(*result["block_interval"])
+    if block_ok == recorded:
+        mark = "같음"
+    elif recorded:
+        mark = "블록 단위에서는 가리지 못함"
+    else:
+        mark = "블록 단위에서는 다름"
+    left_out = result["leave_one_out"]
+    low_block = min(left_out, key=left_out.get)
+    high_block = max(left_out, key=left_out.get)
+    return {
+        **result,
+        "number": number,
+        "stage": stage,
+        "comparison": f"{candidate} - {baseline}",
+        "set": set_name,
+        "kwargs": kwargs,
+        "condition": condition,
+        "recorded": recorded,
+        "block_ok": block_ok,
+        "mark": mark,
+        "leave_one_out_range": (left_out[low_block], low_block, left_out[high_block], high_block),
+    }
+
+
+# robust 명령: 규칙의 비교 25개를 차례로 계산해 한 줄씩 찍는다. 차이(점 추정), 발화 단위 구간, 블록 단위 구간,
+# 블록 수, Zeroth의 화자 하나 빼기 범위(최솟값·최댓값과 그때 뺀 화자), 조건 결과(기록 → 블록 단위).
+# FLEURS는 블록(문장)이 129개라 하나 빼기는 찍지 않는다(규칙). 판정은 바꾸지 않는다.
+def robust() -> list[dict]:
+    """기록된 판정에 쓰인 구간을 화자·문장 단위 부트스트랩으로 다시 계산한다(민감도 분석)."""
+    rows = []
+    for spec in ROBUST_COMPARISONS:
+        row = robust_row(*spec)
+        rows.append(row)
+        options = ", ".join(f"{k}={v}" for k, v in row["kwargs"].items())
+        line = (
+            f"{row['number']:2d} {row['stage']} | {row['comparison']} | {row['set']}"
+            + (f" ({options})" if options else "")
+            + f" | {row['delta'] * 100:+.2f}%p utterance {_points(row['delta_interval'])}"
+            f" block {_points(row['block_interval'])} ({row['blocks']} blocks)"
+        )
+        if row["set"].startswith("zeroth"):
+            low, low_block, high, high_block = row["leave_one_out_range"]
+            line += f" | leave one out {low * 100:+.2f} (-{low_block}) .. {high * 100:+.2f} (-{high_block})"
+        recorded = "만족" if row["recorded"] else "불만족"
+        block = "만족" if row["block_ok"] else "불만족"
+        line += f" | {row['condition']}: {recorded} -> {block} ({row['mark']})"
+        print(line)
+    changed = [row["number"] for row in rows if row["mark"] != "같음"]
+    print(f"블록 단위에서 기록과 다른 조건: {changed if changed else '없음'} (판정은 바꾸지 않는다)")
+    return rows
+
+
 # 명령줄 진입점. 하위 명령마다 인자를 정하고 해당 함수를 부른다. 명령과 단계: digits·table·loops(공통),
 # verdict(2·3단계), verdict6(6단계), changes·verdict8·itn8(8단계), gate9·verdict9(9단계),
-# gate10·smoke10·pick10·verdict10(10단계).
+# gate10·smoke10·pick10·verdict10(10단계), robust(민감도 분석).
 def main() -> None:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -997,6 +1196,9 @@ def main() -> None:
     ver10.add_argument("--n", required=True, help="후보가 대신할 모델")
     ver10.add_argument("--untrained", required=True, help="학습 전 기본 모델")
     ver10.add_argument("--others", nargs="*", default=[])
+    commands.add_parser(
+        "robust", help="기록된 판정의 구간을 화자·문장 단위 부트스트랩으로 다시 본다(민감도 분석)"
+    )
     args = parser.parse_args()
 
     if args.command == "digits":
@@ -1025,6 +1227,8 @@ def main() -> None:
         pick10(args.files)
     elif args.command == "verdict10":
         verdict10(args.candidate, args.n, args.untrained, args.others)
+    elif args.command == "robust":
+        robust()
     else:
         table(
             args.set_name, args.reports, args.baseline, not args.no_digit_split, args.harmonized, args.scoring
