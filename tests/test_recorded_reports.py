@@ -92,6 +92,19 @@ def test_stored_scores_are_reproduced(path):
         ("qwen3-asr-1.7b-qn-steps", "zeroth-val500-step500", 552, 18321),  # 3.01%
         ("qwen3-asr-1.7b-qn-steps", "zeroth-val500-step1000", 281, 18321),  # 1.53%
         ("qwen3-asr-1.7b-qn-steps", "zeroth-val500-step1500", 213, 18321),  # 1.16%
+        # 2026-10-18, 11단계: QN 갱신량을 줄여 합친 것. 판정 후보 0.5(raw와 fixed), 보고 팔, 관문 (a)(s =
+        # 1.0이 10단계 체크포인트 고르기 파일과 같다)
+        ("qwen3-asr-1.7b-qn-s050", "zeroth-val", 1386, 93621),  # 1.48%
+        ("qwen3-asr-1.7b-qn-s050-fixed", "zeroth-val", 1386, 93621),  # 1.48%
+        ("qwen3-asr-1.7b-qn-s050", "zeroth-test", 433, 19272),  # 2.25%
+        ("qwen3-asr-1.7b-qn-s050-fixed", "zeroth-test", 433, 19272),  # 2.25%
+        ("qwen3-asr-1.7b-qn-s025", "zeroth-val", 2291, 93621),  # 2.45%
+        ("qwen3-asr-1.7b-qn-s075", "zeroth-val", 969, 93621),  # 1.04%
+        ("qwen3-asr-1.7b-qn-lm050", "zeroth-val", 1354, 93621),  # 1.45%
+        ("qwen3-asr-1.7b-qn-step1000", "zeroth-val", 1042, 93621),  # 1.11%
+        ("qwen3-asr-1.7b-qn-scale-gate", "zeroth-val500-s100", 213, 18321),  # 1.16%
+        # 2026-10-18, 12단계: N을 CTranslate2 int8_float16으로(기록된 float16은 위의 turbo-n-ct2 1,203개)
+        ("turbo-n-ct2-int8", "zeroth-val", 1254, 93621),  # 1.34%
     ],
 )
 # analyze.load_rows로 맞춘 채점을 다시 해서 총합이 고정값과 같은지.
