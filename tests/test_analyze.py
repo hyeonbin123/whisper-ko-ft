@@ -4,7 +4,8 @@
 # 조건을 빠뜨린 버그, 커밋 037ad21에서 고침) 결과를 본 뒤 기준이 바뀐 것과 같은 일이 된다. 판정 표의 모든
 # 칸(만족/불만족 조합)과 경계값, 판정하지 않는 경우를 테스트로 고정한다.
 # [구성] 공통(load_rows 검사, 숫자 발화 목록, compare, table) → 2·3단계 verdict → 6단계 맞춘 CER과 verdict6 →
-# 되풀이와 8단계 채점·verdict8·changes·itn8 → 9단계 gate9·verdict9 → 10단계 gate10·pick10·smoke10·verdict10.
+# 되풀이와 8단계 채점·verdict8·changes·itn8 → 9단계 gate9·verdict9 → 10단계 gate10·pick10·smoke10·verdict10 →
+# 민감도 분석(robust) → 11·12단계 → Zeroth 문장 겹침(overlap, 커밋된 파생 파일의 수 고정).
 
 import json
 
@@ -12,6 +13,7 @@ import pytest
 
 from whisper_ko_ft import analyze
 from whisper_ko_ft.metrics import score
+from whisper_ko_ft.paths import REPORTS
 
 
 # 임시 리포트 폴더에 <이름>/<묶음>.json을 쓴다(요약은 비워 둔다).
@@ -858,3 +860,128 @@ def test_verdict12_follows_the_table(reports, tmp_path, int8_edits, int8_speed, 
     )
     speed = speed_file(tmp_path / "speed.json", (2000, (0.40, 0.40)), int8_speed)
     assert analyze.verdict12(speed, "int8", "fp") == label
+
+
+# --- Zeroth 문장 겹침 (overlap) ---
+
+
+# 임시 data/cache/sets에 prepare와 같은 꼴의 묶음 목록을 쓴다. 겹침 셈은 ID·화자·정답만 보므로 오디오 위치는
+# 아무 값이나 둔다. utterances는 (ID, 화자, 정답) 목록이다.
+def write_set(cache, name, language, utterances):
+    folder = cache / "sets"
+    folder.mkdir(parents=True, exist_ok=True)
+    entries = [
+        {"id": i, "speaker": s, "text": t, "store": "s", "offset": 0, "length": 1} for i, s, t in utterances
+    ]
+    (folder / f"{name}.json").write_text(
+        json.dumps({"language": language, "utterances": entries}, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+# analyze.CACHE를 임시 폴더로 바꾸고 학습 묶음과 기본 평가 묶음 다섯 개, 영어 묶음 하나를 쓴다. 학습: 두
+# 화자가 '가나다'를 세 번(한 번은 문장부호만 다름), '라마바'를 한 번 읽음. zeroth-val: '가나다'와 처음 보는
+# 문장.
+@pytest.fixture
+def overlap_sets(tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(analyze, "CACHE", cache)
+    train = [("a_1", "a", "가나다"), ("a_2", "a", "가나다"), ("b_1", "b", "가나다."), ("b_2", "b", "라마바")]
+    write_set(cache, "zeroth-train", "ko", train)
+    write_set(cache, "zeroth-val", "ko", [("v_1", "v", "가나다"), ("v_2", "v", "처음 보는 문장")])
+    write_set(cache, "zeroth-val500", "ko", [("v_1", "v", "가나다")])
+    write_set(cache, "zeroth-test", "ko", [("w_1", "w", "라마바")])
+    write_set(cache, "fleurs-ko-val", "ko", [("1", "", "다른 글")])
+    write_set(cache, "fleurs-ko-test", "ko", [("2", "", "다른 글"), ("2#2", "", "다른 글")])
+    write_set(cache, "fleurs-en-val", "en", [("3", "", "other text")])
+    return cache
+
+
+# overlap은 리포트가 아니라 prepare가 만든 묶음 목록을 읽어 수를 찍고, 파일에 쓸 기록과 같은 dict를 돌려준다.
+# 발화별 낭독 횟수와 학습에 없는 발화는 정규화 기준(문장 키)이다. --write 없이는 아무것도 쓰지 않는다.
+def test_overlap_reads_the_prepared_sets_and_prints_the_counts(reports, overlap_sets, capsys):
+    record = analyze.overlap("zeroth-train", ["zeroth-val", "zeroth-test"])
+    out = capsys.readouterr().out
+
+    assert (record["train"]["raw"]["sentences"], record["train"]["normalized"]["sentences"]) == (3, 2)
+    val = record["sets"]["zeroth-val"]
+    assert (val["raw"]["utterances_in_train"], val["normalized"]["utterances_in_train"]) == (1, 1)
+    assert val["train_reads"] == {"v_1": 3, "v_2": 0} and val["not_in_train"] == ["v_2"]
+    assert record["sets"]["zeroth-test"]["train_reads"] == {"w_1": 1}
+    assert "zeroth-val: 2 utterances" in out and "v_2" in out
+    assert not (reports / "sentence_overlap").exists()
+
+
+# 학습 묶음과 언어가 다른 묶음은 문장 키가 달라 비교하지 않는다.
+def test_overlap_refuses_a_set_in_another_language(reports, overlap_sets):
+    with pytest.raises(SystemExit, match="language"):
+        analyze.overlap("zeroth-train", ["fleurs-en-val"])
+
+
+# --write는 기본 정의(학습 zeroth-train, 묶음 다섯 개)일 때만 reports/sentence_overlap/zeroth.json에 쓴다.
+# 다른 인자로 쓰면 커밋된 파일이 README가 적은 정의와 달라지므로 거부한다. 쓴 파일은 돌려준 기록과 같고 정답
+# 글이 들어 있지 않다(발화 ID와 수만).
+def test_overlap_writes_only_the_default_definition_without_text(reports, overlap_sets):
+    with pytest.raises(SystemExit, match="--write"):
+        analyze.overlap("zeroth-train", ["zeroth-val"], write=True)
+    assert not (reports / "sentence_overlap").exists()
+
+    record = analyze.overlap(write=True)
+    text = (reports / "sentence_overlap" / "zeroth.json").read_text(encoding="utf-8")
+    assert json.loads(text) == record
+    assert list(record["sets"]) == list(analyze.OVERLAP_SETS)
+    assert record["train_set"] == "zeroth-train" and record["per_utterance_key"] == "normalized"
+    assert all(word not in text for word in ("가나다", "라마바", "처음", "다른 글"))
+    fleurs = record["sets"]["fleurs-ko-test"]
+    assert fleurs["speakers"] == 0 and fleurs["normalized"]["repeated_utterances"] == 2
+
+
+# 커밋된 파생 파일 reports/sentence_overlap/zeroth.json의 수를 고정한다. README 한계 절과
+# docs/experiments.md '추가 확인: Zeroth 문장 겹침'이 이 수를 적는다. 데이터나 문장 키가 바뀌어 파일을 다시
+# 쓴 결과가 달라지면 여기서 드러난다. 값은 `analyze overlap --write`(2026-10-24)의 출력이다. 원문 기준과
+# 정규화 기준의 수가 같다.
+OVERLAP_FILE = REPORTS / "sentence_overlap" / "zeroth.json"
+
+
+# 학습 묶음: 20,049발화, 화자 95명, 고유 문장 3,001개(가장 많이 읽힌 문장 18번, 두 번 이상 읽힌 문장 2,977개).
+def test_recorded_sentence_overlap_train():
+    data = json.loads(OVERLAP_FILE.read_text(encoding="utf-8"))
+    assert data["train_set"] == "zeroth-train"
+    assert (data["language"], data["per_utterance_key"]) == ("ko", "normalized")
+    train = data["train"]
+    assert (train["utterances"], train["speakers"]) == (20049, 95)
+    for kind in ("raw", "normalized"):
+        assert (train[kind]["sentences"], train[kind]["max_reads"], train[kind]["repeated_sentences"]) == (
+            3001,
+            18,
+            2977,
+        )
+
+
+# 평가 묶음마다: 발화, 화자와 그중 학습 화자, 고유 문장과 그중 학습에 있는 문장, 문장이 학습에 있는 발화,
+# 학습에 없는 발화 ID. 발화별 낭독 횟수가 요약 수·학습에 없는 발화 목록과 맞는지도 본다.
+@pytest.mark.parametrize(
+    ("set_name", "utterances", "speakers", "sentences", "sentences_in_train", "in_train", "not_in_train"),
+    [
+        ("zeroth-val", 2214, 10, 1642, 1640, 2212, ["152_003_2851", "217_003_0624"]),
+        ("zeroth-val500", 440, 10, 379, 379, 440, []),
+        ("zeroth-test", 457, 10, 423, 422, 456, ["121_003_1564"]),
+        # FLEURS는 화자 칸이 비어 화자 수가 0이다(화자 겹침 확인이 아니다). 학습 문장과 겹치는 것은 없다.
+        ("fleurs-ko-val", 226, 0, 129, 0, 0, None),
+        ("fleurs-ko-test", 382, 0, 270, 0, 0, None),
+    ],
+)
+def test_recorded_sentence_overlap_sets(
+    set_name, utterances, speakers, sentences, sentences_in_train, in_train, not_in_train
+):
+    entry = json.loads(OVERLAP_FILE.read_text(encoding="utf-8"))["sets"][set_name]
+    assert (entry["utterances"], entry["speakers"], entry["speakers_in_train"]) == (utterances, speakers, 0)
+    for kind in ("raw", "normalized"):
+        summary = entry[kind]
+        assert (summary["sentences"], summary["sentences_in_train"]) == (sentences, sentences_in_train)
+        assert summary["utterances_in_train"] == in_train
+    reads = entry["train_reads"]
+    assert len(reads) == utterances
+    assert sum(1 for n in reads.values() if n) == in_train
+    assert entry["not_in_train"] == sorted(i for i, n in reads.items() if not n)
+    if not_in_train is not None:
+        assert entry["not_in_train"] == not_in_train

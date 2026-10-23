@@ -21,9 +21,11 @@ from whisper_ko_ft import analyze
 from whisper_ko_ft.metrics import error_rate, score
 from whisper_ko_ft.paths import REPORTS
 
-# FILES: reports/<이름>/<묶음>.json 전부(숫자 발화 목록 폴더는 리포트가 아니라 뺀다). 리포트가 새로 커밋되면
-# 자동으로 검사 대상이 된다.
-FILES = sorted(p for p in REPORTS.glob("*/*.json") if p.parent.name != "digit_utterances")
+# FILES: reports/<이름>/<묶음>.json 전부. 리포트가 새로 커밋되면 자동으로 검사 대상이 된다. 리포트가 아닌
+# 파생 파일 폴더는 뺀다: 숫자 발화 목록(digit_utterances)과 문장 겹침(sentence_overlap, analyze overlap이 쓰고
+# tests/test_analyze.py가 수를 고정한다). 둘 다 요약(summary)과 발화별 정답·가설이 없다.
+DERIVED = {"digit_utterances", "sentence_overlap"}
+FILES = sorted(p for p in REPORTS.glob("*/*.json") if p.parent.name not in DERIVED)
 
 
 # 리포트를 하나도 못 찾으면 아래 검사가 아무것도 하지 않고 통과하므로, 먼저 있는지 확인한다.

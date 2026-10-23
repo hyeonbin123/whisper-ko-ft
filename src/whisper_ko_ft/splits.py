@@ -1,18 +1,38 @@
-"""Zeroth-Korean train을 화자 기준으로 나눠 validation을 만든다(규칙은 docs/experiments.md "데이터 분리")."""
+"""Zeroth-Korean train을 화자 기준으로 나눠 validation을 만든다(규칙은 docs/experiments.md "데이터 분리").
+
+학습 묶음과 평가 묶음이 같은 문장을 얼마나 함께 갖는지도 센다(`sentence_overlap`, docs/experiments.md
+"추가 확인: Zeroth 문장 겹침"). 화자 기준 분리는 화자만 떼므로 문장은 겹칠 수 있다.
+"""
 
 # [파일 역할] Zeroth-Korean train을 화자 기준으로 나누는 규칙이다. validation으로 뗄 화자 10명과, 학습 중
 # 체크포인트를 고를 작은 묶음(val-500)의 발화를 정한다. prepare.py가 이 두 함수로 zeroth-val, zeroth-val500
-# 목록을 만든다.
+# 목록을 만든다. 그 분리가 화자만 떼고 문장은 떼지 않는다는 점을 숫자로 보이는 문장 겹침 셈(sentence_key,
+# sentence_overlap)도 여기 둔다. analyze overlap이 이 함수로 수를 찍고 reports/sentence_overlap/zeroth.json을
+# 쓴다.
 # [왜 필요한가] Zeroth-Korean에는 validation이 없다. 같은 화자가 학습과 validation에 함께 있으면 validation이
-# 실제보다 쉬워지므로 발화가 아니라 화자 단위로 떼어 낸다(docs/plan.md 데이터).
+# 실제보다 쉬워지므로 발화가 아니라 화자 단위로 떼어 낸다(docs/plan.md 데이터). 그런데 Zeroth의
+# validation·test 문장은 거의 모두 학습 묶음에 다른 화자의 녹음으로 들어 있다. 그래서 Zeroth 수치는 '처음
+# 듣는 화자가 학습에서 본 문장을 읽는' 조건이고, 이것을 세어 두는 함수가 필요하다(docs/experiments.md '추가
+# 확인: Zeroth 문장 겹침').
 # [설계 이유] 무작위 추출 대신 해시 정렬, ID 정렬 같은 결정적인 규칙만 쓴다. 시드를 관리하지 않아도 누가 다시
 # 돌려도 같은 분리가 나온다. 실제로 새 클론에서 prepare 결과가 바이트 단위로 같았다(docs/experiments.md '새
-# 클론에서 재현').
+# 클론에서 재현'). 문장 겹침 셈도 파일을 읽지 않는 순수 함수라 가짜 묶음으로 테스트하고, 묶음을 읽는 일은
+# 호출하는 쪽(analyze overlap)이 맡는다.
 
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable, Sequence
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING
+
+# text_norm.normalize: 채점(metrics.score)이 정답과 가설에 쓰는 정규화. 문장 키를 채점과 같은 규칙으로 만들어,
+# 띄어쓰기·문장부호만 다른 문장을 같은 문장으로 센다.
+from whisper_ko_ft.text_norm import normalize
+
+# Utterance는 타입 표기에만 쓴다. 실행할 때 store(numpy를 부름)를 불러오지 않으려고 TYPE_CHECKING 안에 둔다.
+if TYPE_CHECKING:
+    from whisper_ko_ft.store import Utterance
 
 # VALIDATION_SPEAKERS: validation으로 뗄 화자 수(train 화자 105명 중 10명).
 # VAL500_PER_SPEAKER: val-500에 화자마다 넣을 발화 수. 10명 × 50 = 500이 목표지만 발화가 50개보다 적은 화자가
@@ -48,3 +68,97 @@ def val500_ids(entries: Sequence[dict], per_speaker: int = VAL500_PER_SPEAKER) -
     for speaker in sorted(by_speaker):
         picked.extend(sorted(by_speaker[speaker])[:per_speaker])
     return picked
+
+
+# --- 문장 겹침 (docs/experiments.md '추가 확인: Zeroth 문장 겹침', 2026-10-24) ---
+
+# OVERLAP_KEYS: 문장을 같다고 보는 두 기준. raw는 prepare가 저장한 정답 글 그대로(앞뒤 공백만 뗀 원문),
+# normalized는 sentence_key(채점과 같은 정규화) 뒤의 글이다. 두 기준의 수가 다르면 띄어쓰기·문장부호만 다른
+# 문장이 있다는 뜻이다.
+OVERLAP_KEYS = ("raw", "normalized")
+
+
+# 문장 키: 정답 글을 채점과 같은 규칙(text_norm.normalize)으로 정규화한 글. 한국어는
+# 문장부호·띄어쓰기·대소문자 차이를 지운 글자열이 되므로 '학교에 간다'와 '학교에, 간다!'가 같은 키다. 영어는
+# 단어 사이 공백 하나를 남긴다.
+# 왜 채점 정규화인가: 채점이 같은 글로 보는 두 정답은 모델에게도 같은 문장이므로, 겹침도 같은 기준으로 센다.
+# 문장 hold-out처럼 문장 단위로 묶음을 나누는 일도 이 키를 쓴다.
+def sentence_key(text: str, language: str = "ko") -> str:
+    """겹침을 셀 때 같은 문장으로 보는 키: `text_norm.normalize(text, language)`."""
+    return normalize(text, language)
+
+
+# 한 기준(raw 또는 normalized)으로 발화마다 문장 키를 만든다.
+def _keys(utterances: Sequence[Utterance], kind: str, language: str) -> list[str]:
+    if kind == "raw":
+        return [u.text for u in utterances]
+    return [sentence_key(u.text, language) for u in utterances]
+
+
+# 한 묶음 안에서의 문장 셈: 고유 문장 수, 두 번 이상 나온 문장 수와 그 문장들의 발화 수. counts는 문장 키 →
+# 그 묶음에서 나온 횟수.
+def _within(counts: Counter[str]) -> dict[str, int]:
+    repeated = [n for n in counts.values() if n > 1]
+    return {
+        "sentences": len(counts),
+        "repeated_sentences": len(repeated),
+        "repeated_utterances": sum(repeated),
+    }
+
+
+# 학습 묶음과 평가 묶음들의 문장 겹침과 화자 겹침을 센다. 파일을 읽지 않는 순수 함수다(묶음은 호출하는 쪽이
+# store.load_set으로 읽어 넘긴다).
+# 입력: train은 학습 묶음의 발화 목록, sets는 묶음 이름 → 발화 목록, language는 문장 키를 만들 언어(학습과
+# 평가 묶음이 같은 언어여야 뜻이 있다. analyze overlap이 다른 언어 묶음을 거부한다). 발화는
+# store.Utterance처럼 id·speaker·text 속성이 있으면 된다.
+# 출력(dict):
+# - "train": 발화 수(utterances), 화자 수(speakers), 기준마다(raw, normalized) 고유 문장 수(sentences),
+#   가장 많이 읽힌 문장의 낭독 수(max_reads), 두 번 이상 읽힌 문장 수와 그 발화 수(repeated_sentences,
+#   repeated_utterances)
+# - "sets"[이름]: 발화 수, 화자 수, 그중 학습 묶음에도 있는 화자 수(speakers_in_train), 기준마다 고유 문장
+#   수(sentences), 그중 학습에도 있는 문장 수(sentences_in_train), 문장이 학습에 있는 발화
+#   수(utterances_in_train), 묶음 안에서 두 번 이상 나온 문장 수와 그 발화 수(repeated_sentences,
+#   repeated_utterances), 발화 ID → 그 문장이 학습 묶음에서 읽힌 횟수(train_reads, 묶음의 발화 순서), 문장이
+#   학습에 없는 발화 ID(not_in_train, ID순)
+# 주의: 화자 칸이 빈 발화(FLEURS)는 화자로 세지 않는다. 그래서 FLEURS의 화자 수와 화자 겹침 0은 겹침이 없다는
+# 확인이 아니라 화자 정보가 없다는 뜻이다. 발화 ID가 겹치는 묶음은 발화별 횟수가 덮어써지므로 ValueError로
+# 거부한다(1단계에서 FLEURS의 같은 ID 때문에 행이 빠졌던 오류와 같은 종류).
+def sentence_overlap(
+    train: Sequence[Utterance], sets: Mapping[str, Sequence[Utterance]], language: str = "ko"
+) -> dict:
+    """학습 묶음과 평가 묶음들의 문장·화자 겹침(원문 기준과 정규화 기준)."""
+    train_speakers = {u.speaker for u in train if u.speaker}
+    reads: dict[str, Counter[str]] = {}
+    summary: dict = {"utterances": len(train), "speakers": len(train_speakers)}
+    for kind in OVERLAP_KEYS:
+        reads[kind] = Counter(_keys(train, kind, language))
+        summary[kind] = {**_within(reads[kind]), "max_reads": max(reads[kind].values(), default=0)}
+
+    result: dict = {"train": summary, "sets": {}}
+    for name, utterances in sets.items():
+        ids = [u.id for u in utterances]
+        if len(set(ids)) != len(ids):
+            raise ValueError(f"{name}: utterance ids are not unique")
+        speakers = {u.speaker for u in utterances if u.speaker}
+        entry: dict = {
+            "utterances": len(utterances),
+            "speakers": len(speakers),
+            "speakers_in_train": len(speakers & train_speakers),
+        }
+        for kind in OVERLAP_KEYS:
+            keys = _keys(utterances, kind, language)
+            counts = Counter(keys)
+            # 발화마다 그 문장이 학습에서 읽힌 횟수. 학습에 없으면 0이다.
+            train_reads = {i: reads[kind][k] for i, k in zip(ids, keys, strict=True)}
+            within = _within(counts)
+            entry[kind] = {
+                "sentences": within["sentences"],
+                "sentences_in_train": sum(1 for k in counts if k in reads[kind]),
+                "utterances_in_train": sum(1 for n in train_reads.values() if n),
+                "repeated_sentences": within["repeated_sentences"],
+                "repeated_utterances": within["repeated_utterances"],
+                "train_reads": train_reads,
+                "not_in_train": sorted(i for i, n in train_reads.items() if not n),
+            }
+        result["sets"][name] = entry
+    return result

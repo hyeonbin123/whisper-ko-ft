@@ -33,9 +33,20 @@ speed.json)의 메모리·지연 조건을 적용한다.
 
 민감도 분석(2026-10-15): `robust`는 2~10단계의 판정·선택에 쓴 validation 구간 25개를 화자(Zeroth)·문장(FLEURS)
 단위 부트스트랩으로 다시 계산해, 블록 단위에서도 조건이 기록과 같은지 찍는다. 판정은 바꾸지 않는다.
+
+문장 겹침(2026-10-24): `overlap`은 학습 묶음(zeroth-train)과 평가 묶음들이 같은 문장을 얼마나 함께 갖는지
+(원문 기준과 채점 정규화 기준), 화자가 겹치는지 센다. `--write`는 발화 ID → 학습 낭독 횟수와 요약 수를
+`reports/sentence_overlap/zeroth.json`에 쓴다(정답 글은 넣지 않는다). 다른 하위 명령과 달리 리포트가 아니라
+`prepare`가 만든 묶음 목록(data/cache/sets)을 읽는다. 학습 문장은 리포트에 없기 때문이다.
+
+    uv run python -m whisper_ko_ft.analyze overlap --train zeroth-train \
+        --sets zeroth-val zeroth-val500 zeroth-test fleurs-ko-val fleurs-ko-test --write
 """
 
-# [파일 역할] 커밋된 리포트(reports/)만 읽어 표와 판정을 내는 분석 도구. 모델을 다시 돌리지 않는다.
+# [파일 역할] 커밋된 리포트(reports/)만 읽어 표와 판정을 내는 분석 도구. 모델을 다시 돌리지 않는다. 예외는
+# overlap 하나다: 학습 묶음의 문장은 리포트에 없으므로 overlap만 prepare가 만든 묶음 목록(data/cache/sets)을
+# 읽고, 그 결과를 파생 파일(reports/sentence_overlap/zeroth.json)로 남겨 데이터가 없는 곳(CI)에서도 수를
+# 확인할 수 있게 한다.
 # docs/experiments.md의 수치와 판정 문장은 대부분 이 파일의 하위 명령 출력이다.
 # [왜 필요한가] 이 프로젝트는 판정 규칙을 재기 전에 적고 커밋한다. 규칙을 코드(상수와 verdict 함수)로 옮겨
 # 두면, 결과를 본 뒤 기준을 슬쩍 바꾸거나 손으로 계산하다 틀리는 일을 막고, 누구든 같은 리포트에서 같은 판정을
@@ -47,8 +58,10 @@ speed.json)의 메모리·지연 조건을 적용한다.
 #   발화), changes(재시도가 바꾼 것).
 # - 단계별 판정: verdict(2·3단계), verdict6, verdict8·itn8, gate9·verdict9, gate10·smoke10·pick10·verdict10.
 # - 민감도 분석: robust(기록된 판정 구간을 화자·문장 단위 부트스트랩으로 다시 계산, 2026-10-15).
-# [연결] metrics(채점·구간), itn·latin(표기 변환), paths.REPORTS를 쓴다. tests/test_recorded_reports.py가
-# load_rows·arrays로 커밋된 리포트의 맞춘 CER 총합을 고정한다.
+# - 문장 겹침: overlap(학습 묶음과 평가 묶음의 문장·화자 겹침, 2026-10-24. 셈은 splits.sentence_overlap).
+# [연결] metrics(채점·구간), itn·latin(표기 변환), paths.REPORTS를 쓴다. overlap만 splits·store.load_set과
+# paths.CACHE를 더 쓴다. tests/test_recorded_reports.py가 load_rows·arrays로 커밋된 리포트의 맞춘 CER 총합을
+# 고정하고, tests/test_analyze.py가 문장 겹침 파생 파일의 수를 고정한다.
 
 from __future__ import annotations
 
@@ -63,7 +76,8 @@ import statistics
 import numpy as np
 
 # itn·latin: 다시 채점할 때 쓰는 표기 변환. metrics: 채점, 오류율, 부트스트랩 구간과 짝지은 차이 구간.
-# paths.REPORTS: 리포트 폴더.
+# paths.REPORTS: 리포트 폴더. paths.CACHE·store.load_set·splits: overlap만 쓴다(묶음 목록 읽기와 문장 겹침
+# 셈). CACHE는 load_set에 매번 넘겨, 테스트가 analyze.CACHE를 임시 폴더로 바꿀 수 있게 한다.
 from whisper_ko_ft.itn import harmonize, to_digits
 from whisper_ko_ft.latin import letters_to_latin
 from whisper_ko_ft.metrics import (
@@ -74,7 +88,9 @@ from whisper_ko_ft.metrics import (
     leave_one_block_out,
     score,
 )
-from whisper_ko_ft.paths import REPORTS
+from whisper_ko_ft.paths import CACHE, REPORTS
+from whisper_ko_ft.splits import OVERLAP_KEYS, sentence_overlap
+from whisper_ko_ft.store import load_set
 
 # BASE_MODELS: '숫자 발화' 목록을 정할 때 보는 기본 모델 두 개(1단계 기준선).
 BASE_MODELS = ("whisper-small", "whisper-large-v3-turbo")
@@ -1272,9 +1288,124 @@ def robust() -> list[dict]:
     return rows
 
 
+# --- Zeroth 문장 겹침 (2026-10-24, docs/experiments.md '추가 확인: Zeroth 문장 겹침') ---
+
+# 기본 정의: 학습 묶음 zeroth-train과, Zeroth·FLEURS 한국어의 validation·test 묶음. 숫자를 바꾼 학습 묶음
+# zeroth-train-itn(6·7단계 N·N2, 10단계 QN)은 zeroth-train과 발화가 같고 정답의 숫자 표기만
+# 다르다(prepare_itn). --write는 이 정의일 때만 쓴다. 커밋된 파일과 README가 적은 수가 같은 정의를 가리키게
+# 하려는 것이다.
+OVERLAP_TRAIN = "zeroth-train"
+OVERLAP_SETS = ("zeroth-val", "zeroth-val500", "zeroth-test", "fleurs-ko-val", "fleurs-ko-test")
+# 파생 파일에 적는 두 기준의 설명(파일 안의 데이터라 영어로 짧게 둔다. digit_utterances의 rule 칸과 같다).
+OVERLAP_KEY_NOTES = {
+    "raw": "the reference text as prepare stored it (stripped)",
+    "normalized": "text_norm.normalize(text, language), the scoring normalization (splits.sentence_key)",
+}
+
+
+# 묶음 목록을 읽어 splits.sentence_overlap으로 센 뒤, 파생 파일에 쓸 기록을 만든다(쓰지는 않는다).
+# 입력: 학습 묶음 이름과 평가 묶음 이름들(data/cache/sets/<이름>.json, store.load_set으로 읽음). 학습 묶음과
+# 언어가 다른 묶음은 문장 키를 비교할 수 없어 거부한다.
+# 출력(dict): train_set·language·command(다시 만드는 명령)·keys(두 기준의 설명)·per_utterance_key, train(학습
+# 묶음 요약), sets[이름](발화·화자 수, 기준마다 요약 수, 그리고 정규화 기준의 not_in_train과 train_reads(발화
+# ID순)). 정답 글은 넣지 않는다. 발화별 수는 정규화 기준 하나만 둔다(원문 기준은 요약 수로 비교한다).
+def overlap_record(train_name: str, set_names: list[str]) -> dict:
+    """학습 묶음과 평가 묶음들의 문장 겹침 기록(파생 파일의 내용)."""
+    language, train = load_set(train_name, CACHE)
+    loaded = {}
+    for name in set_names:
+        set_language, utterances = load_set(name, CACHE)
+        if set_language != language:
+            raise SystemExit(
+                f"{name}: language {set_language!r} differs from {train_name} ({language!r});"
+                " sentence keys are not comparable"
+            )
+        loaded[name] = utterances
+    result = sentence_overlap(train, loaded, language)
+    sets = {}
+    for name, entry in result["sets"].items():
+        per_utterance = entry["normalized"]
+        sets[name] = {
+            "utterances": entry["utterances"],
+            "speakers": entry["speakers"],
+            "speakers_in_train": entry["speakers_in_train"],
+            # 기준마다 요약 수만(발화별 목록은 아래에 정규화 기준으로 한 번).
+            **{
+                kind: {k: v for k, v in entry[kind].items() if k not in ("train_reads", "not_in_train")}
+                for kind in OVERLAP_KEYS
+            },
+            "not_in_train": per_utterance["not_in_train"],
+            "train_reads": dict(sorted(per_utterance["train_reads"].items())),
+        }
+    command = f"python -m whisper_ko_ft.analyze overlap --train {train_name} --sets {' '.join(set_names)}"
+    return {
+        "train_set": train_name,
+        "language": language,
+        "command": command,
+        "keys": OVERLAP_KEY_NOTES,
+        "per_utterance_key": "normalized",
+        "train": result["train"],
+        "sets": sets,
+    }
+
+
+# overlap 명령: 문장 겹침을 묶음마다 한 줄씩 찍고, --write면 기록을 reports/sentence_overlap/zeroth.json에
+# 쓴다(reports/의 다른 폴더처럼 커밋하는 파생 파일. 리포트가 아니라 tests/test_recorded_reports.py의 다시
+# 채점 대상에서 뺀다). 다른 하위 명령과 달리 리포트가 아니라 묶음 목록을 읽는다(학습 문장은 리포트에 없다).
+# 왜 필요한가: 화자 기준 분리는 화자만 떼므로, Zeroth validation·test 문장이 학습에 다른 화자의 녹음으로
+# 들어 있는지를 숫자로 남겨야 Zeroth 수치를 '처음 듣는 화자가 학습에서 본 문장을 읽는 조건'으로 바르게 읽을
+# 수 있다.
+# 주의: 측정이 아니라 데이터 성질의 셈이라 판정은 없고 기록된 수치를 바꾸지 않는다. 데이터가 같으면 몇 번을
+# 다시 써도 같은 파일이 나온다(무작위 요소 없음). 학습에 없는 발화가 5개 이하면 ID를 함께 찍는다.
+def overlap(
+    train_name: str = OVERLAP_TRAIN,
+    set_names: list[str] | tuple[str, ...] = OVERLAP_SETS,
+    write: bool = False,
+) -> dict:
+    """학습 묶음과 평가 묶음들의 문장·화자 겹침을 찍는다. `write`면 파생 파일로 남긴다."""
+    if write and (train_name, tuple(set_names)) != (OVERLAP_TRAIN, OVERLAP_SETS):
+        raise SystemExit("--write records only the default --train and --sets (the committed definition)")
+    record = overlap_record(train_name, list(set_names))
+    train = record["train"]
+    print(
+        f"{train_name}: {train['utterances']} utterances, {train['speakers']} speakers"
+        + "".join(
+            f"; {kind}: {train[kind]['sentences']} sentences, read up to {train[kind]['max_reads']} times,"
+            f" {train[kind]['repeated_sentences']} read more than once"
+            for kind in OVERLAP_KEYS
+        )
+    )
+    for name, entry in record["sets"].items():
+        lines = [
+            f"{name}: {entry['utterances']} utterances, {entry['speakers']} speakers"
+            f" ({entry['speakers_in_train']} also in {train_name})"
+        ]
+        for kind in OVERLAP_KEYS:
+            counts = entry[kind]
+            lines.append(
+                f"{kind}: utterances whose sentence is in {train_name} {counts['utterances_in_train']}"
+                f" of {entry['utterances']}, sentences {counts['sentences_in_train']}"
+                f" of {counts['sentences']}, repeated within the set {counts['repeated_sentences']}"
+                f" sentences ({counts['repeated_utterances']} utterances)"
+            )
+        missing = entry["not_in_train"]
+        lines.append(
+            f"sentence not in {train_name} (normalized): {len(missing)} of {entry['utterances']} utterances"
+            + (f" ({' '.join(missing)})" if 0 < len(missing) <= 5 else "")
+        )
+        print("\n  ".join(lines))
+    if write:
+        target = REPORTS / "sentence_overlap" / "zeroth.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
+        print(f"wrote {target}")
+    return record
+
+
 # 명령줄 진입점. 하위 명령마다 인자를 정하고 해당 함수를 부른다. 명령과 단계: digits·table·loops(공통),
 # verdict(2·3단계), verdict6(6단계), changes·verdict8·itn8(8단계), gate9·verdict9(9단계),
-# gate10·smoke10·pick10·verdict10(10단계), gate11·blocks(11단계), verdict12(12단계), robust(민감도 분석).
+# gate10·smoke10·pick10·verdict10(10단계), gate11·blocks(11단계), verdict12(12단계), robust(민감도 분석),
+# overlap(문장 겹침, 리포트가 아니라 묶음 목록을 읽는 유일한 명령).
 def main() -> None:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1355,6 +1486,37 @@ def main() -> None:
     ver12.add_argument("--speed", required=True, help="scripts/speed.py --preset ct2-int8이 쓴 speed.json")
     ver12.add_argument("--candidate", default="turbo-n-ct2-int8")
     ver12.add_argument("--baseline", default="turbo-n-ct2")
+    over = commands.add_parser(
+        "overlap",
+        help="학습 묶음과 평가 묶음의 문장·화자 겹침을 센다(리포트가 아니라 prepare의 묶음 목록을 읽는다)",
+        description=(
+            "학습 묶음(--train)과 평가 묶음들(--sets)이 같은 문장을 얼마나 함께 갖는지를 원문 기준과"
+            " 채점 정규화 기준(text_norm.normalize)으로 세고, 화자 겹침도 센다. data/cache/sets의 묶음"
+            " 목록을 읽으므로 먼저 prepare를 돌려야 한다. 판정은 없고 기록된 수치를 바꾸지 않는다."
+        ),
+    )
+    over.add_argument(
+        "--train",
+        default=OVERLAP_TRAIN,
+        help=f"학습 묶음 이름(기본 {OVERLAP_TRAIN}, data/cache/sets/<이름>.json)",
+    )
+    over.add_argument(
+        "--sets",
+        nargs="+",
+        default=list(OVERLAP_SETS),
+        help=(
+            "평가 묶음 이름들(기본은 Zeroth·FLEURS 한국어의 validation·test 다섯 개). 학습 묶음과"
+            " 언어가 같아야 한다"
+        ),
+    )
+    over.add_argument(
+        "--write",
+        action="store_true",
+        help=(
+            "발화 ID → 학습 낭독 횟수와 요약 수를 reports/sentence_overlap/zeroth.json에 쓴다(정답 글은"
+            " 넣지 않는다). 기본 --train·--sets일 때만 쓴다"
+        ),
+    )
     args = parser.parse_args()
 
     if args.command == "digits":
@@ -1391,6 +1553,8 @@ def main() -> None:
         blocks(args.set_name, args.candidate, args.baseline, args.scoring, args.without_digits)
     elif args.command == "verdict12":
         verdict12(args.speed, args.candidate, args.baseline)
+    elif args.command == "overlap":
+        overlap(args.train, args.sets, args.write)
     else:
         table(
             args.set_name, args.reports, args.baseline, not args.no_digit_split, args.harmonized, args.scoring
