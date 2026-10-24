@@ -130,12 +130,13 @@ uv run python -m whisper_ko_ft.download       # Zeroth-Korean, FLEURS 한국어�
 uv run python -m whisper_ko_ft.prepare        # 16kHz 오디오 저장소와 학습·validation·test 목록 (약 6.5GB)
 uv run python -m whisper_ko_ft.evaluate --model openai/whisper-small --set zeroth-val --overwrite   # 리포트가 커밋되어 있어 다시 재려면 --overwrite
 uv run python -m whisper_ko_ft.analyze table --set zeroth-val --reports whisper-small whisper-large-v3-turbo
-uv run python -m whisper_ko_ft.train --run-name small-a --learning-rate 1e-5   # 3,000스텝, 이 PC에서 몇 시간
+uv run python -m whisper_ko_ft.train --run-name small-a-repro --learning-rate 1e-5   # 3,000스텝, 이 PC에서 몇 시간
 ```
 
 - `prepare`는 Zeroth-Korean train에서 화자 10명을 validation으로 떼어 낸다 (화자 ID의 SHA-256 순, 규칙은 experiments.md)
 - `evaluate`는 `reports/<이름>/<묶음>.json`에 요약과 발화별 정답·가설·오류 수를 남긴다. test 묶음은 `--allow-test`를 줘야 잰다 (단계마다 한 번만 재기 위한 장치)
 - 리포트는 커밋된 기록이라 이미 있으면 `--overwrite`를 줘야 다시 잰다(`evaluate_ct2`도 같다). `--adapter`로 잴 때는 `--name`이 필수다 (기본 이름이 기준 모델의 리포트 폴더가 되므로). `--limit`으로 일부만 잰 리포트는 `analyze`가 받지 않는다
+- `train`은 `outputs/<run-name>/`에 학습 결과(`run.json`, `best/`, `checkpoint-*`)가 있으면 시작하지 않는다(`outputs/`는 커밋하지 않으므로, 같은 이름으로 다시 돌려 기록한 학습 결과를 덮어쓰지 않게). 새로 학습하려면 다른 `--run-name`을 쓰고, 멈춘 실행은 같은 명령에 `--resume`을 더하면 끝까지 저장된 마지막 체크포인트부터 잇는다(옵티마이저·학습률 일정·난수 상태도 이어진다). 학습 스텝도 평가 배치도 15분 넘게 끝나지 않으면 주 프로세스의 스레드 스택을 `outputs/<run-name>/hang.log`에 덧붙인다(DataLoader 워커 안은 보이지 않는다)
 
 faster-whisper로 재기 (5단계):
 
