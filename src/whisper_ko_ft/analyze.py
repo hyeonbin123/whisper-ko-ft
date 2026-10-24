@@ -41,6 +41,16 @@ speed.json)의 메모리·지연 조건을 적용한다.
 
     uv run python -m whisper_ko_ft.analyze overlap --train zeroth-train \
         --sets zeroth-val zeroth-val500 zeroth-test fleurs-ko-val fleurs-ko-test --write
+
+영어 보조 지표(2026-10-24, 판정 없음): `--scoring en-whisper`는 FLEURS 영어 묶음의 WER을 Whisper 표준 영어
+정규화(en_norm.normalize_english)로 정답·가설을 바꾼 뒤 다시 센다. 숫자 표기·'%'·영미 철자 차이를 걷어 낸
+값이고, 등록 지표와 그 판정은 그대로다. 채점마다 쓸 수 있는 묶음의 언어가 정해져 있어(한국어 채점은
+Zeroth·FLEURS 한국어, en-whisper는 FLEURS 영어) 다른 언어의 묶음에 주면 거부한다(docs/experiments.md
+'보조 지표').
+
+    uv run python -m whisper_ko_ft.analyze table --set fleurs-en-val \
+        --reports whisper-large-v3-turbo turbo-n --baseline whisper-large-v3-turbo \
+        --no-digit-split --scoring en-whisper
 """
 
 # [파일 역할] 커밋된 리포트(reports/)만 읽어 표와 판정을 내는 분석 도구. 모델을 다시 돌리지 않는다. 예외는
@@ -53,15 +63,17 @@ speed.json)의 메모리·지연 조건을 적용한다.
 # 다시 낼 수 있다.
 # [주요 구성]
 # - 채점 방식: 원래 채점, 맞춘 CER(harmonized, 6단계), 출력 숫자 변환(itn, 8단계), 글자 이름 변환(itn-latin),
-#   표기 무관(agnostic). 리포트의 글은 바꾸지 않고 채점할 때만 적용한다(SCORINGS).
+#   표기 무관(agnostic), 영어 표준 정규화(en-whisper, 2026-10-24 보조 지표, FLEURS 영어 묶음만). 리포트의 글은
+#   바꾸지 않고 채점할 때만 적용한다(SCORINGS. 채점마다 쓸 수 있는 묶음의 언어는 SCORING_LANGUAGE).
 # - 공통 도구: load_rows(리포트 읽기와 검사), compare(두 리포트의 짝지은 차이와 구간), table(표), loops(되풀이
 #   발화), changes(재시도가 바꾼 것).
 # - 단계별 판정: verdict(2·3단계), verdict6, verdict8·itn8, gate9·verdict9, gate10·smoke10·pick10·verdict10.
 # - 민감도 분석: robust(기록된 판정 구간을 화자·문장 단위 부트스트랩으로 다시 계산, 2026-10-15).
 # - 문장 겹침: overlap(학습 묶음과 평가 묶음의 문장·화자 겹침, 2026-10-24. 셈은 splits.sentence_overlap).
-# [연결] metrics(채점·구간), itn·latin(표기 변환), paths.REPORTS를 쓴다. overlap만 splits·store.load_set과
-# paths.CACHE를 더 쓴다. tests/test_recorded_reports.py가 load_rows·arrays로 커밋된 리포트의 맞춘 CER 총합을
-# 고정하고, tests/test_analyze.py가 문장 겹침 파생 파일의 수를 고정한다.
+# [연결] metrics(채점·구간), itn·latin(표기 변환), en_norm(영어 표준 정규화), paths.REPORTS를 쓴다. overlap만
+# splits·store.load_set과 paths.CACHE를 더 쓴다. tests/test_recorded_reports.py가 load_rows·arrays로 커밋된
+# 리포트의 맞춘 CER 총합을 고정하고, tests/test_analyze.py가 문장 겹침 파생 파일의 수와 영어 보조 지표의
+# 총합을 고정한다.
 
 from __future__ import annotations
 
@@ -75,9 +87,11 @@ import statistics
 # numpy: 발화별 편집 수·길이 배열.
 import numpy as np
 
-# itn·latin: 다시 채점할 때 쓰는 표기 변환. metrics: 채점, 오류율, 부트스트랩 구간과 짝지은 차이 구간.
-# paths.REPORTS: 리포트 폴더. paths.CACHE·store.load_set·splits: overlap만 쓴다(묶음 목록 읽기와 문장 겹침
-# 셈). CACHE는 load_set에 매번 넘겨, 테스트가 analyze.CACHE를 임시 폴더로 바꿀 수 있게 한다.
+# itn·latin: 다시 채점할 때 쓰는 표기 변환(한국어). en_norm: 영어 보조 지표의 표준 정규화. metrics: 채점,
+# 오류율, 부트스트랩 구간과 짝지은 차이 구간. paths.REPORTS: 리포트 폴더. paths.CACHE·store.load_set·splits:
+# overlap만 쓴다(묶음 목록 읽기와 문장 겹침 셈). CACHE는 load_set에 매번 넘겨, 테스트가 analyze.CACHE를 임시
+# 폴더로 바꿀 수 있게 한다.
+from whisper_ko_ft.en_norm import normalize_english
 from whisper_ko_ft.itn import harmonize, to_digits
 from whisper_ko_ft.latin import letters_to_latin
 from whisper_ko_ft.metrics import (
@@ -143,7 +157,8 @@ STAGE10_FORGETTING_MAX = 0.010
 _DIGIT = re.compile(r"[0-9]")
 
 
-# 채점 방식 다섯 가지. 모두 (정답, 가설)을 받아 바꾼 (정답, 가설)을 돌려주고, 저장된 리포트는 바꾸지 않는다.
+# 채점 방식 여섯 가지(한국어 다섯, 영어 하나). 모두 (정답, 가설)을 받아 바꾼 (정답, 가설)을 돌려주고, 저장된
+# 리포트는 바꾸지 않는다.
 def _harmonized(reference: str, hypothesis: str) -> tuple[str, str]:
     """harmonized(6단계 맞춘 CER): 정답과 가설 양쪽에 같은 숫자 표기 통일을 적용한다.
 
@@ -178,29 +193,55 @@ def _agnostic(reference: str, hypothesis: str) -> tuple[str, str]:
     return letters_to_latin(harmonize(reference)), letters_to_latin(harmonize(hypothesis))
 
 
-# SCORINGS: --scoring 이름 → 변환 함수. 한국어 CER을 다시 계산하기 전에 저장된 정답과 가설을 어떻게 바꿀지
-# 정한다. 모두 한국어 CER용이다(load_rows가 영어 묶음에서는 거부한다).
+def _en_whisper(reference: str, hypothesis: str) -> tuple[str, str]:
+    """en-whisper(2026-10-24 판정 없는 보조 지표, 영어 WER): 양쪽에 Whisper 표준 영어 정규화를 적용한다.
+
+    숫자 낱말과 아라비아 숫자, 'percent'와 '%', 영미 철자가 같은 글이 되어 그 표기 차이는 오류로 세지
+    않는다(docs/experiments.md '보조 지표'). FLEURS 영어 묶음에만 쓴다.
+    """
+    return normalize_english(reference), normalize_english(hypothesis)
+
+
+# SCORINGS: --scoring 이름 → 변환 함수. 오류율을 다시 계산하기 전에 저장된 정답과 가설을 어떻게 바꿀지 정한다.
+# SCORING_LANGUAGE: 채점마다 쓸 수 있는 묶음의 언어. 적지 않은 채점은 한국어 CER용이다. load_rows가 묶음의
+# 언어(set_language)와 다르면 거부한다.
 SCORINGS = {
     "harmonized": _harmonized,
     "itn": _itn,
     "itn-harmonized": _itn_harmonized,
     "itn-latin": _itn_latin,
     "agnostic": _agnostic,
+    "en-whisper": _en_whisper,
 }
+SCORING_LANGUAGE = {"en-whisper": "en"}
+
+
+def scoring_language(scoring: str) -> str:
+    """채점 방식이 전제하는 언어 코드: en-whisper는 'en', 나머지는 'ko'."""
+    return SCORING_LANGUAGE.get(scoring, "ko")
+
+
+def set_language(set_name: str) -> str:
+    """묶음 이름의 언어 코드: fleurs-en-*('@telephone' 판 포함)은 'en', Zeroth·FLEURS 한국어는 'ko'."""
+    return "en" if set_name.startswith("fleurs-en") else "ko"
 
 
 # 리포트 하나를 읽어 발화 ID → 행 dict로 돌려준다. 정답이 빈 행(길이 0)은 뺀다. scoring을 주면 행마다 다시
-# 채점한 편집 수·길이로 바꾼다(harmonized=True는 scoring='harmonized'와 같다).
-# 거부하는 경우(규칙을 지키게 하는 검사): 영어 묶음에 한국어용 채점을 주면, --limit으로 일부만 잰 리포트(커밋
-# a29a975), 발화 ID가 겹치는 리포트(1단계에서 FLEURS 행이 빠진 오류를 되풀이하지 않게).
+# 채점한 편집 수·길이로 바꾼다(harmonized=True는 scoring='harmonized'와 같다). 다시 채점해 정답이 비는
+# 행(en-whisper가 군말만 있는 정답을 지운 경우)도 같은 이유로 뺀다.
+# 거부하는 경우(규칙을 지키게 하는 검사): 채점의 언어와 묶음의 언어가 다르면(한국어 채점을 영어 묶음에,
+# en-whisper를 한국어 묶음에), --limit으로 일부만 잰 리포트(커밋 a29a975), 발화 ID가 겹치는 리포트(1단계에서
+# FLEURS 행이 빠진 오류를 되풀이하지 않게).
 # 호출 위치: table, compare, loops, changes, write_digits, tests/test_recorded_reports.py.
 def load_rows(
     report: str, set_name: str, harmonized: bool = False, scoring: str | None = None
 ) -> dict[str, dict]:
     """리포트의 채점된 발화를 ID별로 돌려준다. `harmonized`는 `scoring="harmonized"`와 같다."""
     scoring = "harmonized" if harmonized else scoring
-    if scoring and set_name.startswith("fleurs-en"):
-        raise SystemExit(f"{set_name}: the {scoring!r} scoring is for Korean sets")
+    language = set_language(set_name)
+    if scoring and scoring_language(scoring) != language:
+        wanted = "Korean" if scoring_language(scoring) == "ko" else "English"
+        raise SystemExit(f"{set_name}: the {scoring!r} scoring is for {wanted} sets")
     data = json.loads((REPORTS / report / f"{set_name}.json").read_text(encoding="utf-8"))
     if data["summary"].get("limit"):
         raise SystemExit(f"{report}/{set_name}: measured with --limit, not the whole set; measure it again")
@@ -208,16 +249,20 @@ def load_rows(
     if len(rows) != sum(1 for row in data["utterances"] if row["length"]):
         raise SystemExit(f"{report}/{set_name}: utterance ids are not unique; measure it again")
     if scoring:
-        rows = {i: rescored(row, scoring) for i, row in rows.items()}
+        rows = {i: rescored(row, scoring, language) for i, row in rows.items()}
+        rows = {i: row for i, row in rows.items() if row["length"]}
     return rows
 
 
-def rescored(row: dict, scoring: str = "harmonized") -> dict:
-    """행 하나를 SCORINGS[scoring]으로 바꾼 글로 한국어 CER을 다시 계산한 새 행.
+def rescored(row: dict, scoring: str = "harmonized", language: str = "ko") -> dict:
+    """행 하나를 SCORINGS[scoring]으로 바꾼 글로 그 언어의 오류율(ko는 CER, en은 WER)을 다시 계산한 새 행.
 
-    edits·length만 바뀌고, 저장된 정답·가설 글은 그대로 남는다.
+    edits·length만 바뀌고, 저장된 정답·가설 글은 그대로 남는다. 바꾼 정답이 비면(score가 None) 편집 수와
+    길이를 0으로 적어 load_rows가 그 행을 뺄 수 있게 한다.
     """
-    scored = score(*SCORINGS[scoring](row["reference"], row["hypothesis"]), "ko")
+    scored = score(*SCORINGS[scoring](row["reference"], row["hypothesis"]), language)
+    if scored is None:
+        return {**row, "edits": 0, "length": 0}
     return {**row, "edits": scored.edits, "length": scored.length}
 
 
@@ -1419,7 +1464,13 @@ def main() -> None:
     tab.add_argument("--no-digit-split", action="store_true", help="FLEURS 묶음에는 숫자 발화 목록이 없다")
     tab.add_argument("--harmonized", action="store_true", help="itn.harmonize 뒤에 다시 채점한다(한국어)")
     tab.add_argument(
-        "--scoring", choices=list(SCORINGS), help="저장된 글을 다른 방식으로 다시 채점한다(한국어, 8단계)"
+        "--scoring",
+        choices=list(SCORINGS),
+        help=(
+            "저장된 글을 다른 방식으로 다시 채점한다. 한국어 채점(harmonized·itn·itn-harmonized·itn-latin·"
+            "agnostic)은 Zeroth·FLEURS 한국어 묶음에, en-whisper(영어 표준 정규화, 판정 없는 보조 지표)는"
+            " FLEURS 영어 묶음에만 쓴다"
+        ),
     )
     ver = commands.add_parser("verdict")
     ver.add_argument("--baseline", required=True)

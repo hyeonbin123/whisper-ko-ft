@@ -1409,3 +1409,14 @@ test 비교(참고용), 판정 없이 보고만 한 비교, 점 추정만 쓰는
 - 같은 가중치를 두 방식으로 돌린 비교(5단계·2026-10-02·8단계의 재시도 켬·끔, 12단계 int8 대 fp16)는 이 조건이 두 쪽에 똑같이 걸린다. 그 차이도 본 문장 위에서 잰 것이다
 - FLEURS 한국어 validation·test는 학습과 겹치는 문장이 없다. 다른 도메인(FLEURS 한국어)과 영어(FLEURS 영어)의 수치에는 이 단서가 붙지 않는다
 
+## 보조 지표 (판정 없음): 영어 표준 정규화 WER (규칙 2026-10-24, 계산 전. 값은 사후로 이미 봤다)
+
+- 무엇: FLEURS 영어 묶음(validation·test)의 WER을, 정답과 가설 양쪽에 Whisper 표준 영어 정규화를 적용한 뒤 다시 잰다. 정규화기는 transformers 5.17.0의 `EnglishTextNormalizer`에 영미 철자 사전 사본 `src/whisper_ko_ft/english.json`(Hugging Face `openai/whisper-small` 저장소의 `normalizer.json`을 그대로 복사한 것, 1,740쌍, SHA-256 `bf1c507dc8724ca9cf9903640dacfb69dae2f00edee4f21ceba106a7392f26dd`)을 넘긴 것이다(`whisper_ko_ft.en_norm`). 리포트는 바꾸지 않는다. 등록 지표(공통 규칙 '지표'의 정규화)와 그 수치·판정은 그대로다
+- 왜: 등록 정규화는 소문자·문장부호·공백만 맞추고, 숫자 표기('7'과 'seven'), '%'와 'percent', 영미 철자('behaviour'와 'behavior')는 맞추지 않는다. 그래서 한국어로 학습한 뒤 영어 숫자를 풀어 쓰게 된 표기 변화가 영어 WER 차이에 들어간다. 표준 정규화는 이 표기를 한쪽으로 맞춘다(축약형을 펴고 군말·괄호 안을 지우는 것도 포함되므로 등록 지표와 절대값도 달라진다)
+- 사전 등록 단서: 이 지표의 값은 규칙을 적기 전에 사후 계산으로 이미 봤다(2026-10-24). 판정에 쓰지 않고, 기록된 영어 비용 서술에 날짜 붙은 단서를 더하는 데만 쓴다
+- 채점: `analyze --scoring en-whisper`(FLEURS 영어 묶음에만 허용. 한국어 채점은 거꾸로 영어 묶음을 거부한다). 편집 수와 정답 길이(단어 수)는 정규화한 글로 다시 센다. 정규화한 정답이 비는 발화는 공통 규칙의 '정답이 빈 발화'처럼 뺀다. 구간은 공통 규칙과 같은 짝지은 발화 단위 부트스트랩(1,000번, seed 0)
+- 명령: `analyze table --set fleurs-en-val --reports whisper-small small-a whisper-large-v3-turbo turbo-l2 turbo-n qwen3-asr-1.7b qwen3-asr-1.7b-qn qwen3-asr-1.7b-qn-s050 --baseline <비교 기준> --no-digit-split --scoring en-whisper` (fleurs-en-test도 같은 줄. 비교 기준은 아래 보고 줄마다 다르다: whisper-small, whisper-large-v3-turbo, qwen3-asr-1.7b)
+- 보고: 3단계(A − small, L2 − turbo), 6단계(N − turbo), 10·11단계(QN − 학습 전 Qwen, QN@0.5 − 학습 전 Qwen)의 영어 줄에 대해, 등록 지표의 차이 옆에 보조 지표의 차이와 짝지은 95% 구간을 validation·test 모두 적는다. 함께 적는다: 학습 전 Qwen − turbo(9단계. 모델 계열이 다른 비교가 정규화에 얼마나 흔들리는지), 리포트별 등록·보조 WER
+- 허용 폭: 없음(판정 없음). GPU 0, 내려받기 0
+- 고정: 예시 네 짝과 사전의 SHA-256은 `tests/test_en_norm.py`, 커밋된 리포트의 보조 지표 편집 수·길이 총합은 `tests/test_analyze.py`로 고정한다. transformers 버전이 바뀌어 정규화가 달라지면 거기서 드러난다
+

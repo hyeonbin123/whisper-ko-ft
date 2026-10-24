@@ -273,6 +273,75 @@ def test_korean_rescoring_is_refused_for_english_sets(reports):
         analyze.load_rows("m", "fleurs-en-val", scoring="itn")
 
 
+# 영어 리포트의 행: evaluate처럼 등록 정규화('en', 단어 단위)로 채점한 편집 수와 정답 길이를 저장한다.
+def english_rows(pairs):
+    out = []
+    for n, (reference, hypothesis) in enumerate(pairs):
+        scored = score(reference, hypothesis, "en")
+        out.append(
+            {
+                "id": f"u{n}",
+                "reference": reference,
+                "hypothesis": hypothesis,
+                "edits": scored.edits,
+                "length": scored.length,
+            }
+        )
+    return out
+
+
+# 영어 보조 채점 en-whisper(docs/experiments.md '보조 지표' 절): 숫자 표기('7'과 'seven'), '%'와 'percent',
+# 영미 철자 차이가 0 편집이 되고, 정답 길이는 정규화한 글의 단어 수로 다시 센다('10,000'은 등록 정규화에서
+# 두 단어, 표준 정규화에서 한 단어). 등록 채점(scoring 없음)의 값과 저장된 글은 그대로다.
+def test_en_whisper_scoring_matches_english_notation(reports):
+    pairs = [
+        ("He took 7 wickets", "He took seven wickets"),
+        ("10,000 years ago", "ten thousand years ago"),
+        ("100% of the vote", "100 percent of the vote"),
+        ("good behaviour", "good behavior"),
+    ]
+    write_report(reports, "m", "fleurs-en-val", english_rows(pairs))
+    registered = analyze.load_rows("m", "fleurs-en-val")
+    assert all(row["edits"] > 0 for row in registered.values())
+    aux = analyze.load_rows("m", "fleurs-en-val", scoring="en-whisper")
+    assert [row["edits"] for row in aux.values()] == [0, 0, 0, 0]
+    assert (registered["u1"]["length"], aux["u1"]["length"]) == (4, 3)
+    assert aux["u0"]["hypothesis"] == pairs[0][1]  # 저장된 글은 절대 바뀌지 않는다
+
+
+# 표준 정규화로 정답이 비는 발화(군말만 있는 경우)는 공통 규칙의 '정답이 빈 발화'처럼 보조 채점에서 뺀다.
+# 등록 채점에서는 그대로 남는다.
+def test_en_whisper_drops_a_reference_that_normalizes_to_nothing(reports):
+    pairs = [("Hmm.", "Hmm"), ("7 wickets", "seven wickets")]
+    write_report(reports, "m", "fleurs-en-val", english_rows(pairs))
+    assert set(analyze.load_rows("m", "fleurs-en-val")) == {"u0", "u1"}
+    assert set(analyze.load_rows("m", "fleurs-en-val", scoring="en-whisper")) == {"u1"}
+
+
+# 영어용 보조 채점을 한국어 묶음(Zeroth, FLEURS 한국어)에 주면 거부한다.
+@pytest.mark.parametrize("set_name", ["zeroth-val", "fleurs-ko-val"])
+def test_en_whisper_is_refused_for_korean_sets(reports, set_name):
+    write_report(reports, "m", set_name, rows([1]))
+    with pytest.raises(SystemExit, match="English"):
+        analyze.load_rows("m", set_name, scoring="en-whisper")
+
+
+# 규칙의 명령(table --scoring en-whisper --baseline)으로 표기만 다른 두 리포트를 비교하면 등록 채점에서는
+# 차이가 나고 보조 채점에서는 +0.00%p가 된다.
+def test_table_reports_the_en_whisper_difference(reports, capsys):
+    references = ["he took 7 wickets", "100% of the vote"]
+    write_report(reports, "base", "fleurs-en-val", english_rows([(r, r) for r in references]))
+    spelled = ["he took seven wickets", "100 percent of the vote"]
+    write_report(reports, "cand", "fleurs-en-val", english_rows(list(zip(references, spelled, strict=True))))
+
+    analyze.table("fleurs-en-val", ["base", "cand"], "base", split_digits=False)
+    registered = capsys.readouterr().out
+    assert "vs base: +25.00%p" in registered  # 정답 8단어 중 편집 2개(치환 1, 삽입 1)
+    analyze.table("fleurs-en-val", ["base", "cand"], "base", split_digits=False, scoring="en-whisper")
+    aux = capsys.readouterr().out
+    assert "vs base: +0.00%p" in aux
+
+
 # 후보와 기준선을 서로 다른 채점으로 비교할 때 정답 길이가 달라지면(여기서는 '%' 처리 차이) 짝지은 비교를
 # 거부한다.
 def test_compare_refuses_different_reference_lengths(reports):
