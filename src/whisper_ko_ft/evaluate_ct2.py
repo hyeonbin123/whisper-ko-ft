@@ -42,9 +42,10 @@ import torch
 
 # ct2_features.feature_kwargs: 변환된 모델의 멜 수에 맞춘 특징 설정. evaluate.git_commit: 측정 코드의 커밋
 # 기록(evaluate.py와 같은 방식). evaluate.batch_seconds_summary: 지연의 중앙값·90번째 백분위(같은 키로 남겨
-# 두 하네스를 나란히 읽는다). metrics: 채점. store: 묶음과 오디오.
+# 두 하네스를 나란히 읽는다). evaluate.report_json: 리포트 글(NaN이면 ValueError). metrics: 채점. store:
+# 묶음과 오디오.
 from whisper_ko_ft.ct2_features import feature_kwargs
-from whisper_ko_ft.evaluate import batch_seconds_summary, git_commit
+from whisper_ko_ft.evaluate import batch_seconds_summary, git_commit, report_json
 from whisper_ko_ft.metrics import error_rate, interval, score
 from whisper_ko_ft.paths import REPORTS, ROOT
 from whisper_ko_ft.store import AudioStore, load_set
@@ -119,7 +120,12 @@ def main() -> None:
     # 기본 특징 추출기를 변환된 모델의 멜 수(model.model.n_mels, turbo는 128)에 맞춘 것으로 바꾼다.
     # faster-whisper는 폴더에 preprocessor_config.json이 없으면 멜 80개로 특징을 만든다(ct2_features).
     model.feature_extractor = FeatureExtractor(**feature_kwargs(Path(args.model), model.model.n_mels))
+    # 발화가 없는 묶음은 오디오를 읽기 전에 멈춘다(evaluate와 같은 보호. 모델은 위 순서대로 이미 띄웠다).
     language, utterances = load_set(args.set_name)
+    if not utterances:
+        parser.error(
+            f"set {args.set_name} has no utterances; rebuild the sets with `python -m whisper_ko_ft.prepare`"
+        )
     if args.limit:
         utterances = utterances[: args.limit]
     # 재시도 끔/켬 조건을 고르고, 저장소별 memmap을 열어 둘 dict를 만든다.
@@ -212,7 +218,8 @@ def main() -> None:
         return
     target.parent.mkdir(parents=True, exist_ok=True)
     payload = {"summary": summary, "utterances": rows}
-    target.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
+    # report_json은 요약에 NaN(채점한 발화가 없을 때의 0 ÷ 0)이 있으면 ValueError로 멈춰 파일을 남기지 않는다.
+    target.write_text(report_json(payload), encoding="utf-8", newline="\n")
     print(f"wrote {target.relative_to(ROOT)}")
 
 

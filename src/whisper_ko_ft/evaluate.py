@@ -24,8 +24,9 @@
 # 모델을 다시 돌리지 않고 계산한다.
 # [흐름] 인자 확인 → 묶음과 모델 불러오기 → 배치마다 오디오 읽기(필요하면 전화 채널 변환) → GPU에서 로그 멜
 # 특징 계산 → generate(greedy, 또는 8단계의 재시도) → 채점 → 요약 출력과 리포트 쓰기.
-# [연결] evaluate_qwen이 MAX_NEW_TOKENS·WINDOW_SECONDS·score_rows·batch_seconds_summary·git_commit을,
-# evaluate_ct2와 train·train_qwen이 git_commit을, train이 MAX_NEW_TOKENS를 가져다 쓴다.
+# [연결] evaluate_qwen이 MAX_NEW_TOKENS·WINDOW_SECONDS·score_rows·batch_seconds_summary·git_commit·
+# report_json을, evaluate_ct2가 git_commit·batch_seconds_summary·report_json을, train·train_qwen이
+# git_commit을, train이 MAX_NEW_TOKENS를 가져다 쓴다.
 
 from __future__ import annotations
 
@@ -251,6 +252,16 @@ def batch_seconds_summary(seconds: list[float]) -> dict:
     return {"batch_seconds_median": round(float(median), 3), "batch_seconds_p90": round(float(p90), 3)}
 
 
+# 리포트 파일에 쓸 JSON 글. 한국어는 그대로(ensure_ascii=False), 들여쓰기 1칸(커밋된 리포트와 같은 모양),
+# 그리고 allow_nan=False. 정답이 모두 빈 묶음처럼 채점한 발화가 하나도 없으면 오류율이 0 ÷ 0 = NaN이
+# 되는데, NaN은 표준 JSON이 아니고 그런 리포트가 '성공'으로 남으면 빈 측정이 기록처럼 보인다. 그래서
+# ValueError로 멈추고 파일을 남기지 않는다(2026-10-24 전에는 'error_rate': NaN을 그대로 썼다).
+# 호출 위치: evaluate·evaluate_ct2·evaluate_qwen의 main(리포트 쓰기).
+def report_json(payload: dict) -> str:
+    """리포트 JSON 글(한국어 그대로, indent=1). 요약에 NaN·무한대가 있으면 ValueError."""
+    return json.dumps(payload, ensure_ascii=False, indent=1, allow_nan=False)
+
+
 # 요약에 넣을 개수: 다시 디코딩한 발화(redecoded), 마지막 temperature까지 기준을 넘은
 # 발화(fallback_exhausted), 빈 가설, 되풀이 발화(loops: 편집 수 > 정답 길이). 정답이 빈 행은 세지 않는다.
 # 재시도를 쓰지 않은 리포트는 재시도 관련 두 값을 None으로 둔다.
@@ -353,7 +364,14 @@ def main() -> None:
     commit = git_commit()  # 측정하는 코드의 커밋을, 코드가 바뀔 수 있기 전에 기록한다
 
     # 묶음을 읽고(--limit이면 앞 N개만), 모델을 올린다. 재시도 후보면 이 모델 객체에 FallbackTrace를 건다.
+    # 발화가 없는 묶음(빈 폴더로 만든 옛 캐시의 묶음)은 모델을 올리기 전에 멈춘다. 빈 묶음의 오류율은
+    # 0 ÷ 0이라 잴 것이 없고, 2026-10-24부터 prepare가 그런 묶음을 만들지 않으므로 캐시를 다시 만들라고
+    # 알린다.
     language, utterances = load_set(args.set_name)
+    if not utterances:
+        parser.error(
+            f"set {args.set_name} has no utterances; rebuild the sets with `python -m whisper_ko_ft.prepare`"
+        )
     if args.limit:
         utterances = utterances[: args.limit]
     stores: dict[str, AudioStore] = {}
@@ -455,12 +473,12 @@ def main() -> None:
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
-    # --no-report가 아니면 요약과 발화별 행을 JSON으로 쓴다. 한국어를 그대로(ensure_ascii=False) 적고 줄바꿈은
-    # LF로 고정한다. 이 파일을 커밋한다.
+    # --no-report가 아니면 요약과 발화별 행을 JSON으로 쓴다(report_json: 한국어 그대로, NaN이면 ValueError).
+    # 줄바꿈은 LF로 고정한다. 이 파일을 커밋한다.
     if not args.no_report:
         target.parent.mkdir(parents=True, exist_ok=True)
         payload = {"summary": summary, "utterances": rows}
-        target.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
+        target.write_text(report_json(payload), encoding="utf-8", newline="\n")
         print(f"wrote {target.relative_to(ROOT)}")
 
 

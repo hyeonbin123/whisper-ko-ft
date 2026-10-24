@@ -434,3 +434,13 @@ def test_the_adapter_scale_needs_an_adapter_and_is_not_negative(reports, monkeyp
     assert "--adapter-scope needs --adapter-scale" in capsys.readouterr().err
     with pytest.raises(Reached):
         run(monkeypatch, *named, "--adapter", "a", "--adapter-scale", "0.5", "--adapter-scope", "language")
+
+
+# 발화가 하나도 없는 묶음은 모델을 올리기 전에 멈춘다(모델 불러오기 Reached에 닿지 않음). Whisper 하네스와
+# 같은 보호다.
+def test_an_empty_set_is_refused_before_the_model_is_loaded(reports, monkeypatch, capsys):
+    monkeypatch.setattr(evaluate_qwen, "load_set", lambda name: ("ko", []))
+    with pytest.raises(SystemExit):
+        run(monkeypatch, "--set", "zeroth-val")
+    err = capsys.readouterr().err
+    assert "zeroth-val" in err and "no utterances" in err

@@ -62,14 +62,15 @@ import torch
 import transformers
 
 # channel: 10단계의 --channel telephone. evaluate: Whisper 하네스와 같은 최대 토큰 수·30초 창·채점·배치 지연
-# 요약·커밋 기록을 그대로 써서 두 하네스의 조건을 맞춘다. metrics, paths, store: 채점, 리포트 위치, 묶음과
-# 오디오.
+# 요약·커밋 기록·리포트 글(report_json, NaN이면 ValueError)을 그대로 써서 두 하네스의 조건을 맞춘다. metrics,
+# paths, store: 채점, 리포트 위치, 묶음과 오디오.
 from whisper_ko_ft.channel import CHANNELS
 from whisper_ko_ft.evaluate import (
     MAX_NEW_TOKENS,
     WINDOW_SECONDS,
     batch_seconds_summary,
     git_commit,
+    report_json,
     score_rows,
 )
 from whisper_ko_ft.metrics import error_rate, interval
@@ -414,8 +415,12 @@ def main() -> None:
     commit = git_commit()  # 측정하는 코드의 커밋을, 코드가 바뀔 수 있기 전에 기록한다
 
     # 묶음을 읽고, 어댑터 정보(SHA-256)를 커밋처럼 디코딩 전에 읽어 둔 뒤 모델을 올리고 출력층에 넘침 감시를
-    # 건다.
+    # 건다. 발화가 없는 묶음은 모델을 올리기 전에 멈춘다(Whisper 하네스와 같은 보호).
     language, utterances = load_set(args.set_name)
+    if not utterances:
+        parser.error(
+            f"set {args.set_name} has no utterances; rebuild the sets with `python -m whisper_ko_ft.prepare`"
+        )
     if args.limit:
         utterances = utterances[: args.limit]
     dtype, cuda = DTYPES[args.precision], args.device == "cuda"
@@ -490,15 +495,15 @@ def main() -> None:
         "transformers": transformers.__version__,
         "gpu": torch.cuda.get_device_name(0) if cuda else None,
     }
-    # raw와 fixed 요약을 모두 찍고, 쓰기로 한 것만 파일로 남긴다(LF, 한국어 그대로).
+    # raw와 fixed 요약을 모두 찍고, 쓰기로 한 것만 파일로 남긴다(LF, 한국어 그대로. report_json은 요약에 NaN이
+    # 있으면 ValueError로 멈춰 파일을 남기지 않는다).
     payloads = report_payloads(rows, language, meta)
     for output, payload in payloads.items():
         print(json.dumps(payload["summary"], ensure_ascii=False, indent=2))
         if output in targets:
             target = targets[output]
             target.parent.mkdir(parents=True, exist_ok=True)
-            text = json.dumps(payload, ensure_ascii=False, indent=1)
-            target.write_text(text, encoding="utf-8", newline="\n")
+            target.write_text(report_json(payload), encoding="utf-8", newline="\n")
             print(f"wrote {target}")
 
 

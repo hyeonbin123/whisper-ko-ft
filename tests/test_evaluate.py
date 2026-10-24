@@ -6,6 +6,7 @@
 # [방법] 인자 검사를 통과하면 모델을 불러오기 직전에 Reached를 던지게 해, GPU 없이 '멈췄는지/통과했는지'만
 # 본다.
 
+import json
 import subprocess
 import sys
 
@@ -160,3 +161,22 @@ def test_batch_times_in_the_summary():
         "batch_seconds_p90": 0.76,
     }
     assert evaluate.batch_seconds_summary([]) == {"batch_seconds_median": None, "batch_seconds_p90": None}
+
+
+# 발화가 하나도 없는 묶음(빈 캐시로 만든 묶음)은 모델을 올리기 전에 멈춘다. 모델 불러오기(Reached)에 닿지
+# 않아야 하고, 멈춘 이유에 묶음 이름이 나와야 한다.
+def test_an_empty_set_is_refused_before_the_model_is_loaded(reports, monkeypatch, capsys):
+    monkeypatch.setattr(evaluate, "load_set", lambda name: ("ko", []))
+    with pytest.raises(SystemExit):
+        run(monkeypatch, "--model", "m", "--set", "zeroth-val")
+    err = capsys.readouterr().err
+    assert "zeroth-val" in err and "no utterances" in err
+
+
+# 리포트 JSON은 NaN·inf를 거부한다(allow_nan=False). 정답이 모두 빈 묶음의 오류율은 0 ÷ 0 = NaN이 되는데, 표준
+# JSON이 아닌 리포트가 '성공'으로 남으면 안 된다. 한국어는 그대로(ensure_ascii=False) 적는다.
+def test_report_json_refuses_nan_and_keeps_korean():
+    with pytest.raises(ValueError):
+        evaluate.report_json({"summary": {"error_rate": float("nan")}})
+    text = evaluate.report_json({"summary": {"error_rate": 0.5}, "utterances": [{"reference": "안녕"}]})
+    assert "안녕" in text and json.loads(text)["summary"]["error_rate"] == 0.5

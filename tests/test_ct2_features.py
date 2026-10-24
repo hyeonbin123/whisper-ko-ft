@@ -228,3 +228,48 @@ def test_a_cpu_ct2_run_needs_no_report(tmp_path, monkeypatch, capsys):
     with pytest.raises(SystemExit):
         evaluate_ct2.main()
     assert "--no-report" in capsys.readouterr().err
+
+
+# 발화가 하나도 없는 묶음은 묶음을 읽은 자리에서 바로 멈춘다(오디오를 읽거나 리포트를 쓰지 않는다). 모델은
+# 묶음보다 먼저 띄우는 순서라 멈추는 자리는 모델 뒤, 오디오 앞이다.
+def test_evaluate_ct2_refuses_an_empty_set(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("faster_whisper")
+    from whisper_ko_ft import evaluate_ct2
+
+    def no_audio(name):
+        raise AssertionError("an empty set must not open an audio store")
+
+    monkeypatch.setattr(evaluate_ct2, "REPORTS", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "ROOT", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "git_commit", lambda: "test")
+    monkeypatch.setattr(evaluate_ct2, "WhisperModel", FakeWhisperModel)
+    monkeypatch.setattr(evaluate_ct2, "AudioStore", no_audio)
+    monkeypatch.setattr(evaluate_ct2, "load_set", lambda name: ("ko", []))
+    monkeypatch.setattr(sys, "argv", ["evaluate_ct2", "--model", str(tmp_path), "--name", "n", "--set", "x"])
+
+    with pytest.raises(SystemExit):
+        evaluate_ct2.main()
+    assert "no utterances" in capsys.readouterr().err
+    assert not (tmp_path / "n").exists()
+
+
+# 정답이 모두 빈 묶음은 오류율이 0 ÷ 0 = NaN이 되는데, 리포트 JSON은 NaN을 거부해(allow_nan=False) 파일을
+# 남기지 않는다. 표준 JSON이 아닌 리포트가 '성공'으로 남는 것을 막는다.
+def test_evaluate_ct2_does_not_write_a_report_with_nan(tmp_path, monkeypatch):
+    pytest.importorskip("faster_whisper")
+    from whisper_ko_ft import evaluate_ct2
+    from whisper_ko_ft.store import Utterance
+
+    TranscribingModel.segments = {"a": [Segment("가")], "b": []}
+    utterances = [Utterance(i, "s", "", "x", 0, 16_000) for i in ("a", "b")]  # 정답이 모두 비었다
+    monkeypatch.setattr(evaluate_ct2, "REPORTS", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "ROOT", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "git_commit", lambda: "test")
+    monkeypatch.setattr(evaluate_ct2, "WhisperModel", TranscribingModel)
+    monkeypatch.setattr(evaluate_ct2, "AudioStore", IdStore)
+    monkeypatch.setattr(evaluate_ct2, "load_set", lambda name: ("ko", utterances))
+    monkeypatch.setattr(sys, "argv", ["evaluate_ct2", "--model", str(tmp_path), "--name", "n", "--set", "x"])
+
+    with pytest.raises(ValueError):
+        evaluate_ct2.main()
+    assert not (tmp_path / "n" / "x.json").exists()
