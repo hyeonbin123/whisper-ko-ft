@@ -134,6 +134,7 @@ uv run python -m whisper_ko_ft.train --run-name small-a-repro --learning-rate 1e
 ```
 
 - `prepare`는 Zeroth-Korean train에서 화자 10명을 validation으로 떼어 낸다 (화자 ID의 SHA-256 순, 규칙은 experiments.md)
+- `prepare`는 시작할 때 `data/raw`의 parquet을 커밋된 원본 manifest(`src/whisper_ko_ft/data_manifest.json`: 파일마다 크기·SHA-256과 Hugging Face parquet 변환본의 커밋)와 견주고(기본은 크기, `--verify-hash`면 SHA-256), 만든 묶음의 발화 수와 validation 화자가 기록(experiments.md 1단계)과 다르면 멈춘다(`--allow-different-data`면 경고만 찍고 쓴다). 받은 파일만 확인하려면 `download --verify`. 저장소를 다시 만들려면 `prepare --rebuild`(또는 `data/cache/<저장소>.json` 삭제). 색인이 지금 parquet과 다른 파일로 만들어진 것이면 `--rebuild`를 요구한다
 - `evaluate`는 `reports/<이름>/<묶음>.json`에 요약과 발화별 정답·가설·오류 수를 남긴다. test 묶음은 `--allow-test`를 줘야 잰다 (단계마다 한 번만 재기 위한 장치)
 - 리포트는 커밋된 기록이라 이미 있으면 `--overwrite`를 줘야 다시 잰다(`evaluate_ct2`도 같다). `--adapter`로 잴 때는 `--name`이 필수다 (기본 이름이 기준 모델의 리포트 폴더가 되므로). `--limit`으로 일부만 잰 리포트는 `analyze`가 받지 않는다
 - `train`은 `outputs/<run-name>/`에 학습 결과(`run.json`, `best/`, `checkpoint-*`)가 있으면 시작하지 않는다(`outputs/`는 커밋하지 않으므로, 같은 이름으로 다시 돌려 기록한 학습 결과를 덮어쓰지 않게). 새로 학습하려면 다른 `--run-name`을 쓰고, 멈춘 실행은 같은 명령에 `--resume`을 더하면 끝까지 저장된 마지막 체크포인트부터 잇는다(옵티마이저·학습률 일정·난수 상태도 이어진다). 학습 스텝도 평가 배치도 15분 넘게 끝나지 않으면 주 프로세스의 스레드 스택을 `outputs/<run-name>/hang.log`에 덧붙인다(DataLoader 워커 안은 보이지 않는다)

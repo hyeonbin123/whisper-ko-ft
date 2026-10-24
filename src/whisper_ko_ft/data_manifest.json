@@ -1,0 +1,61 @@
+{
+  "created": "2026-10-24",
+  "files": {
+    "zeroth/default/train/0.parquet": {
+      "bytes": 499070876,
+      "sha256": "6801a64e3f5c9b49bedfffc41733dfceffbf822237ac9cd70c9687944a685943"
+    },
+    "zeroth/default/train/1.parquet": {
+      "bytes": 470691683,
+      "sha256": "5f189248aed0befdecea9fb3cd843d18819419acfbe2be32fcc61af94360b64b"
+    },
+    "zeroth/default/train/2.parquet": {
+      "bytes": 444033028,
+      "sha256": "b7f7b4cdd57af262313485bd41c454f575509ef4eba17240f2078033693b2069"
+    },
+    "zeroth/default/train/3.parquet": {
+      "bytes": 481254881,
+      "sha256": "7b1cc68d924b52d9f7ea938fa3d65ba3d8e7bb81d0149b10f06f89e8d39261a5"
+    },
+    "zeroth/default/train/4.parquet": {
+      "bytes": 459642792,
+      "sha256": "f679e7f963e6cf4911c45ac68c4e67be12df73b63d889ebd9373d4af18fcbe91"
+    },
+    "zeroth/default/train/5.parquet": {
+      "bytes": 462471629,
+      "sha256": "7c31d0628a6bd0d6624d4bd1505052579a72eec99842e9e526fe1b1c89f6c1ec"
+    },
+    "zeroth/default/test/0.parquet": {
+      "bytes": 59847930,
+      "sha256": "2f6382b902622ede1bf35e5a167a9b06b0f1b8c896e1947324b8b5180fca7502"
+    },
+    "fleurs/ko_kr/validation/0.parquet": {
+      "bytes": 170237617,
+      "sha256": "fe165251431a7376f43502f326f636cc9c8c51d0584b9a21b880e359f2d4893b"
+    },
+    "fleurs/ko_kr/test/0.parquet": {
+      "bytes": 291159866,
+      "sha256": "1a8319fc61c7996e8c15acde633786de97054e28ae1e463eb13901716176a7ec"
+    },
+    "fleurs/en_us/validation/0.parquet": {
+      "bytes": 236549523,
+      "sha256": "7c3eeb11a9597bd52cdc1b0d637e85389fe094cfd8763913e7bf4fdf7a853959"
+    },
+    "fleurs/en_us/test/0.parquet": {
+      "bytes": 401722686,
+      "sha256": "6428a4d04d3aac29e16b45e039bb1470a8bd7aa334cf92f7984c9c520d1f234d"
+    }
+  },
+  "upstream": {
+    "zeroth": {
+      "repo": "kresnik/zeroth_korean",
+      "parquet_revision": "491377c37bc9cf41fb2d88f3e7b01b2c19b4891c",
+      "checked": "2026-10-24"
+    },
+    "fleurs": {
+      "repo": "google/fleurs",
+      "parquet_revision": "168de341b3db6859a9bac1c50a2ef5e3b47647e0",
+      "checked": "2026-10-24"
+    }
+  }
+}

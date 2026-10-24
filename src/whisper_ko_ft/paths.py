@@ -27,3 +27,9 @@ CACHE = DATA / "cache"
 # tests/test_recorded_reports.py가 다시 읽어 채점한다.
 OUTPUTS = ROOT / "outputs"
 REPORTS = ROOT / "reports"
+# MANIFEST: 원본 manifest(커밋). data/raw의 parquet마다 상대 경로·바이트 크기·SHA-256과, 데이터셋마다 Hugging
+# Face parquet 변환본(refs/convert/parquet)의 커밋을 적은 JSON이다. `download --write-manifest`가 쓰고,
+# `download --verify`와 prepare가 읽어 받은 파일이 기록된 측정의 원본과 같은지 가린다. data/는 git 제외라
+# 커밋할 수 없어 패키지 폴더에 둔다(en_norm의 english.json과 같은 방식). 패키지와 함께 설치되므로 어디서
+# 실행하든 같은 기록을 읽는다.
+MANIFEST = Path(__file__).with_name("data_manifest.json")
