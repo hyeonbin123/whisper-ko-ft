@@ -5,7 +5,8 @@
 # 칸(만족/불만족 조합)과 경계값, 판정하지 않는 경우를 테스트로 고정한다.
 # [구성] 공통(load_rows 검사, 숫자 발화 목록, compare, table) → 2·3단계 verdict → 6단계 맞춘 CER과 verdict6 →
 # 되풀이와 8단계 채점·verdict8·changes·itn8 → 9단계 gate9·verdict9 → 10단계 gate10·pick10·smoke10·verdict10 →
-# 민감도 분석(robust) → 11·12단계 → Zeroth 문장 겹침(overlap, 커밋된 파생 파일의 수 고정).
+# 민감도 분석(robust) → 11·12단계 → Zeroth 문장 겹침(overlap, 커밋된 파생 파일의 수 고정) → 영어 보조 채점
+# en-whisper(예시, 커밋된 FLEURS 영어 리포트의 총합 고정).
 
 import json
 
@@ -307,6 +308,18 @@ def test_en_whisper_scoring_matches_english_notation(reports):
     assert [row["edits"] for row in aux.values()] == [0, 0, 0, 0]
     assert (registered["u1"]["length"], aux["u1"]["length"]) == (4, 3)
     assert aux["u0"]["hypothesis"] == pairs[0][1]  # 저장된 글은 절대 바뀌지 않는다
+
+
+# en-whisper는 표준 정규화의 출력을 그대로 단어 단위로 센다(Whisper의 WER 절차). 등록 정규화를 덧씌우지
+# 않으므로 숫자에 붙은 '%'·'$'는 남아 '100%'와 '100'은 한 단어가 다르다. 등록 채점은 기호를 지워 둘을 같게
+# 본다.
+def test_en_whisper_keeps_the_symbols_the_standard_normalizer_keeps(reports):
+    pairs = [("100%", "100"), ("$5", "5"), ("2.5 percent", "2.5%")]
+    write_report(reports, "m", "fleurs-en-val", english_rows(pairs))
+    registered = analyze.load_rows("m", "fleurs-en-val")
+    assert [row["edits"] for row in registered.values()] == [0, 0, 1]
+    aux = analyze.load_rows("m", "fleurs-en-val", scoring="en-whisper")
+    assert [(row["edits"], row["length"]) for row in aux.values()] == [(1, 1), (1, 1), (0, 1)]
 
 
 # 표준 정규화로 정답이 비는 발화(군말만 있는 경우)는 공통 규칙의 '정답이 빈 발화'처럼 보조 채점에서 뺀다.
@@ -1054,3 +1067,35 @@ def test_recorded_sentence_overlap_sets(
     assert entry["not_in_train"] == sorted(i for i, n in reads.items() if not n)
     if not_in_train is not None:
         assert entry["not_in_train"] == not_in_train
+
+
+# 영어 보조 지표 en-whisper(docs/experiments.md '보조 지표' 절)로 커밋된 FLEURS 영어 리포트를 다시 채점한 편집
+# 수와 정답 단어 수의 총합을 고정한다. 리포트에는 저장하지 않고 부를 때마다 다시 채점하므로, transformers의
+# EnglishTextNormalizer나 사전 사본이 바뀌어 값이 움직이면 여기서 드러난다. 각 줄 끝의 퍼센트는 문서에 적은
+# 보조 지표 WER이고 괄호 안은 등록 지표다. 값은 규칙의 명령(`analyze table --scoring en-whisper`)의 2026-10-24
+# 출력이다. 두 묶음 모두 정규화한 정답이 빈 발화는 없어 발화 수는 등록 지표와 같다(394, 647).
+@pytest.mark.parametrize(
+    ("report", "set_name", "edits", "length"),
+    [
+        ("whisper-small", "fleurs-en-val", 561, 8298),  # 6.76% (등록 7.35%)
+        ("small-a", "fleurs-en-val", 603, 8298),  # 7.27% (8.22%)
+        ("whisper-large-v3-turbo", "fleurs-en-val", 388, 8298),  # 4.68% (5.50%)
+        ("turbo-l2", "fleurs-en-val", 417, 8298),  # 5.03% (5.96%)
+        ("turbo-n", "fleurs-en-val", 420, 8298),  # 5.06% (6.09%)
+        ("qwen3-asr-1.7b", "fleurs-en-val", 306, 8298),  # 3.69% (4.40%)
+        ("qwen3-asr-1.7b-qn", "fleurs-en-val", 309, 8298),  # 3.72% (4.91%)
+        ("qwen3-asr-1.7b-qn-s050", "fleurs-en-val", 294, 8298),  # 3.54% (4.42%)
+        ("whisper-small", "fleurs-en-test", 951, 14557),  # 6.53% (7.08%)
+        ("small-a", "fleurs-en-test", 978, 14557),  # 6.72% (7.63%)
+        ("whisper-large-v3-turbo", "fleurs-en-test", 635, 14557),  # 4.36% (4.95%)
+        ("turbo-l2", "fleurs-en-test", 643, 14557),  # 4.42% (5.23%)
+        ("turbo-n", "fleurs-en-test", 647, 14557),  # 4.44% (5.31%)
+        ("qwen3-asr-1.7b", "fleurs-en-test", 478, 14557),  # 3.28% (3.91%)
+        ("qwen3-asr-1.7b-qn", "fleurs-en-test", 497, 14557),  # 3.41% (4.76%)
+        ("qwen3-asr-1.7b-qn-s050", "fleurs-en-test", 472, 14557),  # 3.24% (4.06%)
+    ],
+)
+def test_recorded_en_whisper_totals(report, set_name, edits, length):
+    rows = analyze.load_rows(report, set_name, scoring="en-whisper")
+    got_edits, got_lengths = analyze.arrays(rows, sorted(rows))
+    assert (int(got_edits.sum()), int(got_lengths.sum())) == (edits, length)

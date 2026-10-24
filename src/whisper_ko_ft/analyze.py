@@ -84,7 +84,9 @@ import math
 import re
 import statistics
 
-# numpy: 발화별 편집 수·길이 배열.
+# jiwer: en-whisper 채점의 단어 단위 편집 거리(표준 정규화의 출력을 더 손대지 않고 세기 위해 metrics.score를
+# 거치지 않는다. word_edits). numpy: 발화별 편집 수·길이 배열.
+import jiwer
 import numpy as np
 
 # itn·latin: 다시 채점할 때 쓰는 표기 변환(한국어). en_norm: 영어 보조 지표의 표준 정규화. metrics: 채점,
@@ -205,6 +207,10 @@ def _en_whisper(reference: str, hypothesis: str) -> tuple[str, str]:
 # SCORINGS: --scoring 이름 → 변환 함수. 오류율을 다시 계산하기 전에 저장된 정답과 가설을 어떻게 바꿀지 정한다.
 # SCORING_LANGUAGE: 채점마다 쓸 수 있는 묶음의 언어. 적지 않은 채점은 한국어 CER용이다. load_rows가 묶음의
 # 언어(set_language)와 다르면 거부한다.
+# FINAL_SCORINGS: 변환 결과가 이미 채점용 글이라 등록 정규화(text_norm.normalize)를 덧씌우지 않고 그대로 세는
+# 채점. en-whisper가 그렇다: Whisper의 WER 절차는 표준 정규화의 출력을 바로 단어로 나눠 세고, 등록 정규화를 더
+# 적용하면 숫자에 붙은 '%'·'$'가 지워지고 소수점이 단어 경계가 되어 표준과 다른 값이 된다. 한국어 채점들은
+# 변환 뒤 등록 정규화를 거친다(기존 동작 그대로).
 SCORINGS = {
     "harmonized": _harmonized,
     "itn": _itn,
@@ -214,6 +220,7 @@ SCORINGS = {
     "en-whisper": _en_whisper,
 }
 SCORING_LANGUAGE = {"en-whisper": "en"}
+FINAL_SCORINGS = {"en-whisper"}
 
 
 def scoring_language(scoring: str) -> str:
@@ -254,16 +261,31 @@ def load_rows(
     return rows
 
 
+# 이미 채점용 형태인 영어 글의 단어 단위 편집 수와 정답 단어 수. metrics.score와 같은 셈(치환 + 삭제 + 삽입,
+# 정답 길이 = 맞음 + 치환 + 삭제)이지만 정규화를 더 하지 않는다. 정답에 단어가 없으면 None(score와 같다).
+def word_edits(reference: str, hypothesis: str) -> tuple[int, int] | None:
+    """정규화를 더 하지 않고 센 (편집 수, 정답 단어 수). 정답이 비면 None."""
+    if not reference.split():
+        return None
+    out = jiwer.process_words(reference, hypothesis)
+    return out.substitutions + out.deletions + out.insertions, out.hits + out.substitutions + out.deletions
+
+
 def rescored(row: dict, scoring: str = "harmonized", language: str = "ko") -> dict:
     """행 하나를 SCORINGS[scoring]으로 바꾼 글로 그 언어의 오류율(ko는 CER, en은 WER)을 다시 계산한 새 행.
 
-    edits·length만 바뀌고, 저장된 정답·가설 글은 그대로 남는다. 바꾼 정답이 비면(score가 None) 편집 수와
-    길이를 0으로 적어 load_rows가 그 행을 뺄 수 있게 한다.
+    edits·length만 바뀌고, 저장된 정답·가설 글은 그대로 남는다. FINAL_SCORINGS의 채점은 바꾼 글을 그대로
+    단어로 세고, 나머지는 metrics.score(등록 정규화 포함)로 센다. 바꾼 정답이 비면 편집 수와 길이를 0으로 적어
+    load_rows가 그 행을 뺄 수 있게 한다.
     """
-    scored = score(*SCORINGS[scoring](row["reference"], row["hypothesis"]), language)
-    if scored is None:
-        return {**row, "edits": 0, "length": 0}
-    return {**row, "edits": scored.edits, "length": scored.length}
+    reference, hypothesis = SCORINGS[scoring](row["reference"], row["hypothesis"])
+    if scoring in FINAL_SCORINGS:
+        counted = word_edits(reference, hypothesis)
+    else:
+        scored = score(reference, hypothesis, language)
+        counted = (scored.edits, scored.length) if scored else None
+    edits, length = counted or (0, 0)
+    return {**row, "edits": edits, "length": length}
 
 
 def digit_ids(set_name: str) -> set[str]:
