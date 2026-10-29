@@ -11,8 +11,15 @@
 # 배포하는 영미 철자 사전(영국 철자 → 미국 철자 1,740쌍)을 2026-10-24에 그대로 복사한 것이다. transformers의
 # WhisperTokenizer가 바로 이 파일을 읽어 EnglishTextNormalizer에 넘기고(tokenization_whisper.py의
 # `english_spelling_normalizer`), 같은 파일이 `openai/whisper-large-v3-turbo` 저장소에도 바이트까지 같게 들어
-# 있다. 이 사전은 openai/whisper 저장소의 `whisper/normalizers/english.json`에 해당한다(GitHub의 그 파일과
-# 바이트 단위로 대조하지는 않았다). 아래 ENGLISH_JSON_SHA256이 복사한 파일의 SHA-256이다.
+# 있다. 아래 ENGLISH_JSON_SHA256이 복사한 파일의 SHA-256이다.
+# GitHub openai/whisper와의 대조(2026-10-29): 내용은 그 저장소 첫 커밋 6e3be77(2022-09-21)의
+# `whisper/normalizers/english.json` 1,740쌍과 같다. 바이트는 키를 정렬하고 2칸으로 들여 다시 쓴 꼴이라
+# 다르다(그 파일을 json.dumps(..., indent=2, sort_keys=True)로 쓰고 줄바꿈 하나를 붙이면 이 사본과 바이트까지
+# 같다). 지금 openai/whisper main은 커밋 ea1c266(2023-01-18, '20mm'의 mm이 hmm으로 바뀌던 버그를 고침)에서
+# "mm" → "hmm" 한 쌍을 뺀 1,739쌍이다. 군말로 쓴 'mm'은 EnglishTextNormalizer가 사전을 적용하기 전에 지우므로
+# 이 쌍은 '35mm'처럼 숫자에서 떨어져 나온 'mm'에만 걸리고, 정답과 가설에 같게 걸린다. 커밋된 FLEURS 영어
+# 리포트에서는 두 사전의 발화별 편집 수·단어 수가 모두 같다(docs/experiments.md '보조 지표' 절의 2026-10-29
+# 덧붙임).
 # [라이선스] openai/whisper의 정규화 코드와 사전은 MIT 라이선스다. 사본에 붙이는 고지:
 #   MIT License. Copyright (c) 2022 OpenAI
 #   Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
