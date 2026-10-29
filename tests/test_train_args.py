@@ -1,8 +1,8 @@
 # [테스트 묶음] train.py의 LoRA 인자 처리(resolve_lora_args)와, --init-adapter만 준 실행이 실제로 어댑터를
 # 불러오는지 확인한다. 그리고 실행 폴더 보호(같은 --run-name이면 시작하지 않음), --resume(끝까지 저장된 마지막
-# 체크포인트에서 잇기, run.json의 starts 덧붙이기), 멈춤 진단(진행이 없으면 스레드 스택을 hang.log에 남기는
-# 콜백), 기본 모델 revision 고정(등록한 Hub ID에만)과 run.json의 환경 기록(revision, transformers·peft 판)을
-# 확인한다.
+# 체크포인트에서 잇기, run.json의 starts 덧붙이기, 이미 --max-steps에 닿은 실행은 거부), 멈춤 진단(진행이
+# 없으면 스레드 스택을 hang.log에 남기는 콜백), 기본 모델 revision 고정(등록한 Hub ID에만)과 run.json의 환경
+# 기록(revision, transformers·peft 판)을 확인한다.
 # [왜 중요한가] 예전 코드는 --lora-r만 보고 LoRA 여부를 정해서, --lora-r 없이 --init-adapter만 주면 어댑터를
 # 버리고 기본 모델 전체를 fp32로 학습했다(커밋 8ad5a18에서 고침). 오류 없이 다른 실험이 되어 버리는 버그라
 # 테스트로 막는다. 또 outputs/는 커밋하지 않아 기록한 리포트를 낸 가중치의 유일한 사본인데, 예전 코드는 같은
@@ -344,6 +344,70 @@ def test_resuming_a_run_recorded_before_starts_keeps_its_first_commit(tmp_path, 
     starts = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))["starts"]
     assert starts[0] == {"time": None, "commit": "35087f3", "resume_from": None}
     assert starts[1]["resume_from"] == str(run_dir / "checkpoint-500")
+
+
+# Trainer가 체크포인트에 쓰는 것과 같은 trainer_state.json(TrainerState.save_to_json)을 단 체크포인트 폴더를
+# 만든다. 이어 하기는 이 파일의 global_step에서 잇는다.
+def saved_checkpoint(run_dir, step: int, max_steps: int) -> None:
+    folder = run_dir / f"checkpoint-{step}"
+    folder.mkdir(parents=True)
+    transformers.TrainerState(global_step=step, max_steps=max_steps).save_to_json(
+        str(folder / "trainer_state.json")
+    )
+
+
+# 마지막 체크포인트가 이미 --max-steps에 닿은(끝난) 실행에 --resume을 주면, 데이터·처리기·모델을 불러오기
+# 전에 멈추고 폴더에 아무것도 쓰지 않는다. transformers 5.17의 Trainer는 이어 하기 전에 이를 확인하지 않아,
+# 고치기 전에는 옵티마이저 스텝을 하나 더 돌고 평가한 뒤 checkpoint-<max+1>을 저장했다(save_total_limit 2
+# 회전으로 앞 체크포인트가 지워지고, 그 체크포인트가 가장 좋으면 best/도 바뀐다). 같은 명령으로 다시 돌린
+# 경우(1500)와 더 작은 --max-steps를 준 경우(1000) 모두 그렇다.
+@pytest.mark.parametrize("max_steps", ["1500", "1000"])
+def test_a_finished_run_is_not_resumed(tmp_path, monkeypatch, capsys, max_steps):
+    seen = fake_training(monkeypatch, tmp_path)
+    run_dir = tmp_path / "x"
+    for step in (1000, 1500):
+        saved_checkpoint(run_dir, step, 1500)
+    (run_dir / "run.json").write_text('{"commit": "0db1c24"}', encoding="utf-8")
+    before = sorted(str(path.relative_to(run_dir)) for path in run_dir.rglob("*"))
+
+    with pytest.raises(SystemExit):
+        run_main(monkeypatch, "--resume", "--max-steps", max_steps)
+
+    err = capsys.readouterr().err
+    assert f"checkpoint-1500 is already at step 1500 of --max-steps {max_steps}" in err
+    assert "nothing left to train; pass a larger --max-steps to extend" in err
+    assert seen["loaded"] == []  # 불러오기 전에 멈춘다
+    assert sorted(str(path.relative_to(run_dir)) for path in run_dir.rglob("*")) == before  # hang.log도 없다
+    assert (run_dir / "run.json").read_text(encoding="utf-8") == '{"commit": "0db1c24"}'
+
+
+# 더 긴 --max-steps로 잇는 것은 그대로 된다(13단계 스모크의 checkpoint-2 → --resume --max-steps 4).
+def test_a_run_can_be_extended_with_a_larger_max_steps(tmp_path, monkeypatch, capsys):
+    seen = fake_training(monkeypatch, tmp_path)
+    run_dir = tmp_path / "x"
+    saved_checkpoint(run_dir, 2, 2)
+    (run_dir / "run.json").write_text("{}", encoding="utf-8")
+
+    run_main(monkeypatch, "--resume", "--max-steps", "4")
+
+    assert seen["resume_from_checkpoint"] == str(run_dir / "checkpoint-2")
+    assert seen["training_args"]["max_steps"] == 4
+    assert "(step 2 of --max-steps 4)" in capsys.readouterr().out
+
+
+# 고른 체크포인트의 trainer_state.json을 읽을 수 없으면(저장 도중 끝나 반만 쓰인 파일 등) 불러오기 전에 그
+# 파일을 짚어 멈춘다. 그대로 두면 데이터와 모델을 다 불러온 뒤 Trainer가 JSON 오류로 멈춘다.
+def test_an_unreadable_trainer_state_stops_before_loading(tmp_path, monkeypatch, capsys):
+    seen = fake_training(monkeypatch, tmp_path)
+    run_dir = tmp_path / "x"
+    (run_dir / "checkpoint-500").mkdir(parents=True)
+    (run_dir / "checkpoint-500" / "trainer_state.json").write_text('{"global_step": 5', encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        run_main(monkeypatch, "--resume")
+
+    assert "cannot read the step of checkpoint-500 from trainer_state.json" in capsys.readouterr().err
+    assert seen["loaded"] == []
 
 
 # 멈춤 진단: 학습을 시작할 때 hang.log를 열어 감시(900초, 반복)를 걸고, 스텝 끝·평가 배치·평가 끝마다 다시

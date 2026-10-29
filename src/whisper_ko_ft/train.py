@@ -9,7 +9,9 @@
 outputs/<run-name>/에 쓴다: 체크포인트, `best/`(val-500 CER이 가장 낮은 것: 모델, 또는 --lora-r이나
 --init-adapter를 주면 LoRA 어댑터, 그리고 처리기), `run.json`(시작할 때마다 starts에 한 줄), `hang.log`(학습이
 15분 넘게 나아가지 않으면 주 프로세스의 스레드 스택을 덧붙인다).
-그 폴더에 이미 학습 결과(run.json, best/, 체크포인트)가 있으면 --resume 없이는 시작하지 않는다.
+그 폴더에 이미 학습 결과(run.json, best/, 체크포인트)가 있으면 --resume 없이는 시작하지 않는다. 마지막
+체크포인트가 이미 --max-steps에 닿은(끝난) 실행은 --resume으로도 다시 돌지 않는다(더 길게 하려면 더 큰
+--max-steps).
 --init-adapter는 저장된 어댑터에서 rank, alpha, dropout, 대상 층을 가져오며 --lora-*는 무시한다.
 """
 
@@ -33,6 +35,8 @@ outputs/<run-name>/에 쓴다: 체크포인트, `best/`(val-500 CER이 가장 �
 # 체크포인트를 지우고(save_total_limit 2), 끝에 best/를 덮어썼다. 그래서 학습 결과가 있는 폴더에서는 --resume
 # 없이 시작하지 않는다(train_qwen과 같은 규칙과 문구). --resume은 Trainer가 체크포인트에 남긴
 # 옵티마이저·학습률 일정·GradScaler·난수 상태로 이어 가고, run.json은 지우지 않고 starts에 시작을 덧붙인다.
+# 이미 --max-steps까지 끝난 실행에 --resume을 주면 거부한다(check_run_dir): Trainer가 한 스텝을 더 돌고 새
+# 체크포인트를 저장해 기록한 학습이 바뀔 수 있기 때문이다.
 # [연결] train_qwen이 UtteranceDataset을 가져다 쓴다. 학습한 LoRA는 evaluate --adapter로 재고, merge_adapter로
 # 합쳐 faster-whisper로 잰다.
 
@@ -48,9 +52,9 @@ from pathlib import Path
 
 # numpy: 학습 중 평가에서 라벨 패딩(-100)을 바꾸고 오류율을 계산한다. torch: 데이터셋과 dtype. transformers:
 # Seq2SeqTrainer(학습 루프·평가·체크포인트 관리), Whisper 모델과 처리기, 멈춤 진단을 거는 TrainerCallback,
-# 그리고 체크포인트 폴더 이름(checkpoint-<스텝>)과 Trainer가 체크포인트에 마지막으로 쓰는
-# 파일(trainer_state.json)의 이름. 이름을 Trainer에서 가져와 판이 바뀌어도 Trainer가 쓰는 이름과 어긋나지 않게
-# 한다.
+# 이어 할 체크포인트의 스텝을 Trainer와 같은 방식으로 읽는 TrainerState, 그리고 체크포인트 폴더
+# 이름(checkpoint-<스텝>)과 Trainer가 체크포인트에 마지막으로 쓰는 파일(trainer_state.json)의 이름. 이름을
+# Trainer에서 가져와 판이 바뀌어도 Trainer가 쓰는 이름과 어긋나지 않게 한다.
 import numpy as np
 import torch
 import transformers
@@ -59,6 +63,7 @@ from transformers import (
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     TrainerCallback,
+    TrainerState,
     WhisperForConditionalGeneration,
     WhisperProcessor,
 )
@@ -213,12 +218,24 @@ def last_complete_checkpoint(run_dir: Path) -> Path | None:
 # - --resume이 없으면: run.json, best/, checkpoint-* 폴더(끝까지 저장됐는지와 관계없이) 중 하나라도 있으면
 #   멈춘다. 셸 리디렉션으로 로그를 받으려고 미리 만든 빈 폴더나 train.log만 있는 폴더는 학습 결과가 아니라
 #   통과한다.
-# - --resume이면: 끝까지 저장된 체크포인트가 없으면 멈추고, 있으면 그 경로를 돌려준다. 더 늦은 체크포인트가
-#   저장 도중에 끝나 건너뛸 때는 그 사실을 찍는다. 끝난 실행에 --resume을 주는 것(스모크에서 더 긴
-#   --max-steps로 잇기 등)은 막지 않는다. 같은 이름을 실수로 다시 쓰는 것이 아니라 일부러 이어 가는 것이기
-#   때문이다.
+# - --resume이면: 끝까지 저장된 체크포인트가 없으면 멈춘다. 그 체크포인트의 스텝(trainer_state.json의
+#   global_step)이 이미 max_steps(--max-steps) 이상이면(끝난 실행) 멈추고, 아니면 그 경로를 돌려준다. 더 늦은
+#   체크포인트가 저장 도중에 끝나 건너뛸 때는 그 사실을 찍는다. 더 긴 --max-steps로 잇는 것(13단계 스모크의
+#   2 → 4스텝)은 그대로 된다.
+# 끝난 실행을 막는 이유: transformers 5.17의 Trainer는 이어 하기 전에 스텝이 max_steps에 닿았는지 보지 않는다.
+# 체크포인트의 스텝까지 데이터를 건너뛴 뒤 옵티마이저 스텝을 하나 더 돌고(global_step = max_steps + 1), 학습
+# 끝 처리로 평가해 checkpoint-<max_steps + 1>을 저장한다(작은 무작위 모델로 CPU에서 확인했다. Trainer 코드로
+# 보면 그 스텝이 에폭 끝과 겹칠 때만 이 일이 없다). 그러면
+# save_total_limit 2 회전으로 기록한 체크포인트가 지워질 수 있고, load_best_model_at_end가 그 체크포인트를
+# 고르면 best/가 바뀌며, run.json의 인자·커밋·판도 새 프로세스의 값으로 바뀐다. 기록한 학습이 조용히
+# 달라지므로(13단계는 '500·1,000·1,500스텝 세 체크포인트 중 하나'를 고른다) 시작하지 않는다.
+# 스텝은 Trainer가 이어 할 때 쓰는 것과 같은 함수(TrainerState.load_from_json)로 읽는다. 그 함수는 파일에 없는
+# 칸을 기본값(global_step 0)으로 채운다. 파일을 읽을 수 없으면(저장 도중 끝나 반만 쓰인 JSON 등) 그 파일을
+# 짚어 멈춘다. 그대로 두면 데이터와 모델을 다 불러온 뒤 Trainer가 같은 파일에서 멈춘다.
 # 오류 문구는 train_qwen.parse_args처럼 짧은 영어 한 줄이다. 호출 위치: main.
-def check_run_dir(parser: argparse.ArgumentParser, run_dir: Path, resume: bool) -> Path | None:
+def check_run_dir(
+    parser: argparse.ArgumentParser, run_dir: Path, resume: bool, max_steps: int
+) -> Path | None:
     latest = get_last_checkpoint(str(run_dir)) if run_dir.is_dir() else None
     if not resume:
         if (run_dir / "run.json").exists() or (run_dir / "best").exists() or latest is not None:
@@ -227,9 +244,18 @@ def check_run_dir(parser: argparse.ArgumentParser, run_dir: Path, resume: bool) 
     checkpoint = last_complete_checkpoint(run_dir)
     if checkpoint is None:
         parser.error(f"{run_dir} has no complete checkpoint to resume from")
+    try:
+        step = int(TrainerState.load_from_json(str(checkpoint / TRAINER_STATE_NAME)).global_step)
+    except (OSError, TypeError, ValueError) as error:
+        parser.error(f"cannot read the step of {checkpoint.name} from {TRAINER_STATE_NAME}: {error}")
+    if step >= max_steps:
+        parser.error(
+            f"{checkpoint.name} is already at step {step} of --max-steps {max_steps}: "
+            "nothing left to train; pass a larger --max-steps to extend"
+        )
     if Path(latest) != checkpoint:
         print(f"skipping {Path(latest).name}: no {TRAINER_STATE_NAME} (its save did not finish)", flush=True)
-    print(f"resuming from {checkpoint}", flush=True)
+    print(f"resuming from {checkpoint} (step {step} of --max-steps {max_steps})", flush=True)
     return checkpoint
 
 
@@ -339,12 +365,13 @@ def main() -> None:
         action="store_true",
         help="멈춘 실행을 outputs/<run-name>/의 마지막 체크포인트(trainer_state.json까지 끝까지 "
         "저장된 것)에서 잇는다. 처음과 같은 명령에 이것만 더한다. 옵티마이저·학습률 일정·GradScaler·난수 "
-        "상태는 체크포인트에서 이어지고, run.json의 starts에 이번 시작이 덧붙는다",
+        "상태는 체크포인트에서 이어지고, run.json의 starts에 이번 시작이 덧붙는다. 마지막 체크포인트가 "
+        "이미 --max-steps에 닿은(끝난) 실행은 거부한다(더 길게 이으려면 더 큰 --max-steps)",
     )
     args = parser.parse_args()
     # 실행 폴더 보호: 데이터·처리기·모델을 불러오기 전에 확인해, 거부할 때는 아무것도 읽거나 쓰지 않는다.
     run_dir = OUTPUTS / args.run_name
-    resume_from = check_run_dir(parser, run_dir, args.resume)
+    resume_from = check_run_dir(parser, run_dir, args.resume, args.max_steps)
     resolve_lora_args(args)
 
     # 학습 묶음과 평가 묶음(val-500)을 읽는다. --limit-*는 스모크 실행에서만 쓴다.
