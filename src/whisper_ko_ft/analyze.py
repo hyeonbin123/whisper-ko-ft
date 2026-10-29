@@ -66,6 +66,16 @@ Zeroth·FLEURS 한국어, en-whisper는 FLEURS 영어) 다른 언어의 묶음�
 10,000번(seed 0)이다. N-H를 재기 전에도 돌릴 수 있고 그때는 기준선과 N의 수(G와 해석 문턱)만 찍는다.
 
     uv run python -m whisper_ko_ft.analyze verdict13
+
+붙여 쓴 한글 숫자 보조 채점(2026-10-29, 판정 없음): `--scoring harmonized2`는 맞춘 CER(harmonized)에 더해
+'이천십육년'·'삼십퍼센트'처럼 붙여 쓴 한글 숫자를 Zeroth 정답처럼 띄어 쓴 뒤 같은 변환을 적용한다
+(itn.harmonize2). 11단계 Zeroth 격차 중 붙여 쓴 숫자의 채점 몫을 나눠 볼 때 쓰고, 등록 채점과 판정은
+그대로다. `scoring-diff`는 두 채점의 변환이 다른 발화와 바뀐 낱말 짝을 나열한다(오탐 점검,
+docs/experiments.md '보조 지표 (판정 없음): 붙여 쓴 한글 숫자까지 맞춘 채점').
+
+    uv run python -m whisper_ko_ft.analyze table --set zeroth-val \
+        --reports turbo-n qwen3-asr-1.7b-qn-s050 --baseline turbo-n --scoring harmonized2
+    uv run python -m whisper_ko_ft.analyze scoring-diff --set zeroth-val --reports turbo-n qwen3-asr-1.7b
 """
 
 # [파일 역할] 커밋된 리포트(reports/)만 읽어 표와 판정을 내는 분석 도구. 모델을 다시 돌리지 않는다. 예외는
@@ -78,8 +88,9 @@ Zeroth·FLEURS 한국어, en-whisper는 FLEURS 영어) 다른 언어의 묶음�
 # 다시 낼 수 있다.
 # [주요 구성]
 # - 채점 방식: 원래 채점, 맞춘 CER(harmonized, 6단계), 출력 숫자 변환(itn, 8단계), 글자 이름 변환(itn-latin),
-#   표기 무관(agnostic), 영어 표준 정규화(en-whisper, 2026-10-24 보조 지표, FLEURS 영어 묶음만). 리포트의 글은
-#   바꾸지 않고 채점할 때만 적용한다(SCORINGS. 채점마다 쓸 수 있는 묶음의 언어는 SCORING_LANGUAGE).
+#   표기 무관(agnostic), 영어 표준 정규화(en-whisper, 2026-10-24 보조 지표, FLEURS 영어 묶음만), 붙여 쓴 한글
+#   숫자까지 맞춘 CER(harmonized2, 2026-10-29 보조 지표). 리포트의 글은 바꾸지 않고 채점할 때만 적용한다
+#   (SCORINGS. 채점마다 쓸 수 있는 묶음의 언어는 SCORING_LANGUAGE).
 # - 공통 도구: load_rows(리포트 읽기와 검사), compare(두 리포트의 짝지은 차이와 구간), table(표), loops(되풀이
 #   발화), changes(재시도가 바꾼 것).
 # - 단계별 판정: verdict(2·3단계), verdict6, verdict8·itn8, gate9·verdict9, gate10·smoke10·pick10·verdict10.
@@ -87,19 +98,22 @@ Zeroth·FLEURS 한국어, en-whisper는 FLEURS 영어) 다른 언어의 묶음�
 # - 문장 겹침: overlap(학습 묶음과 평가 묶음의 문장·화자 겹침, 2026-10-24. 셈은 splits.sentence_overlap).
 # - 13단계 문장 hold-out: verdict13(정의 파일의 unseen·seen 발화로 고른 비교, B = 10,000, M − C 구간은
 #   share_interval, 2026-10-29). compare의 only·samples 인자가 이때 생겼다(기본값이면 예전과 같다).
-# [연결] metrics(채점·구간), itn·latin(표기 변환), en_norm(영어 표준 정규화), paths.REPORTS를 쓴다. overlap만
-# splits·store.load_set과 paths.CACHE를 더 쓴다. tests/test_recorded_reports.py가 load_rows·arrays로 커밋된
-# 리포트의 맞춘 CER 총합을 고정하고, tests/test_analyze.py가 문장 겹침 파생 파일의 수와 영어 보조 지표의
-# 총합을 고정한다.
+# - 보조 채점 harmonized2의 오탐 점검: scoring-diff(두 채점의 변환이 다른 발화와 바뀐 낱말 짝, 2026-10-29).
+# [연결] metrics(채점·구간), itn·latin(표기 변환), en_norm(영어 표준 정규화),
+# text_norm.normalize(scoring-diff의 비교), paths.REPORTS를 쓴다. overlap만 splits·store.load_set과
+# paths.CACHE를 더 쓴다. tests/test_recorded_reports.py가 load_rows·arrays로 커밋된 리포트의 맞춘 CER 총합을
+# 고정하고, tests/test_analyze.py가 문장 겹침 파생 파일의 수와 영어 보조 지표의 총합을 고정한다.
 
 from __future__ import annotations
 
 import argparse
 import csv
+import difflib
 import json
 import math
 import re
 import statistics
+from collections import Counter
 from collections.abc import Collection, Sequence
 
 # jiwer: en-whisper 채점의 단어 단위 편집 거리(표준 정규화의 출력을 더 손대지 않고 세기 위해 metrics.score를
@@ -107,13 +121,15 @@ from collections.abc import Collection, Sequence
 import jiwer
 import numpy as np
 
-# itn·latin: 다시 채점할 때 쓰는 표기 변환(한국어). en_norm: 영어 보조 지표의 표준 정규화. metrics: 채점,
-# 오류율, 부트스트랩 구간과 짝지은 차이 구간. paths.REPORTS: 리포트 폴더. paths.CACHE·store.load_set·splits:
-# overlap만 쓴다(묶음 목록 읽기와 문장 겹침 셈). CACHE는 load_set에 매번 넘겨, 테스트가 analyze.CACHE를 임시
-# 폴더로 바꿀 수 있게 한다. splits.HOLDOUT_DEFINITION: 13단계 정의 파일의 reports/ 아래 경로(verdict13이 읽고
+# itn·latin: 다시 채점할 때 쓰는 표기 변환(한국어. itn.PUNCTUATION은 scoring-diff가 낱말을 나눌 때 쓴다).
+# en_norm: 영어 보조 지표의 표준 정규화. metrics: 채점, 오류율, 부트스트랩 구간과 짝지은 차이 구간.
+# text_norm.normalize: scoring-diff가 두 채점의 글을 등록 정규화 뒤 글자로 비교할 때 쓴다(띄어쓰기만 다른 것은
+# CER에 영향이 없어 세지 않는다). paths.REPORTS: 리포트 폴더. paths.CACHE·store.load_set·splits: overlap만
+# 쓴다(묶음 목록 읽기와 문장 겹침 셈). CACHE는 load_set에 매번 넘겨, 테스트가 analyze.CACHE를 임시 폴더로 바꿀
+# 수 있게 한다. splits.HOLDOUT_DEFINITION: 13단계 정의 파일의 reports/ 아래 경로(verdict13이 읽고
 # prepare_heldout이 쓴다).
 from whisper_ko_ft.en_norm import normalize_english
-from whisper_ko_ft.itn import harmonize, to_digits
+from whisper_ko_ft.itn import PUNCTUATION, harmonize, harmonize2, to_digits
 from whisper_ko_ft.latin import letters_to_latin
 from whisper_ko_ft.metrics import (
     BOOTSTRAP_SAMPLES,
@@ -128,6 +144,7 @@ from whisper_ko_ft.metrics import (
 from whisper_ko_ft.paths import CACHE, REPORTS
 from whisper_ko_ft.splits import HOLDOUT_DEFINITION, OVERLAP_KEYS, sentence_overlap
 from whisper_ko_ft.store import load_set
+from whisper_ko_ft.text_norm import normalize
 
 # BASE_MODELS: '숫자 발화' 목록을 정할 때 보는 기본 모델 두 개(1단계 기준선).
 BASE_MODELS = ("whisper-small", "whisper-large-v3-turbo")
@@ -180,7 +197,7 @@ STAGE10_FORGETTING_MAX = 0.010
 _DIGIT = re.compile(r"[0-9]")
 
 
-# 채점 방식 여섯 가지(한국어 다섯, 영어 하나). 모두 (정답, 가설)을 받아 바꾼 (정답, 가설)을 돌려주고, 저장된
+# 채점 방식 일곱 가지(한국어 여섯, 영어 하나). 모두 (정답, 가설)을 받아 바꾼 (정답, 가설)을 돌려주고, 저장된
 # 리포트는 바꾸지 않는다.
 def _harmonized(reference: str, hypothesis: str) -> tuple[str, str]:
     """harmonized(6단계 맞춘 CER): 정답과 가설 양쪽에 같은 숫자 표기 통일을 적용한다.
@@ -188,6 +205,15 @@ def _harmonized(reference: str, hypothesis: str) -> tuple[str, str]:
     그래서 '오 월'과 '5월'이 같은 점수를 받는다.
     """
     return harmonize(reference), harmonize(hypothesis)
+
+
+def _harmonized2(reference: str, hypothesis: str) -> tuple[str, str]:
+    """harmonized2(2026-10-29 판정 없는 보조 지표): 붙여 쓴 한글 숫자까지 양쪽에서 맞춘다.
+
+    '이천십육년'·'삼십퍼센트'를 Zeroth 정답처럼 띄어 쓴 뒤 harmonize를 적용해, 띄어 쓴 정답의 '이천 십 육
+    년'과 같은 '2016년'이 된다(itn.harmonize2, docs/experiments.md '보조 지표' 절). 등록 채점은 harmonized다.
+    """
+    return harmonize2(reference), harmonize2(hypothesis)
 
 
 def _itn(reference: str, hypothesis: str) -> tuple[str, str]:
@@ -231,9 +257,11 @@ def _en_whisper(reference: str, hypothesis: str) -> tuple[str, str]:
 # FINAL_SCORINGS: 변환 결과가 이미 채점용 글이라 등록 정규화(text_norm.normalize)를 덧씌우지 않고 그대로 세는
 # 채점. en-whisper가 그렇다: Whisper의 WER 절차는 표준 정규화의 출력을 바로 단어로 나눠 세고, 등록 정규화를 더
 # 적용하면 숫자에 붙은 '%'·'$'가 지워지고 소수점이 단어 경계가 되어 표준과 다른 값이 된다. 한국어 채점들은
-# 변환 뒤 등록 정규화를 거친다(기존 동작 그대로).
+# 변환 뒤 등록 정규화를 거친다(기존 동작 그대로). harmonized2(2026-10-29)는 판정 없는 보조 채점이다: 기록된
+# 판정·고정값은 모두 harmonized이고, harmonized2는 붙여 쓴 한글 숫자의 채점 몫을 나눠 볼 때만 쓴다.
 SCORINGS = {
     "harmonized": _harmonized,
+    "harmonized2": _harmonized2,
     "itn": _itn,
     "itn-harmonized": _itn_harmonized,
     "itn-latin": _itn_latin,
@@ -1773,6 +1801,103 @@ def verdict13(
     }
 
 
+# --- 보조 채점 harmonized2의 오탐 점검 (규칙 2026-10-29, 계산 전) ---
+
+
+# 한 쪽(정답 또는 가설)의 두 변환 글에서 바뀐 낱말 짝(앞 → 뒤)을 고른다. 문장부호를 뺀 공백 토큰끼리
+# difflib로 맞추고, 같지 않은 구간 중 띄어쓰기만 다른 것(등록 정규화 뒤 글자가 같은 것)은 뺀다. 사람이 읽기
+# 위한 보기이고, 편집 수는 rescored가 센 값을 쓴다.
+def _changed_words(before: str, after: str, language: str) -> list[tuple[str, str]]:
+    old, new = PUNCTUATION.sub(" ", before).split(), PUNCTUATION.sub(" ", after).split()
+    pairs = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+        left, right = " ".join(old[i1:i2]), " ".join(new[j1:j2])
+        if tag != "equal" and normalize(left, language) != normalize(right, language):
+            pairs.append((left, right))
+    return pairs
+
+
+# 채점 하나가 바꾼 글을 비교용 글자로: FINAL_SCORINGS(en-whisper)의 출력은 이미 채점용 글이고, 나머지는 등록
+# 정규화(rescored가 metrics.score에서 하는 것과 같다)를 거친 글자로 본다.
+def _compared(text: str, scoring: str, language: str) -> str:
+    return text if scoring in FINAL_SCORINGS else normalize(text, language)
+
+
+# scoring-diff 명령(오탐 점검): 같은 리포트를 두 채점(기본 harmonized → harmonized2)으로 바꾼 글이 비교용
+# 글자(_compared)에서 다른 발화를 리포트마다 세고, 바뀐 낱말 짝을 정답·가설 쪽마다 그 짝이 나온 발화 수와 함께
+# 찍는다. 짝마다 숫자가 맞게 바뀐 것인지 보통 낱말이 숫자로 바뀐 오탐('사회는' → '4회는')인지 사람이 읽어 보게
+# 하려는 것이다(docs/experiments.md '보조 지표 (판정 없음): 붙여 쓴 한글 숫자까지 맞춘 채점' 절의 오탐 점검).
+# 띄어쓰기만 다른 것은 CER에 영향이 없어 세지 않는다. 리포트는 바꾸지 않는다.
+# 거부하는 경우: 같은 채점 둘, 묶음의 언어와 다른 채점(load_rows가 거부한다).
+# 돌려주는 값: 리포트 → {"utterances": 두 채점 모두에서 남은 발화 수, "differ": 변환이 다른 발화 ID(리포트
+# 순서), "reference"·"hypothesis": 그 쪽 변환이 다른 발화 수, "edits_differ": 편집 수가 바뀐 발화 ID,
+# "edits"·"length": 두 채점의 편집 수·정답 길이 총합, "pairs": (쪽, 앞, 뒤) → 그 짝이 나온 발화 수(Counter)}.
+# utterances=True면 발화마다 편집 수의 변화와 바뀐 짝을 한 줄씩 더 찍는다.
+def scoring_diff(
+    set_name: str,
+    reports: list[str],
+    before: str = "harmonized",
+    after: str = "harmonized2",
+    utterances: bool = False,
+) -> dict[str, dict]:
+    """두 채점의 변환이 다른 발화와 바뀐 낱말 짝(보조 채점의 오탐 점검)."""
+    if before == after:
+        raise SystemExit("choose two different scorings")
+    language = set_language(set_name)
+    results: dict[str, dict] = {}
+    for name in reports:
+        first = load_rows(name, set_name, scoring=before)
+        second = load_rows(name, set_name, scoring=after)
+        ids = [i for i in first if i in second]
+        differ, edits_differ, sides, pairs, lines = [], [], Counter(), Counter(), []
+        for i in ids:
+            row = first[i]
+            texts = (
+                SCORINGS[before](row["reference"], row["hypothesis"]),
+                SCORINGS[after](row["reference"], row["hypothesis"]),
+            )
+            changed = {}
+            for side, (old, new) in zip(("reference", "hypothesis"), zip(*texts, strict=True), strict=True):
+                if _compared(old, before, language) != _compared(new, after, language):
+                    changed[side] = _changed_words(old, new, language)
+            if not changed:
+                continue
+            differ.append(i)
+            sides.update(changed.keys())
+            pairs.update({(side, left, right) for side, found in changed.items() for left, right in found})
+            moved = first[i]["edits"] != second[i]["edits"]
+            if moved:
+                edits_differ.append(i)
+            shown = "  ".join(
+                f"{side}: " + "; ".join(f"{left} -> {right}" for left, right in found)
+                for side, found in changed.items()
+            )
+            lines.append(f"  {i}  edits {first[i]['edits']} -> {second[i]['edits']}  {shown}")
+        edits = tuple(sum(rows[i]["edits"] for i in ids) for rows in (first, second))
+        length = tuple(sum(rows[i]["length"] for i in ids) for rows in (first, second))
+        print(
+            f"\n{set_name} {name} ({before} -> {after}): {len(ids):,} utterances, transformation differs in"
+            f" {len(differ)} (reference {sides['reference']}, hypothesis {sides['hypothesis']}), edits differ"
+            f" in {len(edits_differ)}; edits {edits[0]:,} -> {edits[1]:,}, reference length"
+            f" {length[0]:,} -> {length[1]:,}"
+        )
+        for (side, left, right), count in sorted(pairs.items(), key=lambda item: (-item[1], item[0])):
+            print(f"  {count:4d}  {side:10s}  {left} -> {right}")
+        if utterances and lines:
+            print("\n".join(lines))
+        results[name] = {
+            "utterances": len(ids),
+            "differ": differ,
+            "reference": sides["reference"],
+            "hypothesis": sides["hypothesis"],
+            "edits_differ": edits_differ,
+            "edits": edits,
+            "length": length,
+            "pairs": pairs,
+        }
+    return results
+
+
 # table --bootstrap-samples의 값 검사: 1 이상의 정수만 받는다(표본이 없으면 구간을 낼 수 없다). argparse가
 # 'argument --bootstrap-samples: …' 오류로 계산 전에 멈추도록 ArgumentTypeError를 낸다.
 def _sample_count(text: str) -> int:
@@ -1789,7 +1914,7 @@ def _sample_count(text: str) -> int:
 # verdict(2·3단계), verdict6(6단계), changes·verdict8·itn8(8단계), gate9·verdict9(9단계),
 # gate10·smoke10·pick10·verdict10(10단계), gate11·blocks(11단계), verdict12(12단계), robust(민감도 분석),
 # overlap(문장 겹침, 리포트가 아니라 묶음 목록을 읽는 유일한 명령), verdict13(13단계, 리포트와 정의 파일만
-# 읽음).
+# 읽음), scoring-diff(보조 채점 harmonized2의 오탐 점검, 2026-10-29).
 def main() -> None:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1806,9 +1931,10 @@ def main() -> None:
         "--scoring",
         choices=list(SCORINGS),
         help=(
-            "저장된 글을 다른 방식으로 다시 채점한다. 한국어 채점(harmonized·itn·itn-harmonized·itn-latin·"
-            "agnostic)은 Zeroth·FLEURS 한국어 묶음에, en-whisper(영어 표준 정규화, 판정 없는 보조 지표)는"
-            " FLEURS 영어 묶음에만 쓴다"
+            "저장된 글을 다른 방식으로 다시 채점한다. 한국어 채점(harmonized·harmonized2·itn·itn-harmonized·"
+            "itn-latin·agnostic)은 Zeroth·FLEURS 한국어 묶음에, en-whisper(영어 표준 정규화, 판정 없는 보조"
+            " 지표)는 FLEURS 영어 묶음에만 쓴다. harmonized2는 붙여 쓴 한글 숫자('이천십육년')까지"
+            " 맞추는 판정 없는 보조 채점이다"
         ),
     )
     tab.add_argument(
@@ -1890,7 +2016,11 @@ def main() -> None:
     blk.add_argument("--set", required=True, dest="set_name")
     blk.add_argument("--candidate", required=True)
     blk.add_argument("--baseline", required=True)
-    blk.add_argument("--scoring", choices=list(SCORINGS))
+    blk.add_argument(
+        "--scoring",
+        choices=list(SCORINGS),
+        help="다시 채점할 방식(table과 같다. 예: harmonized, harmonized2)",
+    )
     blk.add_argument("--without-digits", action="store_true", help="Zeroth의 숫자 발화를 뺀다")
     ver12 = commands.add_parser("verdict12", help="12단계 판정: CTranslate2 int8_float16")
     ver12.add_argument(
@@ -1950,6 +2080,29 @@ def main() -> None:
     ver13.add_argument(
         "--baseline", default="whisper-large-v3-turbo", help="기준선(학습 전 turbo)의 리포트 이름"
     )
+    sdiff = commands.add_parser(
+        "scoring-diff",
+        help="두 채점의 변환이 다른 발화와 바뀐 낱말을 나열한다(보조 채점 harmonized2의 오탐 점검)",
+        description=(
+            "같은 리포트를 두 채점(기본 harmonized -> harmonized2)으로 바꾼 글이 등록 정규화 뒤 글자에서 다른"
+            " 발화를 리포트마다 세고, 바뀐 낱말 짝(바꾸기 전 -> 뒤, 정답·가설 쪽마다)을 그 짝이 나온 발화"
+            " 수와 함께 찍는다. 짝마다 숫자가 맞게 바뀐 것인지 보통 낱말이 숫자로 바뀐 오탐인지 사람이 읽어"
+            " 보게 하려는 것이다. 띄어쓰기만 다른 것은 CER에 영향이 없어 세지 않는다. 리포트는 바꾸지 않는다."
+        ),
+    )
+    sdiff.add_argument("--set", required=True, dest="set_name")
+    sdiff.add_argument("--reports", nargs="+", required=True)
+    sdiff.add_argument(
+        "--before", default="harmonized", choices=list(SCORINGS), help="바꾸기 전 채점(기본 harmonized)"
+    )
+    sdiff.add_argument(
+        "--after", default="harmonized2", choices=list(SCORINGS), help="바꾼 뒤 채점(기본 harmonized2)"
+    )
+    sdiff.add_argument(
+        "--utterances",
+        action="store_true",
+        help="발화마다 편집 수의 변화(앞 -> 뒤)와 바뀐 낱말 짝을 한 줄씩 더 찍는다",
+    )
     args = parser.parse_args()
 
     if args.command == "digits":
@@ -1990,6 +2143,8 @@ def main() -> None:
         overlap(args.train, args.sets, args.write)
     elif args.command == "verdict13":
         verdict13(args.candidate, args.n, args.baseline)
+    elif args.command == "scoring-diff":
+        scoring_diff(args.set_name, args.reports, args.before, args.after, args.utterances)
     else:
         table(
             args.set_name,

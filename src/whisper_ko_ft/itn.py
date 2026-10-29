@@ -10,16 +10,21 @@ Zeroth-Korean은 숫자를 토큰마다 한글로 풀어 쓰고, Whisper와 FLEU
 # 6단계부터 쓴다.
 # [쓰이는 곳] (1) prepare_itn: 학습 정답의 숫자를 바꿔 6·7·10단계 모델(N, N2, QN)을 학습한다. (2) analyze의
 # '맞춘 CER'(harmonize): 정답과 가설 양쪽에 같은 변환을 적용해 어느 표기로 적든 같은 점수가 나오게 한다. (3)
-# analyze --scoring itn(to_digits): 8단계의 출력 숫자 변환 후처리로, 가설에만 적용한다.
+# analyze --scoring itn(to_digits): 8단계의 출력 숫자 변환 후처리로, 가설에만 적용한다. (4) analyze --scoring
+# harmonized2(harmonize2, 2026-10-29 판정 없는 보조 채점): 붙여 쓴 한글 숫자('이천십육년')를 Zeroth식으로
+# 띄어 쓴 뒤(split_attached) harmonize를 적용한다. 규칙은 docs/experiments.md '보조 지표 (판정 없음): 붙여 쓴
+# 한글 숫자까지 맞춘 채점' 절. 기존 to_digits·harmonize는 바꾸지 않고 함수만 더했다.
 # [설계 이유] 숫자 낱말 대부분이 보통 낱말과 겹치므로(위 docstring의 '이', '일' 등) 숫자 묶음 바로 뒤에
 # 단위(년, 월, 명 …)가 올 때만 바꾼다. 흔한 낱말과 겹치는 한 글자 숫자는 년·월·퍼센트 같은 좁은 단위 앞에서만
 # 바꾼다. 만·억·조는 글자로 둔다.
 # [한계] 규칙 기반이라 빠뜨리는 것이 있다. 단위 없는 숫자('갤럭시노트 칠'), 붙여 쓴 숫자는 그대로 남아 학습
-# 정답에 두 표기가 섞인다(docs/experiments.md 6단계).
+# 정답에 두 표기가 섞인다(docs/experiments.md 6단계). 붙여 쓴 숫자는 보조 채점 harmonize2만 다룬다.
 # [주의] 이 규칙을 바꾸면 6단계 이후의 맞춘 CER이 모두 달라진다. tests/test_recorded_reports.py가 맞춘 CER
-# 총합을 고정해 이런 변경을 잡는다.
+# 총합을 고정해 이런 변경을 잡는다. harmonize2는 학습 정답(prepare_itn)과 등록 채점에 쓰지 않는다.
 
 from __future__ import annotations
+
+import re
 
 # DIGITS: 한자어 숫자 한 글자(일~구)의 값.
 # SMALL_UNITS: 만 아래의 자리 단위(십·백·천). '이천'처럼 숫자와 붙거나 '십'처럼 혼자 쓰인다.
@@ -210,3 +215,128 @@ def to_digits(text: str) -> str:
 def harmonize(text: str) -> str:
     """정답과 가설을 같은 표기로 맞춘다: "%"를 낱말로 바꾼 뒤 숫자를 아라비아 숫자로 바꾼다."""
     return to_digits(text.replace("%", "퍼센트"))
+
+
+# --- 보조 채점 harmonized2: 붙여 쓴 한글 숫자 (규칙 2026-10-29, docs/experiments.md '보조 지표' 절) ---
+# to_digits는 공백 토큰마다 읽으므로 Zeroth 정답처럼 띄어 쓴 '이천 십 육 년'만 숫자로 바꾸고, 한글 맞춤법대로
+# 붙여 쓴 '이천십육년'·'이천십육 년'(제44항: 수는 만 단위로 띄어 쓴다)·'스물다섯 살'은 그대로 둔다. 9단계
+# Qwen처럼 한글 숫자를 붙여 쓰는 모델은 그래서 맞춘 CER에서 숫자 표기 차이를 오류로 받는다. 아래 함수는 그런
+# 토큰을 Zeroth식 조각으로 띄어 쓴 뒤 기존 harmonize를 그대로 적용한다. 숫자로 바꿀지는 여전히 to_digits가
+# 띄어 쓴 정답에서와 똑같이 정하므로(뒤에 단위가 와야 한다 등), 더 맞춰지는 것은 숫자를 붙여 쓴
+# 표기(띄어쓰기와 숫자 토큰에 붙은 문장부호)의 몫뿐이다. 규칙은 한국어 수사 문법과 이 모듈의 기존 목록만으로
+# 정했고 데이터에서 예외를 고르지 않았다. 알려진 오탐('사회는' → '4회는', '육회' → '6회')은
+# tests/test_itn.py에 고정했다.
+
+# PUNCTUATION: 등록 정규화(text_norm.normalize의 한국어 경로)가 공백으로 바꾸는 글자와 같다(text_norm의
+# 문장부호 글자에 작은따옴표를 더한 것. 한국어 경로는 작은따옴표도 지운다). harmonize2가 숫자를 읽기 전에
+# 공백으로 바꿔 '오월,'처럼 문장부호가 붙은 토큰에서도 변환이 막히지 않게 한다. 어차피 채점 전에 지워지는
+# 글자라 숫자 변환 밖의 결과는 바뀌지 않는다. analyze scoring-diff도 바뀐 낱말을 보여 줄 때 같은 글자로 토큰을
+# 나눈다.
+PUNCTUATION = re.compile(r"[^\w\s]|_")
+# _PLACES: 수의 자리 글자(십·백·천, 만·억·조). 붙여 쓴 토큰을 나눌 때는 단위로 보지 않는다. UNITS 끝의
+# 조·억·만·천은 띄어 쓴 '칠 천여'에서 숫자 읽기가 멈춘 토큰을 받으려고 넣은 것이라, 붙여 쓴 '이천에'를 '이
+# 천에'로 나누면 한 수가 둘로 깨진다.
+_PLACES = set(SMALL_UNITS) | set(LARGE_UNITS)
+# _ATTACHED_UNITS: 붙여 쓴 토큰에서 수사 뒤에 올 수 있는 단위(UNITS에서 자리 글자를 뺀 것, 순서는 그대로라
+# _unit_of처럼 앞에서부터 처음 맞는 것을 쓴다).
+_ATTACHED_UNITS = tuple(unit for unit in UNITS if unit not in _PLACES)
+
+
+# 글자열이 한자어 수사 하나면 Zeroth식 조각 목록을, 아니면 None을 돌려준다. 예: '이천십육' → ['이천', '십',
+# '육'], '일만칠천' → ['일', '만', '칠천']. 숫자 글자 바로 뒤에 십·백·천이 오면 두 글자를 한 조각으로
+# 묶고('이천'), 나머지 숫자·자리 글자는 한 글자씩 조각으로 둔다. 그 조각들을 _read_sino가 처음부터 끝까지 한
+# 수로 읽어야 수사로 본다(자리가 내려가야 하고, 만·억·조는 앞에 수가 있어야 한다). 그래서 '삼삼', '일일',
+# '만'은 수사가 아니다.
+def _sino_pieces(text: str) -> list[str] | None:
+    pieces: list[str] = []
+    index = 0
+    while index < len(text):
+        pair = text[index : index + 2]
+        if len(pair) == 2 and pair[0] in DIGITS and pair[1] in SMALL_UNITS:
+            pieces.append(pair)
+            index += 2
+        elif text[index] in DIGITS or text[index] in SMALL_UNITS or text[index] in LARGE_UNITS:
+            pieces.append(text[index])
+            index += 1
+        else:
+            return None
+    read = _read_sino(pieces, 0)
+    return pieces if read is not None and read[1] == len(pieces) else None
+
+
+# token이 고유어 수사로 시작하면 (수사 조각 목록, 나머지)들을 긴 수사부터 돌려준다. 고유어 수사는 열·스물 …
+# 아흔(NATIVE_TENS) 하나, 그 뒤에 한·두 … 아홉(NATIVE_ONES)을 붙인 것('스물다섯' → ['스물', '다섯']),
+# 다섯~아홉 하나다. 한·두·세·네만 쓴 것은 관형사·대답과 겹치고 to_digits도 혼자서는 숫자로 읽지
+# 않으므로(NATIVE_SAFE_ALONE에 없다) 수사로 보지 않는다.
+def _native_prefixes(token: str) -> list[tuple[list[str], str]]:
+    found: list[tuple[list[str], str]] = []
+    for tens in NATIVE_TENS:
+        if token.startswith(tens):
+            rest = token[len(tens) :]
+            found += [([tens, ones], rest[len(ones) :]) for ones in NATIVE_ONES if rest.startswith(ones)]
+            found.append(([tens], rest))
+    found += [
+        ([ones], token[len(ones) :])
+        for ones in NATIVE_ONES
+        if ones in NATIVE_SAFE_ALONE and token.startswith(ones)
+    ]
+    return sorted(found, key=lambda item: -len("".join(item[0])))
+
+
+# 수사 뒤의 나머지(rest)를 본다. 나머지가 단위 + 조사·접미사(AFTER_UNIT)면 [수사 조각들, 나머지]를 돌려준다.
+# 나머지가 없으면(수사만 있는 토큰) 조각이 둘 이상일 때만 나눈다(이미 한 조각인 '이천', '오', '스물'은
+# 그대로). strict면 단위가 좁은 단위(STRICT_UNITS)여야 한다. 단위는 _unit_of처럼 앞에서부터 처음 맞는 것
+# 하나로 정한다. 나눌 수 없으면 None.
+def _with_unit(numeral: list[str], rest: str, strict: bool) -> list[str] | None:
+    if not rest:
+        return numeral if len(numeral) > 1 else None
+    for unit in _ATTACHED_UNITS:
+        if rest.startswith(unit) and rest[len(unit) :] in AFTER_UNIT:
+            return [*numeral, rest] if not strict or unit in STRICT_UNITS else None
+    return None
+
+
+# 공백 토큰 하나를 Zeroth식 조각으로 나눈 목록을 돌려준다. 남김없이 나뉘지 않으면 None(그대로 둔다).
+# 순서: (1) 소리가 바뀐 달 이름 '시월'·'유월'(+조사)은 '시 월'·'유 월'로(to_digits의 MONTH_FORMS). (2) 한자어
+# 수사 + (단위 + 조사): 수사 앞부분을 가장 길게 잡고, 나머지가 맞지 않으면 짧게 줄여 본다. 수사가 한 조각이고
+# 흔한 낱말과 겹치면(AMBIGUOUS_ALONE: '이', '일', '사' …) 좁은 단위 앞에서만 나눈다. to_digits가 띄어 쓴 글에
+# 쓰는 규칙과 같아 '이년'은 나누고 '이분'·'이번'·'사건'은 그대로 둔다. (3) 고유어 수사 + (단위 + 조사).
+def _pieces(token: str) -> list[str] | None:
+    for form in MONTH_FORMS:
+        rest = token[len(form) :]
+        if token.startswith(form) and rest.startswith("월") and rest[1:] in AFTER_UNIT:
+            return [form, rest]
+    for cut in range(len(token), 0, -1):
+        numeral = _sino_pieces(token[:cut])
+        if numeral is not None:
+            strict = len(numeral) == 1 and numeral[0] in AMBIGUOUS_ALONE
+            found = _with_unit(numeral, token[cut:], strict)
+            if found is not None:
+                return found
+    for numeral, rest in _native_prefixes(token):
+        found = _with_unit(numeral, rest, strict=False)
+        if found is not None:
+            return found
+    return None
+
+
+# 붙여 쓴 한글 수사와 그 뒤에 붙은 단위(+조사)를 Zeroth 정답처럼 자리마다 띄어 쓴다. 띄어쓰기만 바꾸고 숫자로
+# 바꾸지는 않는다(그것은 harmonize가 한다). 예: '이천십육년 오월' → '이천 십 육 년 오 월', '스물다섯살이' →
+# '스물 다섯 살이'. 나뉘지 않는 토큰과 이미 Zeroth식으로 띄어 쓴 글은 그대로다(공백은 한 칸씩으로 맞춘다).
+# 호출 위치: harmonize2.
+def split_attached(text: str) -> str:
+    """붙여 쓴 한글 수사·단위를 Zeroth 정답처럼 자리마다 띄어 쓴다."""
+    out: list[str] = []
+    for token in text.split():
+        out.extend(_pieces(token) or [token])
+    return " ".join(out)
+
+
+# 보조 채점 harmonized2의 표기 통일: '%'를 '퍼센트'로 바꾸고 문장부호를 공백으로 바꾼 뒤 split_attached로 붙여
+# 쓴 한글 숫자를 띄우고, 기존 harmonize를 그대로 적용한다('%' 치환은 split_attached가 '삼십%'를 '삼십
+# 퍼센트'로 나눌 수 있게 먼저 한다. harmonize 안의 같은 치환은 그때 할 일이 없다). 정답과 가설 양쪽에 똑같이
+# 적용한다. 등록 채점(harmonize)과 학습 정답(prepare_itn)은 이 함수를 쓰지 않는다. 호출 위치: analyze의
+# harmonized2 채점(판정 없는 보조 지표)과 scoring-diff.
+def harmonize2(text: str) -> str:
+    """붙여 쓴 한글 숫자까지 맞춘다: 문장부호를 지우고 수사를 Zeroth식으로 띄운 뒤 harmonize를 적용한다."""
+    return harmonize(split_attached(PUNCTUATION.sub(" ", text.replace("%", "퍼센트"))))

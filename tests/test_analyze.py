@@ -7,7 +7,8 @@
 # 되풀이와 8단계 채점·verdict8·changes·itn8 → 9단계 gate9·verdict9 → 10단계 gate10·pick10·smoke10·verdict10 →
 # 민감도 분석(robust) → 11·12단계 → Zeroth 문장 겹침(overlap, 커밋된 파생 파일의 수 고정) → 영어 보조 채점
 # en-whisper(예시, 커밋된 FLEURS 영어 리포트의 총합 고정) → 13단계 문장 hold-out(compare의 발화 고르기·표본
-# 수, verdict13의 판정·해석 문턱, M − C 구간).
+# 수, verdict13의 판정·해석 문턱, M − C 구간) → 붙여 쓴 한글 숫자 보조 채점 harmonized2(채점, table·blocks,
+# 오탐 점검 scoring-diff).
 
 import inspect
 import json
@@ -1406,3 +1407,104 @@ def test_verdict13_command_uses_the_registered_names(monkeypatch):
     run_cli(monkeypatch, "verdict13")
     run_cli(monkeypatch, "verdict13", "--candidate", "x", "--n", "y", "--baseline", "z")
     assert called == [("turbo-nh", "turbo-n", "whisper-large-v3-turbo"), ("x", "y", "z")]
+
+
+# --- 보조 채점 harmonized2: 붙여 쓴 한글 숫자 (규칙 2026-10-29, 계산 전) ---
+
+
+# harmonized2(docs/experiments.md '보조 지표 (판정 없음): 붙여 쓴 한글 숫자까지 맞춘 채점' 절)는 붙여 쓴 한글
+# 숫자('이천십육년', '삼십퍼센트', '스물다섯 살')를 Zeroth식으로 띄어 쓴 정답과 같게 보아 오류 0이 된다. 등록
+# 맞춘 채점(harmonized)은 그 토큰을 숫자로 읽지 못해 오류로 센다. 저장된 점수와 글은 어느 채점에서도 바뀌지
+# 않는다.
+def test_harmonized2_scoring_reads_attached_numbers(reports):
+    pairs = [
+        ("이천 십 육 년 오 월", "이천십육년 오월"),
+        ("삼십 퍼센트", "삼십퍼센트"),
+        ("스물 다섯 살", "스물다섯 살"),
+    ]
+    write_report(reports, "m", "zeroth-val", scored_rows(pairs))
+    stored = analyze.load_rows("m", "zeroth-val")
+    harmonized = analyze.load_rows("m", "zeroth-val", scoring="harmonized")
+    assert all(row["edits"] > 0 for row in harmonized.values())
+    second = analyze.load_rows("m", "zeroth-val", scoring="harmonized2")
+    assert [row["edits"] for row in second.values()] == [0, 0, 0]
+    assert second["u0"]["hypothesis"] == pairs[0][1]  # 저장된 글은 절대 바뀌지 않는다
+    assert analyze.load_rows("m", "zeroth-val") == stored
+
+
+# harmonized2는 한국어 채점이라 영어 묶음에 주면 다른 한국어 채점처럼 거부한다.
+def test_harmonized2_is_refused_for_english_sets(reports):
+    write_report(reports, "m", "fleurs-en-val", rows([1]))
+    with pytest.raises(SystemExit, match="Korean"):
+        analyze.load_rows("m", "fleurs-en-val", scoring="harmonized2")
+
+
+# 규칙의 명령(table --scoring harmonized2 --baseline)으로 붙여 쓴 숫자만 다른 두 리포트를 비교하면 등록 맞춘
+# 채점에서는 차이가 나고 harmonized2에서는 +0.00%p가 된다.
+def test_table_reports_the_harmonized2_difference(reports, monkeypatch, capsys):
+    references = ["이천 십 육 년 오 월", "삼십 퍼센트가 늘었다"]
+    write_report(reports, "base", "zeroth-val", scored_rows([(r, r) for r in references]))
+    attached = ["이천십육년 오월", "삼십퍼센트가 늘었다"]
+    write_report(reports, "cand", "zeroth-val", scored_rows(list(zip(references, attached, strict=True))))
+    args = ("table", "--set", "zeroth-val", "--reports", "base", "cand", "--baseline", "base")
+    run_cli(monkeypatch, *args, "--no-digit-split", "--scoring", "harmonized")
+    assert "vs base: +0.00%p" not in capsys.readouterr().out
+    run_cli(monkeypatch, *args, "--no-digit-split", "--scoring", "harmonized2")
+    assert "vs base: +0.00%p" in capsys.readouterr().out
+
+
+# blocks도 harmonized2를 받는다(규칙의 블록 단위 구간 보고 줄).
+def test_blocks_take_the_harmonized2_scoring(reports, capsys):
+    ids = [f"{s}_003_{n:04d}" for s in ("101", "102") for n in range(2)]
+    for name, hypothesis in (("c", "이천십육년"), ("b", "이천 십 육 년")):
+        scored = scored_rows([("이천 십 육 년", hypothesis)] * 4)
+        write_report(
+            reports, name, "zeroth-val", [{**row, "id": i} for row, i in zip(scored, ids, strict=True)]
+        )
+    assert analyze.blocks("zeroth-val", "c", "b", "harmonized", False)["delta"] > 0
+    result = analyze.blocks("zeroth-val", "c", "b", "harmonized2", False)
+    assert result["delta"] == 0 and result["blocks"] == 2
+    assert "2 blocks" in capsys.readouterr().out
+
+
+# scoring-diff(오탐 점검): 두 채점의 변환이 등록 정규화 뒤 글자에서 다른 발화를 세고, 바뀐 낱말 짝을 정답·가설
+# 쪽마다 센다. u0은 가설만 바뀌어 편집 수가 줄고, u1은 오탐('사회' → '4회')이 양쪽에 똑같이 일어나 편집 수가
+# 그대로이며, u2·u3은 변환이 같다(u3의 '이분'·'이 분'은 넓은 단위 앞의 한 글자 수사라 어느 채점에서도
+# 그대로다).
+def test_scoring_diff_lists_utterances_whose_transformation_differs(reports, capsys):
+    pairs = [
+        ("이천 십 육 년", "이천십육년"),
+        ("사회 문제", "사회 문제"),
+        ("문장", "문장"),
+        ("이분", "이 분"),
+    ]
+    write_report(reports, "m", "zeroth-val", scored_rows(pairs))
+    found = analyze.scoring_diff("zeroth-val", ["m"])["m"]
+    assert found["differ"] == ["u0", "u1"]
+    assert (found["reference"], found["hypothesis"]) == (1, 2)
+    assert found["edits_differ"] == ["u0"]
+    first = analyze.load_rows("m", "zeroth-val", scoring="harmonized")
+    second = analyze.load_rows("m", "zeroth-val", scoring="harmonized2")
+    assert found["edits"] == tuple(sum(r["edits"] for r in x.values()) for x in (first, second))
+    assert found["length"] == tuple(sum(r["length"] for r in x.values()) for x in (first, second))
+    assert found["pairs"] == {
+        ("hypothesis", "이천십육년", "2016년"): 1,
+        ("reference", "사회", "4회"): 1,
+        ("hypothesis", "사회", "4회"): 1,
+    }
+    out = capsys.readouterr().out
+    assert "transformation differs in 2 (reference 1, hypothesis 2), edits differ in 1" in out
+    assert "이천십육년 -> 2016년" in out and "u0" not in out  # 발화별 줄은 --utterances일 때만
+
+
+# scoring-diff --utterances는 발화마다 편집 수의 변화와 바뀐 낱말 짝을 찍는다. 같은 채점 둘이나 다른 언어의
+# 채점은 거부한다.
+def test_scoring_diff_command_prints_utterances_and_refuses_bad_scorings(reports, monkeypatch, capsys):
+    write_report(reports, "m", "zeroth-val", scored_rows([("이천 십 육 년", "이천십육년")]))
+    run_cli(monkeypatch, "scoring-diff", "--set", "zeroth-val", "--reports", "m", "--utterances")
+    out = capsys.readouterr().out
+    assert "u0" in out and "hypothesis: 이천십육년 -> 2016년" in out
+    with pytest.raises(SystemExit, match="two different scorings"):
+        analyze.scoring_diff("zeroth-val", ["m"], before="harmonized2", after="harmonized2")
+    with pytest.raises(SystemExit, match="English"):
+        analyze.scoring_diff("zeroth-val", ["m"], after="en-whisper")
