@@ -276,6 +276,30 @@ def test_the_summary_records_the_revision_the_library_versions_and_the_adapter_h
     assert summary["transformers"] == transformers.__version__
 
 
+# 오디오 저장소의 memmap은 저장소마다 한 번만 연다. 고치기 전에는 setdefault의 기본값 인자 AudioStore(...)가
+# 키가 있어도 먼저 계산되어 발화마다 새 memmap을 열었고, 그 시간이 배치 시간 안에 들어갔다. 두 저장소에 걸친
+# 발화 넷을 배치 2로 재면 여는 것은 저장소 둘이고, 가설과 채점은 그대로다.
+def test_each_audio_store_is_opened_once(tmp_path, monkeypatch):
+    opened: list[str] = []
+
+    class CountingStore(IdStore):
+        def __init__(self, name: str) -> None:
+            opened.append(name)
+
+    texts = {"a": "가나다", "b": "라마", "c": "바사", "d": "아자"}
+    transcribing(monkeypatch, tmp_path, texts, texts)
+    stores = zip(texts.items(), "xyxy", strict=True)
+    utterances = [Utterance(i, "s", text, name, 0, 16_000) for (i, text), name in stores]
+    monkeypatch.setattr(evaluate, "load_set", lambda name: ("ko", utterances))
+    monkeypatch.setattr(evaluate, "AudioStore", CountingStore)
+
+    run(monkeypatch, "--model", "outputs/small-a/best", "--set", "x", "--batch-size", "2")
+
+    assert opened == ["x", "y"]
+    summary = json.loads((tmp_path / "best" / "x.json").read_text(encoding="utf-8"))["summary"]
+    assert (summary["utterances"], summary["error_rate"]) == (4, 0.0)
+
+
 # 어댑터 지문은 모델을 올리기 전에 읽는다(커밋처럼 디코딩 전에). 그래서 요약의 SHA-256은 실제로 불러온 파일의
 # 것이고, 파일이 없으면 모델을 올리고 묶음을 다 디코딩한 뒤가 아니라 시작할 때 멈춘다. 학습이 도는 실행의
 # 체크포인트를 재는 동안 save_total_limit가 그 폴더를 지우는 경우, 끝에서 해시하면 다 잰 측정을 잃는다.

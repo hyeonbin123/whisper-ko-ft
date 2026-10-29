@@ -428,11 +428,13 @@ def main() -> None:
     for begin in range(0, len(utterances), args.batch_size):
         batch_started = time.perf_counter()
         batch = utterances[begin : begin + args.batch_size]
-        # 발화를 읽어 채널 변환과 앞 30초 자르기를 한 뒤 배치로 디코딩한다.
-        audio = [
-            prepare_audio(stores.setdefault(u.store, AudioStore(u.store)).read(u), args.channel)
-            for u in batch
-        ]
+        # 발화를 읽어 채널 변환과 앞 30초 자르기를 한 뒤 배치로 디코딩한다. memmap은 저장소마다 처음 나올 때
+        # 한 번만 연다(evaluate와 같다. 2026-10-29까지 쓴 setdefault(u.store, AudioStore(u.store))는 기본값
+        # 인자를 먼저 계산해 발화마다 새로 열었고, 그 시간이 배치 시간 안에 들어갔다. 읽는 표본은 같다).
+        for u in batch:
+            if u.store not in stores:
+                stores[u.store] = AudioStore(u.store)
+        audio = [prepare_audio(stores[u.store].read(u), args.channel) for u in batch]
         outputs = transcribe(model, processor, audio, language, args.device, dtype, watch)
         batch_seconds.append(time.perf_counter() - batch_started)  # 글로 바꾸는 단계가 GPU 완료를 기다린다
         for utterance, out in zip(batch, outputs, strict=True):

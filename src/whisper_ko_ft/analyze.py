@@ -1109,12 +1109,17 @@ def blocks(set_name: str, candidate: str, baseline: str, scoring: str | None, wi
 # --- 12단계: N을 CTranslate2 int8_float16으로 (규칙 2026-10-15) ---
 
 
-# scripts/speed.py가 쓴 speed.json에서 라벨 → 실행 기록.
+# scripts/speed.py가 쓴 speed.json에서 라벨 → 실행 기록. 2026-10-29부터 speed.py는 실행이 하나 끝날 때마다
+# 그때까지의 기록을 complete: false로 다시 쓰고, 끝까지 돌면 complete: true로 쓴다. 중간에 멈춘 파일(false)은
+# 거부한다: 회차가 빠지면 판정 2의 '두 번 평균'·'두 번 모두'를 볼 수 없고, 빠진 실행 대신 다른 값이 쓰이면
+# 안 된다. 키가 없는 그 전 파일(2026-10-18 측정)은 모든 실행이 끝난 뒤에만 썼으므로 끝까지 돈 것으로 본다.
 def _speed_runs(path: str) -> dict[str, dict]:
     with open(path, encoding="utf-8") as file:
         data = json.load(file)
     if data.get("preset") != "ct2-int8":
         raise SystemExit(f"{path}: not a ct2-int8 run of scripts/speed.py")
+    if not data.get("complete", True):
+        raise SystemExit(f"{path}: an unfinished run of scripts/speed.py (complete: false); measure again")
     return {run["label"]: run for run in data["runs"]}
 
 
@@ -1130,6 +1135,9 @@ def _two_rounds(values: list[float]) -> tuple[float, bool]:
 # 1과의 배속 비율, 환경 확인(속도 실행의 fp16 val-500 오류율이 기록과 같은지), 쉬는 상태였는지.
 def verdict12(speed_path: str, candidate: str = "turbo-n-ct2-int8", baseline: str = "turbo-n-ct2") -> str:
     """12단계: int8_float16이 정확도를 지키면서 메모리나 지연을 줄이는지."""
+    # 속도 파일을 먼저 읽는다: 다른 프리셋이거나 끝까지 돌지 않은 파일이면 정확도 비교(부트스트랩)를 하기 전에
+    # 멈춘다. 읽기만 하고 아무것도 찍지 않으므로 맞는 파일의 출력 순서는 그대로다.
+    runs = _speed_runs(speed_path)
     zeroth = compare("zeroth-val", candidate, baseline, harmonized=True)
     show(f"zeroth-val harmonized {candidate} vs {baseline}", zeroth)
     print("reported, no verdict:")
@@ -1145,7 +1153,6 @@ def verdict12(speed_path: str, candidate: str = "turbo-n-ct2-int8", baseline: st
             counts = [summary.get(k) for k in ("compute_type", "empty_hypotheses", "decoded_again")]
             print(f"  {report}: compute type, empty hypotheses, decoded again {counts}")
 
-    runs = _speed_runs(speed_path)
     rounds = (1, 2)
     memory, latency, speed = {}, {}, {}
     for name in ("hf-b1", "ct2-fp16", "ct2-int8"):
@@ -1556,7 +1563,11 @@ def main() -> None:
     blk.add_argument("--scoring", choices=list(SCORINGS))
     blk.add_argument("--without-digits", action="store_true", help="Zeroth의 숫자 발화를 뺀다")
     ver12 = commands.add_parser("verdict12", help="12단계 판정: CTranslate2 int8_float16")
-    ver12.add_argument("--speed", required=True, help="scripts/speed.py --preset ct2-int8이 쓴 speed.json")
+    ver12.add_argument(
+        "--speed",
+        required=True,
+        help="scripts/speed.py --preset ct2-int8이 쓴 speed.json(complete: false인 중간 기록은 거부한다)",
+    )
     ver12.add_argument("--candidate", default="turbo-n-ct2-int8")
     ver12.add_argument("--baseline", default="turbo-n-ct2")
     over = commands.add_parser(

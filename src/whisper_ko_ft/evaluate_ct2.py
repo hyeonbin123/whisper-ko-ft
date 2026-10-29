@@ -172,7 +172,7 @@ def main() -> None:
     # 배속·지연 수치에는 들어가지 않지만 프로세스가 도는 시간은 그만큼 길어져, scripts/speed.py가 실행
     # 전체에서 내는 GPU·CPU 사용률 평균(gpu_util_avg_during 등)에는 이 시간이 들어간다.
     hashes = converted_model_hashes(Path(args.model))
-    # 재시도 끔/켬 조건을 고르고, 저장소별 memmap을 열어 둘 dict를 만든다.
+    # 재시도 끔/켬 조건을 고르고, 저장소별 memmap을 열어 둘 dict를 만든다(저장소마다 처음 읽을 때 한 번 연다).
     options = FALLBACK if args.fallback else NO_FALLBACK
     stores: dict[str, AudioStore] = {}
 
@@ -185,7 +185,12 @@ def main() -> None:
         # 한 발화의 지연: 오디오 읽기부터 구간을 끝까지 꺼낼 때까지(채점 제외). evaluate의 배치 시간과 같은
         # 범위다.
         utterance_started = time.perf_counter()
-        audio = stores.setdefault(utterance.store, AudioStore(utterance.store)).read(utterance)
+        # 2026-10-29까지 쓴 stores.setdefault(utterance.store, AudioStore(utterance.store))는 기본값 인자를
+        # 키가 있어도 먼저 계산해 발화마다 memmap을 새로 열었고, 그 시간이 이 지연 안에 들어갔다. 이제는
+        # 저장소가 처음 나올 때만 연다(읽는 표본은 같다).
+        if utterance.store not in stores:
+            stores[utterance.store] = AudioStore(utterance.store)
+        audio = stores[utterance.store].read(utterance)
         # greedy(beam_size=1), 언어 고정, 타임스탬프 없음, 앞 구간의 글을 다음 디코딩에 이어 주지 않음, VAD
         # 없음(docs/experiments.md 5단계 설정). 재시도 관련 값만 options로 바뀐다.
         segments, _ = model.transcribe(

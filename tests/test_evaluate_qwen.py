@@ -12,6 +12,7 @@
 import hashlib
 import json
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -20,7 +21,7 @@ from tiny_qwen import tiny_model
 from transformers.models.qwen3_asr.processing_qwen3_asr import _parse_single_output
 
 from whisper_ko_ft import evaluate_qwen, provenance
-from whisper_ko_ft.store import SAMPLE_RATE
+from whisper_ko_ft.store import SAMPLE_RATE, Utterance
 
 # EOS: 끝 토큰 번호 두 개(대역 모델에서 쓰는 값). LOOP: 같은 구절을 30번 되풀이한 글(공식 반복 제거가 줄이는
 # 예).
@@ -446,3 +447,38 @@ def test_an_empty_set_is_refused_before_the_model_is_loaded(reports, monkeypatch
         run(monkeypatch, "--set", "zeroth-val")
     err = capsys.readouterr().err
     assert "zeroth-val" in err and "no utterances" in err
+
+
+# 오디오 저장소의 memmap은 저장소마다 한 번만 연다(Whisper 하네스와 같다). 고치기 전에는 setdefault의 기본값
+# 인자 AudioStore(...)가 키가 있어도 먼저 계산되어 발화마다 새 memmap을 열었고, 그 시간이 배치 시간 안에
+# 들어갔다. 두 저장소에 걸친 발화 넷을 배치 2로 읽고, 마지막 배치를 받아 적으려던 참에 멈춰 연 저장소를 센다
+# (CPU fp32 확인 실행, 리포트 없음. 모델·받아 적기는 가짜).
+def test_each_audio_store_is_opened_once(monkeypatch):
+    opened: list[str] = []
+    batches: list[int] = []
+
+    class CountingStore:
+        def __init__(self, name: str) -> None:
+            opened.append(name)
+
+        def read(self, utterance):
+            return np.zeros(utterance.length, dtype=np.float32)
+
+    def transcribe(model, processor, audio, language, device, dtype, watch):
+        batches.append(len(audio))
+        if sum(batches) == len(utterances):
+            raise Reached
+        return [{} for _ in audio]
+
+    names = zip("abcd", "xyxy", strict=True)
+    utterances = [Utterance(i, "s", "가나다", name, 0, SAMPLE_RATE) for i, name in names]
+    model = SimpleNamespace(lm_head=torch.nn.Linear(1, 1))
+    monkeypatch.setattr(evaluate_qwen, "load_set", lambda name: ("ko", utterances))
+    monkeypatch.setattr(evaluate_qwen, "load_model", lambda *args: (model, None))
+    monkeypatch.setattr(evaluate_qwen, "AudioStore", CountingStore)
+    monkeypatch.setattr(evaluate_qwen, "transcribe", transcribe)
+    cpu_check = ["--device", "cpu", "--precision", "fp32", "--no-report", "--batch-size", "2"]
+
+    with pytest.raises(Reached):
+        run(monkeypatch, "--set", "x", *cpu_check)
+    assert batches == [2, 2] and opened == ["x", "y"]

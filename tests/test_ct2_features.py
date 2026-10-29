@@ -242,6 +242,40 @@ def test_evaluate_ct2_passes_the_compute_type_and_records_latency(tmp_path, monk
     assert summary["batch_seconds_median"] is not None and summary["batch_seconds_p90"] is not None
 
 
+# 오디오 저장소의 memmap은 저장소마다 한 번만 연다. 고치기 전에는 setdefault의 기본값 인자 AudioStore(...)가
+# 키가 있어도 먼저 계산되어 발화마다 새 memmap을 열었고, 그 시간이 한 발화 지연(utterance_started부터) 안에
+# 들어갔다. 두 저장소에 걸친 발화 셋을 재면 여는 것은 저장소 둘이고, 가설과 채점은 그대로다.
+def test_evaluate_ct2_opens_each_audio_store_once(tmp_path, monkeypatch):
+    pytest.importorskip("faster_whisper")
+    from whisper_ko_ft import evaluate_ct2
+    from whisper_ko_ft.store import Utterance
+
+    opened: list[str] = []
+
+    class CountingStore(IdStore):
+        def __init__(self, name: str) -> None:
+            opened.append(name)
+
+    converted_folder(tmp_path)
+    texts = {"a": "가나다", "b": "라마", "c": "바사"}
+    TranscribingModel.segments = {i: [Segment(text)] for i, text in texts.items()}
+    stores = zip(texts.items(), "xyx", strict=True)
+    utterances = [Utterance(i, "s", text, name, 0, 16_000) for (i, text), name in stores]
+    monkeypatch.setattr(evaluate_ct2, "REPORTS", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "ROOT", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "git_commit", lambda: "test")
+    monkeypatch.setattr(evaluate_ct2, "WhisperModel", TranscribingModel)
+    monkeypatch.setattr(evaluate_ct2, "AudioStore", CountingStore)
+    monkeypatch.setattr(evaluate_ct2, "load_set", lambda name: ("ko", utterances))
+    monkeypatch.setattr(sys, "argv", ["evaluate_ct2", "--model", str(tmp_path), "--name", "n", "--set", "x"])
+
+    evaluate_ct2.main()
+
+    assert opened == ["x", "y"]
+    summary = json.loads((tmp_path / "n" / "x.json").read_text(encoding="utf-8"))["summary"]
+    assert (summary["utterances"], summary["error_rate"]) == (3, 0.0)
+
+
 # CPU 실행은 측정 조건이 아니라 리포트를 남기지 못한다(--no-report만).
 def test_a_cpu_ct2_run_needs_no_report(tmp_path, monkeypatch, capsys):
     pytest.importorskip("faster_whisper")

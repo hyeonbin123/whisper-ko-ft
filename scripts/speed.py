@@ -17,7 +17,9 @@
 묶음의 오디오를 한 번 읽어 파일 캐시를 데우고, 프리셋의 실행을 정해진 순서로 하나씩 돌린다. 실행마다
 nvidia-smi를 0.5초 간격으로 기록해 GPU 메모리 증가(최댓값 − 실행 직전 값)와 사용률을 내고, 하네스가 찍은
 요약(배속, 배치 시간, torch 최대 할당, 오류율)을 모은다. 결과는 --out 폴더(기본
-outputs/speed/<프리셋>-<시각>/)의 speed.json과 실행별 CSV에 남는다.
+outputs/speed/<프리셋>-<시각>/)의 speed.json과 실행별 CSV에 남는다. speed.json은 쉬는 상태 확인 뒤와 실행이
+하나 끝날 때마다 그때까지의 기록으로 다시 쓰고(complete: false), 끝난 뒤의 확인까지 마치면 complete: true로
+바꾼다. 중간에 멈춘 측정도 앞 실행의 기록이 남는다(analyze verdict12는 complete: false인 파일을 거부한다).
 """
 
 # [파일 역할] 공개 저장소만으로 속도 수치를 다시 잴 수 있게 하는 측정 스크립트. README의 "CTranslate2로
@@ -35,15 +37,26 @@ outputs/speed/<프리셋>-<시각>/)의 speed.json과 실행별 CSV에 남는다
 # (5) --speed-only: 그때 첫 두 실행이 남긴 리포트가 이미 커밋되어 있어, 다시 재면 그 실행이 덮어쓰기 보호로
 # 멈춘다. 이 옵션은 모든 실행에 --no-report를 붙여 속도만 잰다. (6) 2026-10-29부터 speed.json에 측정 코드의
 # 커밋(commit)을 적는다. 하네스 리포트의 commit과 같은 git_commit이되 scripts/(이 파일)까지 보아, 측정 절차를
-# 고친 채 잰 것은 +dirty로 드러난다.
+# 고친 채 잰 것은 +dirty로 드러난다. (7) 2026-10-29부터 측정 하네스가 실패에 견딘다: 실행 하나가 예외로
+# 끝나도(uv가 PATH에 없음, Ctrl+C 등) 두 표본 프로세스를 끝내고(run의 try/finally와 stop), --poll-minutes가 1
+# 미만이면 시작하기 전에 거부하며, speed.json을 실행마다 다시 써서(complete 키) 중간에 멈춰도 앞 실행의 기록이
+# 남는다. 그전에는 남은 표본 프로세스(1초마다 Get-CimInstance를 부르는 PowerShell, nvidia-smi)가 다음 측정의
+# 쉬는 상태 판정과 사용률 표본을 흐릴 수 있었고, 확인 간격이 1분보다 짧으면 첫 확인 뒤에 음수 sleep으로
+# 죽었으며, 마지막 실행이 실패하면 앞 실행의 기록까지 모두 잃었다. 하네스와 함께 캐시 데우기도 저장소마다
+# memmap을 한 번만 연다(warm_cache). 측정 명령·순서·대기 기준은 그대로다.
 # [주의] Windows 전용이다: CPU 사용률과 프로세스 이름을 PowerShell(Get-CimInstance, Get-Process)로 읽는다.
 # nvidia-smi와 uv가 PATH에 있어야 한다. 쉬는 상태 확인의 Ollama 항목은 같은 PC에서 GPU를 나눠 쓰는 로컬
 # Ollama 서버에 올라간 모델을 적는 것이고, 서버가 없으면 "unreachable"로 남는다(측정에는 영향이 없다).
+# 이 프로세스만 PID로 끝내면(Stop-Process, 작업 관리자의 '작업 끝내기') finally가 돌지 않아 표본 프로세스를
+# 정리하지 못한다. 측정을 멈출 때는 콘솔에서 Ctrl+C를 누르거나 `taskkill /T /F /PID <이 프로세스 PID>`로
+# 자식까지 트리째 끝낸다(Job Object로 묶으면 부모가 죽을 때 자식도 끝나게 할 수 있지만 Windows API 코드가
+# 늘어나 쓰지 않았다).
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -69,8 +82,12 @@ PY = ["uv", "run", "--no-sync", "python", "-m"]
 # 평균 15% 미만.
 GPU_IDLE_UTIL = 10
 CPU_IDLE = 15
-# 한 번의 확인에 걸리는 시간(초). 5초 간격 표본 12개다.
+# 한 번의 확인에 걸리는 시간(초). 5초 간격 표본 12개다. --poll-minutes는 이보다 짧을 수 없다(확인 사이의
+# sleep이 poll − CHECK_SECONDS라 음수가 된다).
 CHECK_SECONDS = 60
+# 표본 프로세스를 끝낼 때 한 단계마다 기다리는 시간(초). Windows의 terminate(TerminateProcess)는 보통 바로
+# 끝나므로 넉넉한 값이고, 정상 실행에서는 기다리는 일이 없다.
+STOP_SECONDS = 10
 
 # 1분 동안 CPU 전체 사용률을 5초마다 12번 읽어 평균·최댓값을 첫 줄에 찍고, 그 1분 동안 CPU 시간을 가장 많이 쓴
 # 프로세스 다섯 개(이름:초)를 둘째 줄에 찍는다. Win32_PerfFormattedData는 Windows 언어와 관계없이 이름이 같다.
@@ -348,7 +365,13 @@ def warm_cache() -> None:
 
     _, utterances = load_set(SET)
     stores: dict[str, AudioStore] = {}
-    total = sum(stores.setdefault(u.store, AudioStore(u.store)).read(u).size for u in utterances)
+    total = 0
+    for u in utterances:
+        # 저장소마다 memmap을 한 번만 연다(하네스와 같다). setdefault(u.store, AudioStore(u.store))는 기본값
+        # 인자를 키가 있어도 먼저 계산해 발화마다 새로 열었다(2026-10-29까지).
+        if u.store not in stores:
+            stores[u.store] = AudioStore(u.store)
+        total += stores[u.store].read(u).size
     log(f"warmed {len(utterances)} utterances, {total / 16000 / 3600:.2f} h")
 
 
@@ -358,30 +381,66 @@ def first_summary(text: str) -> dict:
     return json.loads(text[start : text.index("\n}", start) + 2])
 
 
+def stop(process: subprocess.Popen) -> None:
+    """표본 프로세스 하나를 끝낸다: terminate → wait(STOP_SECONDS) → 안 끝나면 taskkill /T /F → wait.
+
+    두 번째 단계를 Popen.kill이 아니라 taskkill /T /F(자식까지 트리째 강제 종료)로 한 것은, Windows의 kill이
+    terminate와 같은 TerminateProcess라 다시 불러도 다를 것이 없어서다. 그래도 끝나지 않으면(또는 taskkill을
+    띄우지 못하면) PID를 적고 넘어간다: run의 finally에서 불리므로 여기서 예외를 내면 원래 예외를 가리고 다른
+    표본 프로세스를 정리하지 못한다. 남은 프로세스는 그 로그 줄의 명령으로 손으로 끝낸다.
+    """
+    process.terminate()
+    try:
+        process.wait(timeout=STOP_SECONDS)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True, text=True)
+        process.wait(timeout=STOP_SECONDS)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        log(
+            f"warning: sampler pid {process.pid} may still run ({error!r});"
+            f" end it with taskkill /T /F /PID {process.pid}"
+        )
+
+
 def run(label: str, command: list[str], env_extra: dict, out_dir: Path) -> dict:
     """실행 하나: nvidia-smi(0.5초)와 CPU(약 1초) 표본을 남기며 명령을 돌리고, 요약과 표본 통계를 돌려준다."""
     before_mem, before_util = gpu_sample()
     gpu_path, cpu_path = out_dir / f"gpu_{label}.csv", out_dir / f"cpu_{label}.csv"
+    # 띄운 표본 프로세스는 이 목록에 넣고, 하네스가 어떻게 끝나든(정상, 실패, uv가 PATH에 없는
+    # FileNotFoundError, Ctrl+C의 KeyboardInterrupt) finally에서 모두 끝낸다. 둘째 표본(PowerShell)을 띄우지
+    # 못해도 먼저 띄운 nvidia-smi를 끝낸다. 예외는 그대로 위로 나간다(main이 그때까지의 speed.json을 남긴다).
+    # 하네스를 띄운 바로 아래 자식(uv)은 subprocess.run이 예외(KeyboardInterrupt 포함) 때 스스로 kill한다.
+    samplers: list[subprocess.Popen] = []
     with gpu_path.open("w") as gpu_file, cpu_path.open("w") as cpu_file:
-        sampler = subprocess.Popen(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.used,utilization.gpu",
-                "--format=csv,noheader,nounits",
-                "-lms",
-                "500",
-            ],
-            stdout=gpu_file,
-        )
-        cpu_sampler = subprocess.Popen(
-            ["powershell.exe", "-NoProfile", "-Command", CPU_SAMPLER_PS], stdout=cpu_file, text=True
-        )
-        log(f"{label} start: gpu {before_mem} MiB, {before_util}%")
-        env = {**os.environ, **env_extra}
-        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env=env)
-        for process in (sampler, cpu_sampler):
-            process.terminate()
-            process.wait()
+        try:
+            samplers.append(
+                subprocess.Popen(
+                    [
+                        "nvidia-smi",
+                        "--query-gpu=memory.used,utilization.gpu",
+                        "--format=csv,noheader,nounits",
+                        "-lms",
+                        "500",
+                    ],
+                    stdout=gpu_file,
+                )
+            )
+            samplers.append(
+                subprocess.Popen(
+                    ["powershell.exe", "-NoProfile", "-Command", CPU_SAMPLER_PS], stdout=cpu_file, text=True
+                )
+            )
+            log(f"{label} start: gpu {before_mem} MiB, {before_util}%")
+            env = {**os.environ, **env_extra}
+            result = subprocess.run(
+                command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env=env
+            )
+        finally:
+            for process in samplers:
+                stop(process)
     if result.returncode:
         log(f"{label} failed:\n{result.stdout[-2000:]}\n{result.stderr[-4000:]}")
         raise SystemExit(1)
@@ -409,6 +468,11 @@ def run(label: str, command: list[str], env_extra: dict, out_dir: Path) -> dict:
     return record
 
 
+def write_speed_json(target: Path, payload: dict) -> None:
+    """speed.json을 통째로 다시 쓴다(UTF-8, LF). main이 실행마다 부른다(부분 기록)."""
+    target.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="속도·GPU 메모리 측정 절차를 프리셋대로 돈다(Windows 전용, docs/experiments.md 속도 절).",
@@ -422,7 +486,10 @@ def main() -> None:
         help="쉬는 상태를 기다리는 최대 시간(기본 60, 12단계는 10)",
     )
     parser.add_argument(
-        "--poll-minutes", type=float, default=5, help="쉬는 상태 확인 간격(기본 5, 12단계는 3)"
+        "--poll-minutes",
+        type=float,
+        default=5,
+        help="쉬는 상태 확인 간격(기본 5, 12단계는 3). 한 번의 확인이 1분 걸리므로 1 이상이어야 한다",
     )
     parser.add_argument("--out", type=Path, help="결과 폴더(기본 outputs/speed/<프리셋>-<시각>)")
     parser.add_argument(
@@ -437,6 +504,13 @@ def main() -> None:
     args, extra = parser.parse_known_args()
     if extra and args.preset != "qwen-turbo":
         parser.error(f"unrecognized arguments: {' '.join(extra)}")
+    # 확인 사이의 sleep은 poll − CHECK_SECONDS다. 1분보다 짧으면 음수가 되어 첫 확인 뒤에 ValueError로
+    # 죽으므로, 쉬는 상태를 기다리기(최대 --max-wait-minutes) 전에 거부한다. nan·inf도 여기서 거부한다
+    # (round에서 죽는다). --dry-run에도 같은 검사를 한다.
+    if not (math.isfinite(args.poll_minutes) and args.poll_minutes * 60 >= CHECK_SECONDS):
+        parser.error(
+            f"--poll-minutes must be at least {CHECK_SECONDS // 60} (one check takes {CHECK_SECONDS} s)"
+        )
     runs, env_extra = build_runs(args.preset, extra, args.qwen_large_batch)
     if args.speed_only:
         runs = speed_only(runs)
@@ -454,22 +528,37 @@ def main() -> None:
     max_wait, poll = round(args.max_wait_minutes * 60), round(args.poll_minutes * 60)
     idle, checks = wait_for_idle(max_wait, poll)
     log(f"idle reached: {idle}")
-    warm_cache()
-    records = [run(label, command, env_extra, out_dir) for label, command in runs]
-    after = conditions()
-    log(f"conditions after {json.dumps(after, ensure_ascii=False)}")
+    # speed.json 부분 기록: 쉬는 상태 확인 뒤 한 번, 실행이 하나 끝날 때마다 그때까지의 기록으로 다시 쓴다
+    # (complete: false). 끝난 뒤의 확인(after)까지 마치면 complete: true로 쓴다. 그래서 실행 하나가 실패하거나
+    # (run의 SystemExit) 사람이 멈춰도(Ctrl+C) 앞 실행의 기록과 확인이 남고, analyze verdict12는 false인
+    # 파일을 판정에 쓰지 않는다. 키가 없는 이전 speed.json은 모든 실행이 끝난 뒤에만 쓴 것이라 끝까지 돈
+    # 것으로 본다.
+    target = out_dir / "speed.json"
     payload = {
         "preset": args.preset,
+        "complete": False,
         "commit": commit,
         "max_wait_seconds": max_wait,
         "poll_seconds": poll,
         "idle_reached": idle,
         "checks": checks,
-        "runs": records,
-        "after": after,
+        "runs": [],
     }
-    target = out_dir / "speed.json"
-    target.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
+    write_speed_json(target, payload)
+    try:
+        warm_cache()
+        for label, command in runs:
+            payload["runs"].append(run(label, command, env_extra, out_dir))
+            write_speed_json(target, payload)
+        payload["after"] = conditions()
+    except BaseException:
+        # 어디서 멈췄는지와 남은 기록의 위치만 알리고 예외는 그대로 다시 낸다(종료 코드·추적 정보 유지).
+        done = len(payload["runs"])
+        log(f"stopped after {done} of {len(runs)} runs; {target} keeps them (complete: false)")
+        raise
+    log(f"conditions after {json.dumps(payload['after'], ensure_ascii=False)}")
+    payload["complete"] = True
+    write_speed_json(target, payload)
     log(f"wrote {target}")
 
 

@@ -944,6 +944,21 @@ def test_verdict12_follows_the_table(reports, tmp_path, int8_edits, int8_speed, 
     assert analyze.verdict12(speed, "int8", "fp") == label
 
 
+# 끝까지 돌지 않은 speed.json(complete: false. 2026-10-29부터 scripts/speed.py가 실행마다 다시 쓰는 부분
+# 기록)은 정확도 리포트를 읽기 전에 거부한다. 두 회차가 다 없으면 '두 번 모두'를 볼 수 없다.
+# complete: true와 키가 없는 그 전 파일(위 판정 표 테스트)은 받는다.
+def test_verdict12_refuses_an_incomplete_speed_file(reports, tmp_path):
+    path = tmp_path / "speed.json"
+    speed_file(path, (2000, (0.40, 0.40)), (1500, (0.40, 0.40)))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps({**data, "complete": False}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="complete: false"):
+        analyze.verdict12(str(path), "int8", "fp")  # 리포트가 없어도 그보다 먼저 멈춘다
+
+    path.write_text(json.dumps({**data, "complete": True}), encoding="utf-8")
+    assert len(analyze._speed_runs(str(path))) == 6
+
+
 # --- Zeroth 문장 겹침 (overlap) ---
 
 

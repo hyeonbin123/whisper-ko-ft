@@ -385,9 +385,14 @@ def main() -> None:
     for begin in range(0, len(utterances), args.batch_size):
         batch_started = time.perf_counter()
         batch = utterances[begin : begin + args.batch_size]
-        # 저장소 이름마다 memmap을 한 번만 연다. --channel이면 음성을 전화 채널 변환(16 kHz 그대로)에
-        # 통과시킨다.
-        audio = [stores.setdefault(u.store, AudioStore(u.store)).read(u) for u in batch]
+        # 저장소 이름마다 memmap을 한 번만 연다(처음 나온 저장소만 연다). 2026-10-29까지 쓴
+        # stores.setdefault(u.store, AudioStore(u.store))는 기본값 인자를 키가 있어도 먼저 계산해 발화마다
+        # memmap을 새로 열었고, 그 시간이 배치 시간 안에 들어갔다. 읽는 표본은 같다. --channel이면 음성을 전화
+        # 채널 변환(16 kHz 그대로)에 통과시킨다.
+        for u in batch:
+            if u.store not in stores:
+                stores[u.store] = AudioStore(u.store)
+        audio = [stores[u.store].read(u) for u in batch]
         if args.channel:
             audio = [CHANNELS[args.channel](samples) for samples in audio]
         # 로그 멜 특징을 GPU(device="cuda")에서 계산한다. 특징 추출기가 30초로 채우거나 자르므로 긴 발화는 앞
