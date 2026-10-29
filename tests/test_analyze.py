@@ -6,12 +6,13 @@
 # [구성] 공통(load_rows 검사, 숫자 발화 목록, compare, table) → 2·3단계 verdict → 6단계 맞춘 CER과 verdict6 →
 # 되풀이와 8단계 채점·verdict8·changes·itn8 → 9단계 gate9·verdict9 → 10단계 gate10·pick10·smoke10·verdict10 →
 # 민감도 분석(robust) → 11·12단계 → Zeroth 문장 겹침(overlap, 커밋된 파생 파일의 수 고정) → 영어 보조 채점
-# en-whisper(예시, 커밋된 FLEURS 영어 리포트의 총합 고정) → 13단계 문장 hold-out(compare의 발화 고르기·표본
-# 수, verdict13의 판정·해석 문턱, M − C 구간) → 붙여 쓴 한글 숫자 보조 채점 harmonized2(채점, table·blocks,
-# 오탐 점검 scoring-diff).
+# en-whisper(예시, analyze를 불러올 때 transformers를 불러오지 않는지, 커밋된 FLEURS 영어 리포트의 총합
+# 고정) → 13단계 문장 hold-out(compare의 발화 고르기·표본 수, verdict13의 판정·해석 문턱, M − C 구간) → 붙여
+# 쓴 한글 숫자 보조 채점 harmonized2(채점, table·blocks, 오탐 점검 scoring-diff).
 
 import inspect
 import json
+import subprocess
 import sys
 
 import numpy as np
@@ -433,6 +434,17 @@ def test_table_reports_the_en_whisper_difference(reports, capsys):
     analyze.table("fleurs-en-val", ["base", "cand"], "base", split_digits=False, scoring="en-whisper")
     aux = capsys.readouterr().out
     assert "vs base: +0.00%p" in aux
+
+
+# analyze를 불러오는 것만으로는 transformers를 불러오지 않는다. en-whisper 채점의 표준 정규화기는 처음 쓸 때
+# en_norm이 만들고 그때 transformers를 불러온다(약 2초). 예전에는 analyze를 불러올 때마다 불러와서
+# en-whisper를 쓰지 않는 table·verdict 같은 하위 명령의 시작도 그만큼 느렸다. analyze는 커밋된 리포트만 읽는
+# 도구라 torch도 불러오지 않는다. 이미 여러 모듈을 불러온 이 테스트 프로세스가 아니라 새 인터프리터에서 본다.
+def test_importing_analyze_loads_neither_transformers_nor_torch():
+    code = "import sys, whisper_ko_ft.analyze; print(sorted({'torch', 'transformers'} & set(sys.modules)))"
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "[]"
 
 
 # 후보와 기준선을 서로 다른 채점으로 비교할 때 정답 길이가 달라지면(여기서는 '%' 처리 차이) 짝지은 비교를

@@ -35,12 +35,17 @@ import hashlib
 import json
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 # EnglishTextNormalizer: 소문자로 바꾸고, 괄호 안과 군말(hmm, uh 등)을 지우고, 축약형을 펴고(it's → it is,
 # won't → will not), 숫자 낱말을 아라비아 숫자로(seven → 7, ten thousand → 10000), 'percent'를 '%'로,
 # 통화 낱말을 기호로 바꾸고, 기호·문장부호를 공백으로 바꾼 뒤 영미 철자 사전으로 철자를 맞춘다. 정답과 가설
 # 양쪽에 같이 적용해야 표기 차이가 상쇄된다.
-from transformers.models.whisper.english_normalizer import EnglishTextNormalizer
+# 이 클래스는 normalizer()가 처음 불릴 때 불러온다. 이 모듈 머리에서 불러오면 transformers 전체를 불러오게
+# 되어(이 PC에서 약 2초), 이 모듈을 가져다 쓰는 analyze의 모든 하위 명령이 en-whisper 채점을 쓰지 않을 때도
+# 그만큼 늦게 시작했다. 여기서는 타입 표기에 쓰는 이름만 가져온다(실행 중에는 불러오지 않는다).
+if TYPE_CHECKING:
+    from transformers.models.whisper.english_normalizer import EnglishTextNormalizer
 
 # ENGLISH_JSON: 영미 철자 사전 사본(위 '사전 사본의 출처'). ENGLISH_JSON_SHA256: 그 파일의 SHA-256. 규칙
 # (docs/experiments.md '보조 지표')에 같은 값을 적었다.
@@ -71,10 +76,13 @@ def load_spelling_mapping(path: Path = ENGLISH_JSON) -> dict[str, str]:
     return mapping
 
 
-# 정규화기는 사전을 읽어 한 번만 만든다(발화마다 52KB JSON을 다시 읽지 않게).
+# 정규화기는 사전을 읽어 한 번만 만든다(발화마다 52KB JSON을 다시 읽지 않게). transformers도 이때 처음
+# 불러온다(위 import 주석).
 @lru_cache(maxsize=1)
 def normalizer() -> EnglishTextNormalizer:
     """사전 사본으로 만든 EnglishTextNormalizer 하나. 처음 부를 때 만들고 그 뒤로는 재사용한다."""
+    from transformers.models.whisper.english_normalizer import EnglishTextNormalizer
+
     return EnglishTextNormalizer(load_spelling_mapping())
 
 
