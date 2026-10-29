@@ -1469,3 +1469,76 @@ test 비교(참고용), 판정 없이 보고만 한 비교, 점 추정만 쓰는
 - 절대값(리포트별 표)은 모든 모델에서 등록 지표보다 낮다. 정답(FLEURS 전사)이 'one-hundred percent'처럼 숫자를 풀어 쓴 자리에 모델이 숫자를 적은 경우도 보조 지표에서 맞는 것으로 바뀌기 때문이다. 두 지표의 절대값을 서로 비교하지 않는다
 - (2026-10-24) 3단계 '3번 질문', 6단계 validation 결과, 10단계 validation 결과와 정리의 영어 줄 옆에 이 결과를 가리키는 날짜 붙은 단서를 더했다. README의 영어 비용 줄에도 같은 단서를 달았다. 기존 문장과 수치는 그대로다
 
+## 13단계: 처음 보는 문장에서의 같은 도메인 이득 (규칙 2026-10-29, 학습하기 전. 처음 계획에 없던 단계)
+
+지금까지의 Zeroth 수치는 처음 듣는 화자가 학습에서 본 문장을 읽는 조건에서 잰 것이다(앞 절 '추가 확인: Zeroth 문장 겹침'). 문장 일부(H)를 학습에서 통째로 빼고 6단계 N과 같은 설정으로 다시 학습해(N-H), 학습에서 본 적 없는 문장에서도 같은 도메인 이득이 남는지 판정하고, N의 이득 중 본 문장 몫이 얼마인지 미리 정한 규칙으로 보고한다. 기존 묶음·수치·판정은 바꾸지 않는다.
+
+### 재기 전에 아는 것 (2026-10-29에 적음)
+- Zeroth validation·test 문장은 거의 모두 학습 묶음에 다른 화자의 녹음으로 들어 있다(문장이 학습에 없는 발화는 validation 2개·test 1개). 그래서 기존 묶음으로는 처음 보는 문장의 수치를 따로 잴 수 없다
+- 이 단계의 설계는 위 겹침을 0~12단계 결과를 모두 낸 뒤에 찾고 정했다. 기준선 turbo와 N의 발화별 결과는 이미 커밋되어 있어, 아래 묶음에서 두 모델의 수치(아래 '이미 아는 수')는 학습 전에 계산할 수 있다. H를 고르는 규칙과 해석 문턱은 그 수를 계산하기 전에 정했다. 모르는 것은 N-H의 결과다
+- N-H의 학습 발화는 N의 84.9%다(17,025 대 20,049발화, 39.33 대 46.38시간). 스텝 수(1,500)와 스텝당 발화 수(32)가 같으므로 학습 발화 하나를 보는 횟수는 약 2.82번으로 N(약 2.39번)보다 많다. 이 두 차이(데이터 감소, 반복 증가)는 seen 대조(C)에 함께 들어간다
+- 체크포인트 고르기 묶음 zeroth-val500-itn-h(379발화)는 seen 발화의 일부다. N의 고르기 묶음(숫자를 바꾼 val-500, 440발화)에는 unseen 61발화가 들어 있었다. 고르는 것은 500·1,000·1,500스텝 세 체크포인트 중 하나다
+- 학습 코드: N의 학습 코드 커밋 `0db1c24` 뒤로 `train.py`·`store.py`·`channel.py`에서 바뀐 코드(주석·docstring 제외, 2026-10-29에 구문 트리로 비교)는 실행 폴더 보호·`--resume`·멈춤 진단(hang.log), DataLoader 워커 유지(`30e739b`, 7단계 N2부터), `--init-adapter`, 기본 모델 revision 고정(`41f01f3fe87f28c78e2fbf8b568835947dd65ed9`, N이 쓴 캐시 스냅숏과 같다)과 run.json 기록 항목뿐이다(`store.py`·`channel.py`는 주석만 바뀌었다). N-H의 명령(LoRA rank 16, 전화 음질 비율 0)에서 학습 계산을 바꾸는 줄은 없다. 전화 음질 비율이 0이면 데이터셋은 난수를 쓰지 않으므로 워커 유지도 학습 데이터를 바꾸지 않는다. 환경도 N과 같다(torch 2.11.0+cu128, transformers 5.17.0, peft 0.21.0)
+
+### 묶음 (`python -m whisper_ko_ft.prepare_heldout`, 기존 묶음은 바꾸지 않는다)
+- 문장 키: 정답을 채점과 같은 정규화(`text_norm.normalize`)로 바꾼 글(`splits.sentence_key`, 앞 절의 정규화 기준). 숫자를 바꾼 ITN 묶음은 같은 발화 ID의 원래 정답으로 키를 만든다(바뀐 글로 만들면 숫자가 바뀐 문장은 H 키와 달라 학습에 남는다)
+- H: zeroth-train·zeroth-val·zeroth-test 문장 키의 합집합(K = 3,004개)을 키의 SHA-256(UTF-8) 16진수 순으로 정렬한 앞 451개(15% × K를 반올림, 정수 계산 (15K + 50) // 100). 무작위 요소가 없다
+- 학습 묶음 **zeroth-train-itn-h**: zeroth-train-itn(N의 학습 묶음)에서 원래 정답 키가 H에 든 발화를 뺀 것. 17,025발화 39.33시간, 화자 95명(3,024발화를 뺌)
+- 체크포인트 고르기 묶음 **zeroth-val500-itn-h**: zeroth-val500-itn(N의 고르기 묶음)에서 같은 규칙으로 뺀 것. 379발화 0.92시간(61발화를 뺌)
+- 판정·보고 발화는 새로 재지 않고 기존 zeroth-val·zeroth-test 리포트에서 발화 ID로 고른다:
+
+| 이름 | 원래 묶음 | 발화 | 시간 | 화자 | 쓰임 |
+|---|---|---|---|---|---|
+| zeroth-val-unseen | zeroth-val | 347 | 0.83 | 9 | 판정. H 문장을 읽은 발화(N은 그 문장을 학습에서 봤고 N-H는 못 봤다) |
+| zeroth-val-seen | zeroth-val | 1,867 | 4.47 | 10 | 대조. 나머지(둘 다 봤다) |
+| zeroth-test-unseen | zeroth-test | 74 | 0.20 | 10 | 참고(test) |
+| zeroth-test-seen | zeroth-test | 383 | 0.99 | 10 | 참고(test 대조) |
+
+- 문장이 zeroth-train에 아예 없던 발화(N도 보지 못했다)는 validation seen에 2개(`152_003_2851`, `217_003_0624`), test unseen에 1개(`121_003_1564`)다. 규칙은 H 소속으로만 나누고 이 발화를 빼지 않는다
+- 정의 파일 `reports/sentence_holdout/zeroth.json`(커밋): H 키의 SHA-256 목록, 두 학습 묶음의 수와 묶음 파일의 SHA-256, 네 발화 묶음의 발화 ID, 문장이 학습에 없던 발화, 관문 수. 정답 글은 넣지 않는다. 수는 `tests/test_prepare_heldout.py`가 고정하고, validation·test가 정의대로 나뉘었는지는 커밋된 리포트의 정답 글로 다시 맞춰 본다(데이터 없이 CI에서도 돈다)
+- 판정·보고 발화는 묶음 파일로 쓰지 않는다: 판정이 기존 리포트에서 고르므로 필요 없고, `evaluate`는 이름이 '-test'로 끝나는 묶음만 `--allow-test`로 막으므로 'zeroth-test-unseen' 같은 파일은 'test는 단계마다 한 번' 보호를 비켜 간다
+
+### 관문 (학습 전, CPU. `prepare_heldout`이 검사하고 어기면 아무것도 쓰지 않는다)
+- 입력: zeroth-train·zeroth-val·zeroth-val500·zeroth-test의 발화 수가 1단계 기록과 같고, ITN 묶음 둘은 원래 묶음과 발화 ID·순서·오디오 위치가 같고 정답 글만 다르다
+- 학습·고르기 묶음과 판정 발화(validation unseen, test unseen)의 문장 겹침 0. 원래 정답 키, 그리고 저장된 글에 맞춘 채점의 표기 통일(`itn.harmonize`)을 적용한 키 두 가지로 센다(뒤의 것은 표기만 다른 같은 문장이 학습 글로 남는 경우를 막는다. 판정 지표가 맞춘 CER이다). 학습 묶음과 판정 발화의 화자 겹침 0
+- 2026-10-29 결과: 모두 0이다. 고르기 묶음과 validation unseen은 validation 화자 9명을 함께 갖는다(허용. N의 val-500도 validation 화자였다)
+- 학습 직전(GPU 실행)에는 같은 명령을 플래그 없이 다시 돌린다: 다시 계산한 정의가 커밋된 정의 파일과 같을 때만(학습 묶음 파일의 SHA-256 포함) 묶음을 쓰고, 데이터·ITN 묶음·코드가 바뀌어 다르면 멈춘다
+
+### 후보 (하나)
+- **N-H**: 6단계 N과 같은 명령에 실행 이름과 묶음만 바꾼다. `train --run-name turbo-nh --model openai/whisper-large-v3-turbo --learning-rate 1e-4 --lora-r 16 --lora-targets q_proj k_proj v_proj out_proj fc1 fc2 --max-steps 1500 --batch-size 8 --grad-accum 4 --train-set zeroth-train-itn-h --eval-set zeroth-val500-itn-h`. 나머지는 기본값이고 N의 run.json과 같다(LoRA alpha 32, dropout 0.05, warmup 500, 500스텝마다 평가·저장, DataLoader 워커 4, seed 0, fp16). 체크포인트는 N처럼 고르기 묶음 CER(ITN 정답 기준)이 가장 낮은 것
+
+### 디코딩과 리포트
+- N과 같다(공통 규칙 '디코딩': greedy, fp16, 배치 16, 언어 고정, 256토큰). `evaluate --model openai/whisper-large-v3-turbo --adapter outputs/turbo-nh/best --name turbo-nh --set zeroth-val`, 같은 명령으로 `--set fleurs-ko-val`, `--set fleurs-en-val`. 리포트는 `reports/turbo-nh/`
+
+### 판정 (validation, `analyze verdict13`)
+- 지표: 맞춘 CER(6단계). 구간: 발화 단위 짝지은 부트스트랩 10,000번(seed 0). 공통 규칙 '지표'의 2026-10-29 관례대로 결과 전에 정했다
+- 조건: zeroth-val-unseen에서 N-H − 기준선 turbo의 95% 구간 상한 < 0 → **처음 보는 문장에서도 같은 도메인 이득이 있다**. 아니면 → **처음 보는 문장에서는 이득을 보이지 못했다**
+- 리포트가 정의 파일의 발화를 모두 담지 않으면 판정하지 않는다(`verdict13`이 멈춘다)
+
+### 보고 (판정 없음, 해석 규칙은 미리 정함)
+- G = (turbo − N)_unseen: unseen 발화에서 N의 같은 도메인 이득. M = (N-H − N)_unseen: N만 그 문장을 학습에서 봤다. C = (N-H − N)_seen: 둘 다 봤다(학습 데이터 감소·반복 증가의 몫). M − C: N의 이득 중 본 문장 몫의 추정. 모두 맞춘 CER, 10,000번(seed 0)
+- M − C 구간: 두 묶음을 따로 재표집한다. seed 0 생성기 하나에서 unseen 표본 10,000개(M 구간과 같은 표본)를 뽑고 이어서 seen 표본 10,000개를 뽑아, b번째 표본끼리 뺀 값의 2.5~97.5 백분위
+- 해석: M − C의 점 추정이 G의 1/4 미만이면 **'암기 몫은 작다'**, 1/2 이상이면 **'이득의 절반 이상이 본 문장 몫이다'**, 그 사이는 **'이득의 일부가 본 문장 몫이다'**. G ≤ 0이면 해석하지 않는다(아래 '이미 아는 수'로 G > 0이다)
+- 함께 적는다: 상대 변화(unseen과 seen에서 N-H와 N, 모두 기준선 대비), 판정 비교의 화자 블록 구간(1,000번, 2026-10-15 추가 분석과 같은 방법)과 화자 하나 빼기 범위(unseen 화자가 9명이라 블록 구간은 거칠다), unseen의 숫자 발화 제외(N-H − turbo, N-H − N), FLEURS 한국어·영어 validation의 N-H − N(망각 확인, 참고)
+- 결과는 기존 수치·판정을 바꾸지 않고 이 절의 결과와, README·앞 절 '추가 확인: Zeroth 문장 겹침'의 날짜 붙은 덧붙임으로 적는다
+
+### 이미 아는 수 (2026-10-29, 커밋된 리포트. `analyze verdict13`을 N-H 없이 돌린 출력, 10,000번)
+
+| 맞춘 CER | 기준선 turbo | N | N − turbo | 상대 변화 |
+|---|---|---|---|---|
+| zeroth-val-unseen 347발화 | 3.63% | 1.26% | −2.37%p [−2.90, −1.88] | −65.2% |
+| zeroth-val-seen 1,867발화 | 3.59% | 1.25% | −2.34%p [−2.56, −2.14] | −65.2% |
+
+- G = +2.37%p [+1.88, +2.90]. 그래서 해석 문턱은 M − C가 +0.59%p(G/4) 미만이면 '작다', +1.18%p(G/2) 이상이면 '절반 이상'이다
+- 해시로 나눈 두 묶음에서 기준선과 N의 오류율이 거의 같다. 두 묶음 모두 N이 학습에서 본 문장이므로, H가 문장 난도와 무관하게 나뉘었다는 것과 맞는다
+
+### test (한 번, 참고용)
+- 판정 뒤 `evaluate --model openai/whisper-large-v3-turbo --adapter outputs/turbo-nh/best --name turbo-nh --set zeroth-test --allow-test`를 한 번 잰다. `verdict13`이 zeroth-test-unseen·seen에서 같은 줄(N-H − turbo, N − turbo, M, C, M − C)을 참고로 찍는다. test unseen은 74발화뿐이라 구간이 넓다. test 수치로 판정·해석을 바꾸지 않는다. FLEURS test는 재지 않는다
+- 새 리포트의 맞춘 CER 총합은 결과를 적을 때 `tests/test_recorded_reports.py`에 고정한다
+
+### 스모크 (측정 아님) 와 비용
+- 스모크(약 5분): 본 학습과 같은 인자에 `--run-name turbo-nh-smoke --limit-train 64 --limit-eval 16`을 붙여 ① `--max-steps 2 --eval-steps 2`로 평가·checkpoint-2 저장과 hang.log를 확인하고 ② 같은 명령이 `--resume` 없이 거부되는지 ③ `--resume --max-steps 4`로 checkpoint-4까지 이어지고 run.json의 starts가 두 줄인지 본 뒤 `outputs/turbo-nh-smoke`를 지운다
+- GPU 약 5.5~6시간: 스모크 약 5분, 학습 약 5.3~5.5시간(N은 다른 프로그램을 끈 뒤 스텝당 약 12.7초였다. 1,500스텝이면 약 5.3시간), 평가 약 6분(N의 리포트 기준 zeroth-val 202초, FLEURS 한국어 23초, 영어 34초, zeroth-test 49초). 내려받기 0
+- 학습 중에는 `src/`를 고치지 않고 같은 GPU로 다른 측정을 돌리지 않는다. 로그가 15분 넘게 멈추면 hang.log를 보고 PID로 끝낸 뒤 같은 명령에 `--resume`을 붙여 잇는다
+- 실행하지 않기로 하면 이 절 끝에 '측정하지 않음(날짜, 사유)' 한 줄을 적는다
+
