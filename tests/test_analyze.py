@@ -1508,3 +1508,53 @@ def test_scoring_diff_command_prints_utterances_and_refuses_bad_scorings(reports
         analyze.scoring_diff("zeroth-val", ["m"], before="harmonized2", after="harmonized2")
     with pytest.raises(SystemExit, match="English"):
         analyze.scoring_diff("zeroth-val", ["m"], after="en-whisper")
+
+
+# 보조 채점 harmonized2로 커밋된 zeroth-val 리포트를 다시 채점한 편집 수의 총합을 고정한다(2,214발화, 정답
+# 길이는 정답 쪽 변환 25발화 때문에 93,621 → 93,632글자). 리포트에는 저장하지 않고 부를 때마다 다시 채점하므로
+# itn의 목록이나 split_attached가 바뀌어 값이 움직이면 여기서 드러난다. 각 줄 끝의 퍼센트는
+# docs/experiments.md '보조 지표 (판정 없음): 붙여 쓴 한글 숫자까지 맞춘 채점'의 결과에 적은 harmonized2
+# CER이고 괄호 안은 등록 채점(harmonized)이다. 값은 규칙의 명령(`analyze table --scoring harmonized2`,
+# `analyze scoring-diff`)의 2026-10-29 출력이다.
+@pytest.mark.parametrize(
+    ("report", "edits"),
+    [
+        ("whisper-small", 7076),  # 7.56% (7.55%)
+        ("whisper-large-v3-turbo", 2988),  # 3.19% (3.60%)
+        ("turbo-l2", 1208),  # 1.29% (1.28%)
+        ("turbo-n", 1177),  # 1.26% (1.25%)
+        ("turbo-n2-d1a", 1124),  # 1.20% (1.20%)
+        ("qwen3-asr-1.7b", 2736),  # 2.92% (3.45%)
+        ("qwen3-asr-1.7b-qn", 863),  # 0.92% (0.92%)
+        ("qwen3-asr-1.7b-qn-s050", 1390),  # 1.48% (1.48%)
+        ("qwen3-asr-1.7b-qn-s025", 2171),  # 2.32% (2.45%)
+        ("qwen3-asr-1.7b-qn-s075", 969),  # 1.03% (1.04%)
+        ("qwen3-asr-1.7b-qn-lm050", 1352),  # 1.44% (1.45%)
+        ("qwen3-asr-1.7b-qn-step1000", 1043),  # 1.11% (1.11%)
+    ],
+)
+def test_recorded_harmonized2_totals(report, edits):
+    rows = analyze.load_rows(report, "zeroth-val", scoring="harmonized2")
+    got_edits, got_lengths = analyze.arrays(rows, sorted(rows))
+    assert (len(rows), int(got_edits.sum()), int(got_lengths.sum())) == (2214, edits, 93632)
+
+
+# 오탐 점검(scoring-diff) 표의 셈을 고정한다: 리포트마다 변환이 다른 발화 수(정답 쪽, 가설 쪽)와 그중 편집
+# 수가 바뀐 발화 수. 정답 쪽 25발화는 정답이 같으므로 모든 리포트에 같다. 오탐을 가른 것은 낱말 짝을 하나씩
+# 읽고 내린 판단이라 여기서 고정하지 않는다(문서의 표에 적었다).
+@pytest.mark.parametrize(
+    ("report", "differ", "reference", "hypothesis", "edits_differ"),
+    [
+        ("whisper-small", 40, 25, 27, 25),
+        ("whisper-large-v3-turbo", 231, 25, 225, 212),
+        ("turbo-l2", 28, 25, 25, 5),
+        ("turbo-n", 27, 25, 25, 3),
+        ("qwen3-asr-1.7b", 281, 25, 275, 260),
+        ("qwen3-asr-1.7b-qn", 26, 25, 25, 2),
+        ("qwen3-asr-1.7b-qn-s050", 36, 25, 31, 16),
+    ],
+)
+def test_recorded_harmonized2_review_counts(report, differ, reference, hypothesis, edits_differ):
+    found = analyze.scoring_diff("zeroth-val", [report])[report]
+    got = (len(found["differ"]), found["reference"], found["hypothesis"], len(found["edits_differ"]))
+    assert got == (differ, reference, hypothesis, edits_differ)

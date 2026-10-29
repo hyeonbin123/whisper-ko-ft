@@ -102,7 +102,8 @@ docs/experiments.md '보조 지표 (판정 없음): 붙여 쓴 한글 숫자까�
 # [연결] metrics(채점·구간), itn·latin(표기 변환), en_norm(영어 표준 정규화),
 # text_norm.normalize(scoring-diff의 비교), paths.REPORTS를 쓴다. overlap만 splits·store.load_set과
 # paths.CACHE를 더 쓴다. tests/test_recorded_reports.py가 load_rows·arrays로 커밋된 리포트의 맞춘 CER 총합을
-# 고정하고, tests/test_analyze.py가 문장 겹침 파생 파일의 수와 영어 보조 지표의 총합을 고정한다.
+# 고정하고, tests/test_analyze.py가 문장 겹침 파생 파일의 수와 영어 보조 지표·harmonized2의 총합, 오탐 점검의
+# 셈을 고정한다.
 
 from __future__ import annotations
 
