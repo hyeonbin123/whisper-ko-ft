@@ -358,9 +358,10 @@ def saved_checkpoint(run_dir, step: int, max_steps: int) -> None:
 
 # 마지막 체크포인트가 이미 --max-steps에 닿은(끝난) 실행에 --resume을 주면, 데이터·처리기·모델을 불러오기
 # 전에 멈추고 폴더에 아무것도 쓰지 않는다. transformers 5.17의 Trainer는 이어 하기 전에 이를 확인하지 않아,
-# 고치기 전에는 옵티마이저 스텝을 하나 더 돌고 평가한 뒤 checkpoint-<max+1>을 저장했다(save_total_limit 2
-# 회전으로 앞 체크포인트가 지워지고, 그 체크포인트가 가장 좋으면 best/도 바뀐다). 같은 명령으로 다시 돌린
-# 경우(1500)와 더 작은 --max-steps를 준 경우(1000) 모두 그렇다.
+# 고치기 전에는 같은 명령으로 다시 돌리면(1500) 옵티마이저 스텝을 하나 더 돌고 평가한 뒤
+# checkpoint-<max+1>을 저장했다(save_total_limit 2 회전으로 앞 체크포인트가 지워지고, 그 체크포인트가 가장
+# 좋으면 best/도 바뀐다). 더 작은 --max-steps(1000)도 더 학습할 것이 없으므로 같이 거부한다. 그때 Trainer가
+# 스텝을 더 도는지는 에폭 계산에 달렸지만, 어느 쪽이든 새 프로세스가 best/와 run.json을 다시 쓴다.
 @pytest.mark.parametrize("max_steps", ["1500", "1000"])
 def test_a_finished_run_is_not_resumed(tmp_path, monkeypatch, capsys, max_steps):
     seen = fake_training(monkeypatch, tmp_path)
