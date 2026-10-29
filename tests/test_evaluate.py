@@ -1,18 +1,28 @@
 # [테스트 묶음] evaluate.py의 규칙 보호 장치(인자 검사)와 리포트 요약 도우미를 확인한다: --adapter에는 --name
-# 필수, 있는 리포트는 --overwrite 없이 덮어쓰지 않음, 측정 코드가 바뀌면 커밋에 +dirty, 스모크용 기준값은
-# --no-report에서만, 행 채점과 배치 시간 요약.
+# 필수, 있는 리포트는 --overwrite 없이 덮어쓰지 않음, 스모크용 기준값은 --no-report에서만, 행 채점과 배치 시간
+# 요약, 등록한 Hub ID에만 고정 revision을 넘기는 모델 불러오기, 요약의 재현 지문(revision·라이브러리 판·어댑터
+# SHA-256).
 # [왜 중요한가] 리포트는 커밋된 측정 기록이고 모든 판정이 이것을 다시 읽는다. 어댑터 평가가 기준선 리포트를
 # 덮어쓰거나, 일부만 잰 리포트가 전체 리포트를 대신하는 사고(커밋 a29a975가 막은 것)가 다시 생기지 않게 한다.
+# 기본 모델의 revision과 어댑터 가중치의 지문이 없으면 Hub의 모델이 바뀌거나 outputs/의 어댑터를 다시 만든
+# 뒤에 리포트만으로는 같은 가중치로 쟀는지 알 수 없다.
 # [방법] 인자 검사를 통과하면 모델을 불러오기 직전에 Reached를 던지게 해, GPU 없이 '멈췄는지/통과했는지'만
-# 본다.
+# 본다. 요약의 지문은 모델·받아 적기·torch.cuda를 가짜로 바꿔 main을 끝까지 돌려 본다. 커밋 표시(git_commit)는
+# provenance로 옮겨 tests/test_provenance.py가 확인한다.
 
+import hashlib
 import json
-import subprocess
 import sys
+from types import SimpleNamespace
 
+import peft
 import pytest
+import torch
+import transformers
 
 from whisper_ko_ft import evaluate
+from whisper_ko_ft.provenance import WHISPER_REVISIONS
+from whisper_ko_ft.store import Utterance
 
 
 class Reached(Exception):
@@ -65,40 +75,6 @@ def test_an_existing_report_is_not_replaced_without_overwrite(reports, monkeypat
         run(monkeypatch, "--model", "m", "--set", "zeroth-val", *channel, "--overwrite")
     with pytest.raises(Reached):
         run(monkeypatch, "--model", "m", "--set", "zeroth-val", *channel, "--no-report", "--limit", "5")
-
-
-# 임시 저장소에서 git을 부르는 도우미. 사용자 이름·메일을 명령에서 주어 전역 설정 없이도 커밋된다.
-def git(root, *args):
-    command = ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args]
-    subprocess.run(command, cwd=root, check=True, capture_output=True)
-
-
-# 임시 git 저장소를 만들어, 리포트만 바뀌면 커밋 표시가 그대로이고 src 코드가 바뀌면 '+dirty'가 붙는지
-# 본다(커밋 6ba3c27의 규칙).
-def test_commit_is_marked_dirty_only_for_uncommitted_code(tmp_path):
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
-    (tmp_path / "reports").mkdir()
-    (tmp_path / "reports" / "r.json").write_text("{}\n", encoding="utf-8")
-    git(tmp_path, "init", "-q")
-    git(tmp_path, "add", ".")
-    git(tmp_path, "commit", "-qm", "init")
-
-    clean = evaluate.git_commit(tmp_path)
-    assert clean and not clean.endswith("+dirty")
-    (tmp_path / "reports" / "r.json").write_text('{"a": 1}\n', encoding="utf-8")  # 리포트는 세지 않는다
-    assert evaluate.git_commit(tmp_path) == clean
-    (tmp_path / "src" / "a.py").write_text("x = 2\n", encoding="utf-8")
-    assert evaluate.git_commit(tmp_path) == f"{clean}+dirty"
-
-
-# git 실행 파일이 없으면 예외로 죽지 않고 'unknown'을 남긴다.
-def test_commit_without_git(tmp_path, monkeypatch):
-    def missing(*args, **kwargs):
-        raise FileNotFoundError("git")
-
-    monkeypatch.setattr(evaluate.subprocess, "run", missing)
-    assert evaluate.git_commit(tmp_path) == "unknown"
 
 
 # 8단계 재시도 후보 D1a(ratio)로 재는 기본 인자.
@@ -180,3 +156,139 @@ def test_report_json_refuses_nan_and_keeps_korean():
         evaluate.report_json({"summary": {"error_rate": float("nan")}})
     text = evaluate.report_json({"summary": {"error_rate": 0.5}, "utterances": [{"reference": "안녕"}]})
     assert "안녕" in text and json.loads(text)["summary"]["error_rate"] == 0.5
+
+
+# --- 기본 모델 revision 고정과 요약의 재현 지문 ---
+
+
+# load_model은 등록한 Hub ID(whisper-small, large-v3-turbo)에만 고정한 revision을 모델·처리기
+# from_pretrained에 넘기고, outputs/ 아래 로컬 폴더에는 넘기지 않는다(로컬 폴더에는 revision이 없다). 가중치는
+# 받지 않고 from_pretrained를 가짜로 바꿔 받은 인자만 본다.
+def test_load_model_pins_the_registered_revision_for_hub_ids_only(monkeypatch):
+    seen = {}
+
+    class Loaded:
+        def to(self, device):
+            return self
+
+        def eval(self):
+            return self
+
+    def fake_model(path, **kwargs):
+        seen["model"] = kwargs
+        return Loaded()
+
+    def fake_processor(path, **kwargs):
+        seen["processor"] = kwargs
+        return "processor"
+
+    monkeypatch.setattr(evaluate.WhisperForConditionalGeneration, "from_pretrained", fake_model)
+    monkeypatch.setattr(evaluate.WhisperProcessor, "from_pretrained", fake_processor)
+
+    evaluate.load_model("openai/whisper-large-v3-turbo", None)
+    turbo = WHISPER_REVISIONS["openai/whisper-large-v3-turbo"]
+    assert seen["model"] == {"dtype": torch.float16, "revision": turbo}
+    assert seen["processor"] == {"revision": turbo}
+    evaluate.load_model("outputs/turbo-n/merged", None)
+    assert seen["model"] == {"dtype": torch.float16} and seen["processor"] == {}
+
+
+class Features:
+    """특징 추출기 출력 대역. input_features·attention_mask가 자기 자신이고 to()는 자신을 돌려준다.
+
+    배치의 '오디오'(아래 IdStore가 돌려주는 발화 ID)를 들고 있어 가짜 transcribe가 가설을 고른다.
+    """
+
+    def __init__(self, audio) -> None:
+        self.audio = audio
+        self.input_features = self.attention_mask = self
+
+    def to(self, *args, **kwargs):
+        return self
+
+
+class IdStore:
+    """오디오 저장소 대역: memmap 대신 발화 ID를 '오디오'로 돌려준다."""
+
+    def __init__(self, name: str) -> None:
+        pass
+
+    def read(self, utterance):
+        return utterance.id
+
+
+# evaluate.main이 GPU·가중치 없이 끝까지 돌아 리포트를 쓰게 바꾼다: 묶음(정답), 모델 불러오기(아무 객체와 가짜
+# 특징 추출기), 받아 적기(발화 ID → 가설), 오디오 저장소, torch.cuda의 메모리 통계·동기화·장치 이름.
+def transcribing(monkeypatch, tmp_path, references: dict[str, str], hypotheses: dict[str, str]) -> None:
+    utterances = [Utterance(i, "s", text, "x", 0, 16_000) for i, text in references.items()]
+    processor = SimpleNamespace(feature_extractor=lambda audio, **kwargs: Features(audio))
+
+    def transcribe(model, processor, features, attention_mask, language, settings, trace):
+        return [hypotheses[a] for a in features.audio], None
+
+    monkeypatch.setattr(evaluate, "REPORTS", tmp_path)
+    monkeypatch.setattr(evaluate, "ROOT", tmp_path)
+    monkeypatch.setattr(evaluate, "load_set", lambda name: ("ko", utterances))
+    monkeypatch.setattr(evaluate, "load_model", lambda path, adapter: (object(), processor))
+    monkeypatch.setattr(evaluate, "transcribe", transcribe)
+    monkeypatch.setattr(evaluate, "AudioStore", IdStore)
+    monkeypatch.setattr(evaluate.torch.cuda, "reset_peak_memory_stats", lambda: None)
+    monkeypatch.setattr(evaluate.torch.cuda, "synchronize", lambda: None)
+    monkeypatch.setattr(evaluate.torch.cuda, "max_memory_allocated", lambda: 0)
+    monkeypatch.setattr(evaluate.torch.cuda, "get_device_name", lambda index: "Fake GPU")
+
+
+# 요약에 재현 지문이 남는다: 기본 모델의 revision(등록한 Hub ID면 sha, 로컬 폴더면 null), transformers 판,
+# 어댑터가 있으면 peft 판과 어댑터 가중치·설정의 SHA-256(기존 adapter 키는 준 경로 그대로). 어댑터가 없으면
+# peft와 두 SHA는 null이다. 오류율 같은 기존 키의 계산은 그대로다.
+def test_the_summary_records_the_revision_the_library_versions_and_the_adapter_hashes(tmp_path, monkeypatch):
+    adapter = tmp_path / "adapter"
+    adapter.mkdir()
+    (adapter / "adapter_model.safetensors").write_bytes(b"weights")
+    (adapter / "adapter_config.json").write_bytes(b'{"r": 16}')
+    transcribing(monkeypatch, tmp_path, {"a": "가나다", "b": "라마"}, {"a": "가나다", "b": "라마바"})
+    turbo = [
+        "--model",
+        "openai/whisper-large-v3-turbo",
+        "--adapter",
+        str(adapter),
+        "--name",
+        "n",
+        "--set",
+        "x",
+    ]
+
+    run(monkeypatch, *turbo)
+
+    summary = json.loads((tmp_path / "n" / "x.json").read_text(encoding="utf-8"))["summary"]
+    assert summary["revision"] == WHISPER_REVISIONS["openai/whisper-large-v3-turbo"]
+    assert summary["adapter"] == str(adapter)  # 기존 키: 준 경로 그대로
+    assert summary["adapter_sha256"] == hashlib.sha256(b"weights").hexdigest()
+    assert summary["adapter_config_sha256"] == hashlib.sha256(b'{"r": 16}').hexdigest()
+    assert (summary["transformers"], summary["peft"]) == (transformers.__version__, peft.__version__)
+    assert (summary["utterances"], summary["error_rate"]) == (2, 0.2)  # 편집 1 ÷ 글자 5
+
+    run(monkeypatch, "--model", "outputs/small-a/best", "--set", "x")  # 로컬 폴더, 어댑터 없음
+
+    summary = json.loads((tmp_path / "best" / "x.json").read_text(encoding="utf-8"))["summary"]
+    assert (summary["revision"], summary["adapter"], summary["peft"]) == (None, None, None)
+    assert (summary["adapter_sha256"], summary["adapter_config_sha256"]) == (None, None)
+    assert summary["transformers"] == transformers.__version__
+
+
+# 어댑터 지문은 모델을 올리기 전에 읽는다(커밋처럼 디코딩 전에). 그래서 요약의 SHA-256은 실제로 불러온 파일의
+# 것이고, 파일이 없으면 모델을 올리고 묶음을 다 디코딩한 뒤가 아니라 시작할 때 멈춘다. 학습이 도는 실행의
+# 체크포인트를 재는 동안 save_total_limit가 그 폴더를 지우는 경우, 끝에서 해시하면 다 잰 측정을 잃는다.
+def test_the_adapter_is_fingerprinted_before_the_model_is_loaded(tmp_path, monkeypatch):
+    adapter = tmp_path / "adapter"
+    adapter.mkdir()
+    (adapter / "adapter_model.safetensors").write_bytes(b"weights")  # adapter_config.json이 없다
+    transcribing(monkeypatch, tmp_path, {"a": "가나다"}, {"a": "가나다"})
+    loaded: list[str] = []
+    monkeypatch.setattr(evaluate, "load_model", lambda path, adapter: loaded.append(path))
+    turbo = ["--model", "openai/whisper-large-v3-turbo", "--adapter", str(adapter), "--name", "n"]
+
+    with pytest.raises(FileNotFoundError, match="adapter_config"):
+        run(monkeypatch, *turbo, "--set", "x")
+    assert loaded == []  # 모델을 올리기 전에 멈췄다
+    assert not (tmp_path / "n").exists()

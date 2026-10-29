@@ -1,17 +1,25 @@
 # [테스트 묶음] faster-whisper 경로의 멜 필터 수(ct2_features.py, evaluate_ct2.py)를 확인한다. 합친 모델
 # 폴더에 128개 설정이 써지는지, 설정 파일이 없거나 틀린 폴더를 어떻게 다루는지, evaluate_ct2가 오디오를 읽기
-# 전에 turbo에 128개를 쓰는지. 끝에 evaluate_ct2 요약의 빈 가설 수가 evaluate와 같은 기준인지도 본다.
+# 전에 turbo에 128개를 쓰는지. 끝에 evaluate_ct2 요약의 빈 가설 수가 evaluate와 같은 기준인지, 요약에 변환
+# 폴더의 지문(model.bin·config.json SHA-256)과 --seed가 남는지, merge_adapter가 등록한 기본 모델의 revision을
+# 고정하는지도 본다.
 # [왜 중요한가] 2026-09-20 재시도 측정이 turbo에 멜 80개로 계산된 특징 때문에 첫 발화에서 모두
 # 멈췄다(docs/experiments.md '추가 측정', 커밋 61b4b2f에서 고침). 같은 실패가 다시 나지 않게 고정한다.
-# evaluate_ct2 테스트는 고치기 전 코드에서 실패하는 것을 확인했다(커밋 61b4b2f 메시지).
+# evaluate_ct2 테스트는 고치기 전 코드에서 실패하는 것을 확인했다(커밋 61b4b2f 메시지). 변환 폴더는 같은
+# 경로에 다시 만들어진 이력이 있어(outputs/turbo-n/ct2), 지문이 없으면 리포트만으로는 어느 변환으로 쟀는지
+# 모른다.
 # [방법] 가중치 없이 설정 객체만 만들고, evaluate_ct2 테스트는 faster_whisper 모델을 가짜로 바꾼다.
 # faster-whisper는 선택 의존성(ct2 묶음)이라 없으면 evaluate_ct2 테스트는 건너뛴다. CI는 2026-10-15부터 ct2
 # 묶음을 설치해 이 테스트들도 돌린다(.github/workflows/ci.yml). 모델은 내려받지 않는다.
 
+import hashlib
 import json
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import torch
 from transformers import WhisperConfig, WhisperFeatureExtractor
 
 from whisper_ko_ft.ct2_features import (
@@ -20,6 +28,7 @@ from whisper_ko_ft.ct2_features import (
     feature_kwargs,
     write_preprocessor_config,
 )
+from whisper_ko_ft.provenance import WHISPER_REVISIONS
 
 # whisper-large-v3와 large-v3-turbo는 멜 필터 128개, whisper-small은 80개를 받는다.
 TURBO_MEL_BINS = 128
@@ -153,6 +162,20 @@ class IdStore:
         return utterance.id
 
 
+# 변환된 CTranslate2 폴더 흉내: 요약의 지문이 읽는 두 파일(model.bin, config.json)을 작은 바이트로 쓰고,
+# 요약에 남아야 할 SHA-256을 돌려준다. 묶음을 끝까지 받아 적는 테스트는 이 폴더가 있어야 한다(실제 변환
+# 폴더에는 두 파일이 늘 있다. model.bin이 없으면 WhisperModel이 불러오다 멈추고, config.json이 없으면 첫
+# 디코딩에서 멈춘다).
+def converted_folder(folder) -> dict[str, str]:
+    files = {"model.bin": b"ct2 weights", "config.json": b'{"n_mels": 128}'}
+    for name, data in files.items():
+        (folder / name).write_bytes(data)
+    return {
+        "model_sha256": hashlib.sha256(files["model.bin"]).hexdigest(),
+        "config_sha256": hashlib.sha256(files["config.json"]).hexdigest(),
+    }
+
+
 # 요약의 빈 가설 수는 evaluate.decoding_counts와 같은 기준이다: 채점한 발화(정답이 비지 않은 발화)만
 # 세고, 공백만 남은 가설도 빈 가설로 센다. 고치기 전에는 정답이 빈 발화까지 세고 공백 가설은 세지 않아
 # 3이었다.
@@ -161,6 +184,7 @@ def test_evaluate_ct2_counts_empty_hypotheses_over_scored_utterances_only(tmp_pa
     from whisper_ko_ft import evaluate_ct2
     from whisper_ko_ft.store import Utterance
 
+    converted_folder(tmp_path)
     texts = {"spoken": "가나다", "silent": "라마", "blank": "바사", "no-ref-1": "", "no-ref-2": ""}
     TranscribingModel.segments = {
         "spoken": [Segment("가나다")],
@@ -198,6 +222,7 @@ def test_evaluate_ct2_passes_the_compute_type_and_records_latency(tmp_path, monk
             super().__init__(path, device, compute_type)
             seen.update(device=device, compute_type=compute_type)
 
+    converted_folder(tmp_path)
     Recording.segments = {"a": [Segment("가나다")], "b": [Segment("라마")]}
     utterances = [Utterance(i, "s", text, "x", 0, 16_000) for i, text in (("a", "가나다"), ("b", "라마"))]
     monkeypatch.setattr(evaluate_ct2, "REPORTS", tmp_path)
@@ -260,6 +285,7 @@ def test_evaluate_ct2_does_not_write_a_report_with_nan(tmp_path, monkeypatch):
     from whisper_ko_ft import evaluate_ct2
     from whisper_ko_ft.store import Utterance
 
+    converted_folder(tmp_path)
     TranscribingModel.segments = {"a": [Segment("가")], "b": []}
     utterances = [Utterance(i, "s", "", "x", 0, 16_000) for i in ("a", "b")]  # 정답이 모두 비었다
     monkeypatch.setattr(evaluate_ct2, "REPORTS", tmp_path)
@@ -273,3 +299,151 @@ def test_evaluate_ct2_does_not_write_a_report_with_nan(tmp_path, monkeypatch):
     with pytest.raises(ValueError):
         evaluate_ct2.main()
     assert not (tmp_path / "n" / "x.json").exists()
+
+
+# 요약에 변환 폴더의 지문(model.bin·config.json의 SHA-256)이 남는다. --seed를 주면 모델을 띄우기 전에
+# ctranslate2.set_random_seed(seed)를 한 번만 불러, 같은 명령의 재시도 temperature 표본이 실행마다 같게 한다.
+# 띄운 뒤에(예: 발화마다) 부르면 소용이 없다: CTranslate2의 난수 생성기는 작업 스레드마다 처음 쓸 때 한 번만
+# 시드를 받고, set_random_seed는 이미 만든 생성기를 다시 시드하지 않는다(CTranslate2 4.8.2
+# src/random.cc). 그래서 순서(시드 → 모델)를 본다. --seed가 없으면(기본, 기록된 측정과 같은 경로) 시드를
+# 걸지 않고 요약의 seed는 null이다.
+def test_evaluate_ct2_records_the_folder_hashes_and_seeds_once_before_loading_only_when_asked(
+    tmp_path, monkeypatch
+):
+    pytest.importorskip("faster_whisper")
+    from whisper_ko_ft import evaluate_ct2
+    from whisper_ko_ft.store import Utterance
+
+    expected = converted_folder(tmp_path)
+    events: list[tuple] = []  # 시드 걸기와 모델 띄우기를 일어난 순서대로
+
+    class Loading(TranscribingModel):
+        def __init__(self, path, device, compute_type):
+            super().__init__(path, device, compute_type)
+            events.append(("load",))
+
+    Loading.segments = {"a": [Segment("가나다", 0.2)], "b": [Segment("라마")]}
+    utterances = [Utterance(i, "s", text, "x", 0, 16_000) for i, text in (("a", "가나다"), ("b", "라마"))]
+
+    def seeding(seed):
+        events.append(("seed", seed))
+
+    monkeypatch.setattr(evaluate_ct2.ctranslate2, "set_random_seed", seeding)
+    monkeypatch.setattr(evaluate_ct2, "REPORTS", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "ROOT", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "git_commit", lambda: "test")
+    monkeypatch.setattr(evaluate_ct2, "WhisperModel", Loading)
+    monkeypatch.setattr(evaluate_ct2, "AudioStore", IdStore)
+    monkeypatch.setattr(evaluate_ct2, "load_set", lambda name: ("ko", utterances))
+    argv = ["evaluate_ct2", "--model", str(tmp_path), "--set", "x", "--fallback"]
+
+    monkeypatch.setattr(sys, "argv", [*argv, "--name", "n"])
+    evaluate_ct2.main()
+
+    summary = json.loads((tmp_path / "n" / "x.json").read_text(encoding="utf-8"))["summary"]
+    assert events == [("load",)] and summary["seed"] is None  # 기본: 시드 없음(기록된 측정과 같다)
+    assert (summary["model_sha256"], summary["config_sha256"]) == (
+        expected["model_sha256"],
+        expected["config_sha256"],
+    )
+    assert summary["decoded_again"] == 1
+
+    events.clear()
+    monkeypatch.setattr(sys, "argv", [*argv, "--name", "m", "--seed", "7"])
+    evaluate_ct2.main()
+
+    summary = json.loads((tmp_path / "m" / "x.json").read_text(encoding="utf-8"))["summary"]
+    assert events == [("seed", 7), ("load",)]  # 모델을 띄우기 전에 한 번만(발화마다 다시 걸지 않는다)
+    assert summary["seed"] == 7
+
+
+# --seed는 CTranslate2가 받는 unsigned int 범위에서 '시드 없음' 표시(4294967295 = 2**32 - 1)를 뺀
+# 0~4294967294만 받는다. 음수와 2**32 이상은 ctranslate2.set_random_seed가 TypeError를 내고, 4294967295는
+# 받아도 시드가 걸리지 않는다(CTranslate2 4.8.2 src/random.cc의 default_seed. 요약에는 시드가 적히는데 표본은
+# 실행마다 달라진다). 그래서 시드를 걸거나 모델을 띄우기 전에 거부하고, 경계값 0과 4294967294는 그대로 넘긴다.
+@pytest.mark.parametrize(
+    ("seed", "applied"),
+    [("-1", None), ("0", 0), ("4294967294", 4294967294), ("4294967295", None), ("4294967296", None)],
+)
+def test_evaluate_ct2_refuses_a_seed_ctranslate2_would_not_apply(
+    tmp_path, monkeypatch, capsys, seed, applied
+):
+    pytest.importorskip("faster_whisper")
+    from whisper_ko_ft import evaluate_ct2
+
+    class Loaded(Exception):
+        """인자 검사와 시드 걸기를 지나 모델을 띄우려 한 순간(여기서 멈춘다)."""
+
+    def loading(*args, **kwargs):
+        raise Loaded
+
+    seeded: list[int] = []
+    monkeypatch.setattr(evaluate_ct2.ctranslate2, "set_random_seed", seeded.append)
+    monkeypatch.setattr(evaluate_ct2, "REPORTS", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "ROOT", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "git_commit", lambda: "test")
+    monkeypatch.setattr(evaluate_ct2, "WhisperModel", loading)
+    argv = ["evaluate_ct2", "--model", str(tmp_path), "--name", "n", "--set", "x", "--seed", seed]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    if applied is None:
+        with pytest.raises(SystemExit):
+            evaluate_ct2.main()
+        assert seeded == []
+        assert "--seed must be between 0 and 4294967294" in capsys.readouterr().err
+    else:
+        with pytest.raises(Loaded):
+            evaluate_ct2.main()
+        assert seeded == [applied]
+
+
+# merge_adapter는 기본 모델이 등록한 Hub ID면 모델·처리기 from_pretrained에 고정한 revision을 넘기고(로컬
+# 폴더면 넘기지 않음), 합친 폴더에 faster-whisper용 128개 설정을 쓴다. 가중치는 받지 않는다: 모델·PEFT·처리기
+# 불러오기를 가짜로 바꾸고 설정 쓰기만 실제로 한다.
+@pytest.mark.parametrize(
+    ("model", "pinned"),
+    [
+        ("openai/whisper-large-v3-turbo", {"revision": WHISPER_REVISIONS["openai/whisper-large-v3-turbo"]}),
+        ("outputs/turbo-n/base", {}),
+    ],
+)
+def test_merge_adapter_pins_the_registered_revision_of_the_base_model(tmp_path, monkeypatch, model, pinned):
+    from whisper_ko_ft import merge_adapter
+
+    seen = {}
+    output = tmp_path / "merged"
+    merged = SimpleNamespace(
+        config=SimpleNamespace(num_mel_bins=TURBO_MEL_BINS),
+        save_pretrained=lambda path: Path(path).mkdir(parents=True),
+    )
+    processor = SimpleNamespace(
+        feature_extractor=WhisperFeatureExtractor(feature_size=TURBO_MEL_BINS),
+        save_pretrained=lambda path: None,
+    )
+
+    def base(path, **kwargs):
+        seen["base"] = (path, kwargs)
+        return "base"
+
+    def adapter(base_model, path, **kwargs):
+        seen["adapter"] = (base_model, path)
+        return SimpleNamespace(merge_and_unload=lambda: merged)
+
+    def processor_loader(path, **kwargs):
+        seen["processor"] = (path, kwargs)
+        return processor
+
+    monkeypatch.setattr(merge_adapter.WhisperForConditionalGeneration, "from_pretrained", base)
+    monkeypatch.setattr(merge_adapter.PeftModel, "from_pretrained", adapter)
+    monkeypatch.setattr(merge_adapter.WhisperProcessor, "from_pretrained", processor_loader)
+    monkeypatch.setattr(
+        sys, "argv", ["merge_adapter", "--model", model, "--adapter", "a", "--output", str(output)]
+    )
+
+    merge_adapter.main()
+
+    assert seen["base"] == (model, {"dtype": torch.float16, **pinned})
+    assert seen["adapter"] == ("base", "a")
+    assert seen["processor"] == (model, pinned)
+    saved = json.loads((output / PREPROCESSOR_CONFIG).read_text(encoding="utf-8"))
+    assert saved["feature_size"] == TURBO_MEL_BINS

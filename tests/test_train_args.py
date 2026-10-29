@@ -1,7 +1,8 @@
 # [테스트 묶음] train.py의 LoRA 인자 처리(resolve_lora_args)와, --init-adapter만 준 실행이 실제로 어댑터를
 # 불러오는지 확인한다. 그리고 실행 폴더 보호(같은 --run-name이면 시작하지 않음), --resume(끝까지 저장된 마지막
 # 체크포인트에서 잇기, run.json의 starts 덧붙이기), 멈춤 진단(진행이 없으면 스레드 스택을 hang.log에 남기는
-# 콜백)을 확인한다.
+# 콜백), 기본 모델 revision 고정(등록한 Hub ID에만)과 run.json의 환경 기록(revision, transformers·peft 판)을
+# 확인한다.
 # [왜 중요한가] 예전 코드는 --lora-r만 보고 LoRA 여부를 정해서, --lora-r 없이 --init-adapter만 주면 어댑터를
 # 버리고 기본 모델 전체를 fp32로 학습했다(커밋 8ad5a18에서 고침). 오류 없이 다른 실험이 되어 버리는 버그라
 # 테스트로 막는다. 또 outputs/는 커밋하지 않아 기록한 리포트를 낸 가중치의 유일한 사본인데, 예전 코드는 같은
@@ -17,11 +18,14 @@ import time
 from datetime import datetime
 from types import SimpleNamespace
 
+import peft
 import pytest
 import torch
+import transformers
 from peft import LoraConfig
 
 from whisper_ko_ft import train
+from whisper_ko_ft.provenance import WHISPER_REVISIONS
 from whisper_ko_ft.train import resolve_lora_args
 
 
@@ -134,12 +138,12 @@ class FakeFaulthandler:
 
 
 # main이 내려받기·GPU 없이 끝까지 돌도록 바꾼다: 묶음, 처리기, 모델, Trainer 설정과 Trainer, 커밋, GPU 이름과
-# 최대 메모리, faulthandler. 데이터·처리기·모델을 불러오면 seen["loaded"]에 남는다(보호 검사가 그보다 먼저인지
-# 보려고). 가짜 Trainer의 train은 받은 resume_from_checkpoint와 그 순간의 run.json을 남기고, 진짜 Trainer처럼
-# 콜백의 학습 시작·스텝 끝·평가 배치·평가 끝·학습 끝을 차례로 부른다. fail이면 스텝 끝 뒤에 예외를 낸다(학습이
-# 죽는 경우).
+# 최대 메모리, faulthandler. 데이터·처리기·모델을 불러오면 seen["loaded"]에 남고(보호 검사가 그보다 먼저인지
+# 보려고), from_pretrained가 받은 키워드 인자(dtype, revision)는 seen["kwargs"]에 종류별로 남는다. 가짜
+# Trainer의 train은 받은 resume_from_checkpoint와 그 순간의 run.json을 남기고, 진짜 Trainer처럼 콜백의 학습
+# 시작·스텝 끝·평가 배치·평가 끝·학습 끝을 차례로 부른다. fail이면 스텝 끝 뒤에 예외를 낸다(학습이 죽는 경우).
 def fake_training(monkeypatch, outputs, fail: bool = False) -> dict:
-    seen: dict = {"loaded": [], "saved": [], "faulthandler": FakeFaulthandler()}
+    seen: dict = {"loaded": [], "saved": [], "kwargs": {}, "faulthandler": FakeFaulthandler()}
 
     class FakeTrainer:
         def __init__(self, **kwargs):
@@ -168,6 +172,7 @@ def fake_training(monkeypatch, outputs, fail: bool = False) -> dict:
     def loader(kind: str, value):
         def load(*args, **kwargs):
             seen["loaded"].append(kind)
+            seen["kwargs"][kind] = kwargs
             return value
 
         return load
@@ -386,3 +391,41 @@ def test_the_hang_watchdog_writes_every_thread_stack_after_the_timeout(tmp_path)
     assert "Timeout (0:00:00.200000)!" in text
     assert "test_the_hang_watchdog_writes_every_thread_stack_after_the_timeout" in text
     path.unlink()
+
+
+# --- 기본 모델 revision 고정과 run.json의 환경 기록 ---
+
+
+# 등록한 Hub ID(기본값 openai/whisper-small)면 처리기·모델 from_pretrained에 고정한 revision을 넘기고,
+# run.json에 그 revision과 transformers 판을 적는다. 전체 파인튜닝은 peft를 쓰지 않으므로 peft는 null이다.
+def test_the_run_record_pins_the_revision_and_names_the_library_versions(tmp_path, monkeypatch):
+    seen = fake_training(monkeypatch, tmp_path)
+
+    run_main(monkeypatch)
+
+    small = WHISPER_REVISIONS["openai/whisper-small"]
+    assert seen["kwargs"]["processor"] == {"revision": small}
+    assert seen["kwargs"]["model"] == {"dtype": torch.float32, "revision": small}
+    run = json.loads((tmp_path / "x" / "run.json").read_text(encoding="utf-8"))
+    assert (run["revision"], run["transformers"], run["peft"]) == (small, transformers.__version__, None)
+
+
+# outputs/ 아래 로컬 폴더를 기본 모델로 주면 revision을 넘기지 않고 run.json의 revision은 null이다. LoRA
+# 실행(--lora-r)은 어댑터를 만든 peft 판을 적는다(get_peft_model은 가짜로 바꿔 가중치 없이 돈다).
+def test_a_local_base_model_gets_no_revision_and_a_lora_run_names_peft(tmp_path, monkeypatch):
+    seen = fake_training(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "peft.get_peft_model",
+        lambda model, config: SimpleNamespace(**vars(model), print_trainable_parameters=lambda: None),
+    )
+
+    run_main(monkeypatch, "--model", "outputs/turbo-n/merged", "--lora-r", "16")
+
+    assert seen["kwargs"]["processor"] == {}
+    assert seen["kwargs"]["model"] == {"dtype": torch.float16}
+    run = json.loads((tmp_path / "x" / "run.json").read_text(encoding="utf-8"))
+    assert (run["revision"], run["transformers"], run["peft"]) == (
+        None,
+        transformers.__version__,
+        peft.__version__,
+    )

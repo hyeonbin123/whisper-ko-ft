@@ -24,32 +24,44 @@
 # 모델을 다시 돌리지 않고 계산한다.
 # [흐름] 인자 확인 → 묶음과 모델 불러오기 → 배치마다 오디오 읽기(필요하면 전화 채널 변환) → GPU에서 로그 멜
 # 특징 계산 → generate(greedy, 또는 8단계의 재시도) → 채점 → 요약 출력과 리포트 쓰기.
-# [연결] evaluate_qwen이 MAX_NEW_TOKENS·WINDOW_SECONDS·score_rows·batch_seconds_summary·git_commit·
-# report_json을, evaluate_ct2가 git_commit·batch_seconds_summary·report_json을, train·train_qwen이
-# git_commit을, train이 MAX_NEW_TOKENS를 가져다 쓴다.
+# [연결] evaluate_qwen이 MAX_NEW_TOKENS·WINDOW_SECONDS·score_rows·batch_seconds_summary·report_json을,
+# evaluate_ct2가 batch_seconds_summary·report_json을, train이 MAX_NEW_TOKENS를 가져다 쓴다. 측정 코드의 커밋
+# 기록(git_commit)과 가중치 지문(고정 revision, SHA-256)은 provenance에 있다. git_commit은 여기서도 그대로
+# 보이게 가져와 두어(아래 import), 예전처럼 evaluate에서 가져가는 train_qwen도 그대로 동작한다.
+# [재현 지문] 2026-10-29부터 기본 모델이 등록한 Hub ID(whisper-small, large-v3-turbo)면 기록된 측정이 쓴 캐시
+# 스냅숏과 같은 revision으로 받고, 요약에 revision·transformers 판·(어댑터가 있으면) peft 판과 어댑터
+# 가중치·설정의 SHA-256을 더 적는다. 디코딩 경로와 기존 키는 그대로다.
 
 from __future__ import annotations
 
 import argparse
 import json
 import re
-import subprocess
 import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
 # numpy: 채점 배열과 백분위 계산. torch: GPU 추론, 메모리 측정, 재시도 표본의 시드. transformers: Whisper
-# 모델과 처리기(특징 추출기 + 토크나이저).
+# 모델과 처리기(특징 추출기 + 토크나이저), 그리고 요약에 적는 판.
 import numpy as np
 import torch
+import transformers
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 # channel: --channel telephone(4단계 전화 음질 변환). metrics: 채점과 구간. paths: 리포트 위치와 저장소 루트.
-# store: 묶음 목록과 오디오 저장소.
+# provenance: 요약에 남길 지문(기본 모델의 고정 revision, 어댑터 SHA-256, peft 판)과 측정 코드의 커밋. store:
+# 묶음 목록과 오디오 저장소.
 from whisper_ko_ft.channel import CHANNELS
 from whisper_ko_ft.metrics import error_rate, interval, score
 from whisper_ko_ft.paths import REPORTS, ROOT
+from whisper_ko_ft.provenance import (
+    adapter_hashes,
+    git_commit,
+    peft_version,
+    revision_kwargs,
+    whisper_revision,
+)
 from whisper_ko_ft.store import SAMPLE_RATE, AudioStore, load_set
 
 # MAX_NEW_TOKENS: 발화당 생성할 최대 토큰 수(docs/experiments.md 공통 규칙 '디코딩'). 같은 구절을 되풀이하는
@@ -277,40 +289,21 @@ def decoding_counts(rows: list[dict], fallback: bool) -> dict:
     }
 
 
-# 측정·학습한 코드의 커밋을 리포트와 run.json에 남긴다. 짧은 HEAD 해시이고, src·pyproject.toml·uv.lock이
-# HEAD와 다르면 '+dirty'를 붙인다. 리포트나 문서만 바뀐 것은 측정 코드가 아니므로 보지 않는다.
-# git이 없으면 'unknown', 커밋이 없으면 'uncommitted'. 호출 위치:
-# evaluate·evaluate_ct2·evaluate_qwen·train·train_qwen.
-def git_commit(root: Path = ROOT) -> str:
-    """짧은 HEAD 해시. 코드나 의존성 파일이 HEAD와 다르면 '+dirty'를 붙인다(리포트·문서는 보지 않는다)."""
-    try:
-        head = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True, text=True
-        ).stdout.strip()
-        dirty = subprocess.run(
-            ["git", "status", "--porcelain", "--", "src", "pyproject.toml", "uv.lock"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-    except OSError:
-        return "unknown"
-    if not head:
-        return "uncommitted"
-    return f"{head}+dirty" if dirty else head
-
-
 # 모델을 fp16으로 GPU에 올리고 처리기를 함께 돌려준다. --adapter가 있으면 LoRA를 기본 가중치에
 # 합쳐(merge_and_unload) 보통의 Whisper 모델로 잰다. 합치면 추론 구조가 기본 모델과 같아 속도·메모리를 같은
 # 조건에서 비교할 수 있다.
+# path가 등록한 Hub ID(provenance.WHISPER_REVISIONS)면 모델과 처리기를 고정한 revision으로 받는다(기록된
+# 측정이 쓴 캐시 스냅숏과 같은 sha라 가중치는 그대로이고, Hub의 모델이 바뀌어도 측정이 달라지지 않는다).
+# outputs/ 아래 로컬 폴더는 revision이 없어 지금까지와 같은 호출이다.
 # peft는 어댑터가 있을 때만 불러온다. 처리기는 기본 모델(path)의 것을 쓴다.
 def load_model(path: str, adapter: str | None) -> tuple[WhisperForConditionalGeneration, WhisperProcessor]:
-    model = WhisperForConditionalGeneration.from_pretrained(path, dtype=torch.float16)
+    pinned = revision_kwargs(path)
+    model = WhisperForConditionalGeneration.from_pretrained(path, dtype=torch.float16, **pinned)
     if adapter:
         from peft import PeftModel
 
         model = PeftModel.from_pretrained(model, adapter).merge_and_unload()
-    processor = WhisperProcessor.from_pretrained(path)
+    processor = WhisperProcessor.from_pretrained(path, **pinned)
     return model.to("cuda").eval(), processor
 
 
@@ -375,6 +368,11 @@ def main() -> None:
     if args.limit:
         utterances = utterances[: args.limit]
     stores: dict[str, AudioStore] = {}
+    # 어댑터 가중치·설정의 SHA-256은 커밋처럼 디코딩 전에(모델을 올리기 전에) 읽어 둔다(evaluate_qwen과 같다).
+    # 그래야 요약의 지문이 실제로 불러온 파일의 것이고, 파일이 없으면 묶음을 다 디코딩한 뒤가 아니라 지금
+    # 멈춘다(학습이 도는 실행의 체크포인트를 재는 동안 save_total_limit가 그 폴더를 지우는 경우 등).
+    # 어댑터가 없으면 두 값 모두 None이다.
+    adapter_fingerprint = adapter_hashes(args.adapter)
     model, processor = load_model(args.model, args.adapter)
     trace = FallbackTrace(model, settings) if args.fallback else None
 
@@ -439,13 +437,17 @@ def main() -> None:
     lengths = np.array([r["length"] for r in kept])
     low, high = interval(edits, lengths)
     audio_seconds = sum(r["seconds"] for r in rows)
-    # 리포트 요약. 오류율과 구간 말고도 재현과 해석에 필요한 것을 함께 남긴다: 디코딩 설정과 시드,
-    # 재시도·되풀이·빈 가설 수, 30초 넘는 발화 수, 속도(음성 초 ÷ 걸린 초)와 배치 지연, torch 최대 할당
-    # 메모리, --limit(analyze는 limit이 있는 리포트를 받지 않는다), 측정 코드의 커밋, 측정 시각, torch 버전,
-    # GPU 이름.
+    # 리포트 요약. 오류율과 구간 말고도 재현과 해석에 필요한 것을 함께 남긴다: 기본 모델의 revision(등록한 Hub
+    # ID면 고정한 sha, 로컬 폴더면 null), 어댑터(준 경로 그대로)와 그 가중치·설정의 SHA-256, 디코딩 설정과
+    # 시드, 재시도·되풀이·빈 가설 수, 30초 넘는 발화 수, 속도(음성 초 ÷ 걸린 초)와 배치 지연, torch 최대 할당
+    # 메모리, --limit(analyze는 limit이 있는 리포트를 받지 않는다), 측정 코드의 커밋, 측정 시각,
+    # torch·transformers 판, 어댑터가 있으면 peft 판(없으면 null), GPU 이름.
+    # revision·SHA-256·transformers·peft는 2026-10-29에 더한 키라 그 전의 리포트에는 없다.
     summary = {
         "model": args.model,
+        "revision": whisper_revision(args.model),
         "adapter": args.adapter,
+        **adapter_fingerprint,
         "set": args.set_name,
         "channel": args.channel,
         "language": language,
@@ -469,6 +471,8 @@ def main() -> None:
         "commit": commit,
         "measured_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "torch": torch.__version__,
+        "transformers": transformers.__version__,
+        "peft": peft_version() if args.adapter else None,
         "gpu": torch.cuda.get_device_name(0),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))

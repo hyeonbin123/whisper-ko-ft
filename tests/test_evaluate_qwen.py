@@ -19,7 +19,7 @@ import torch
 from tiny_qwen import tiny_model
 from transformers.models.qwen3_asr.processing_qwen3_asr import _parse_single_output
 
-from whisper_ko_ft import evaluate_qwen
+from whisper_ko_ft import evaluate_qwen, provenance
 from whisper_ko_ft.store import SAMPLE_RATE
 
 # EOS: 끝 토큰 번호 두 개(대역 모델에서 쓰는 값). LOOP: 같은 구절을 30번 되풀이한 글(공식 반복 제거가 줄이는
@@ -351,8 +351,10 @@ def test_merging_a_trained_adapter_changes_the_targeted_weights_only(tmp_path):
     assert all(after[k].dtype == torch.float16 for k in after)
 
 
-# 리포트에 남길 어댑터 정보: 폴더 경로와 가중치 파일의 SHA-256. 어댑터가 없으면 둘 다 None.
+# 리포트에 남길 어댑터 정보: 폴더 경로와 가중치 파일의 SHA-256. 어댑터가 없으면 둘 다 None. 이 함수는 Whisper
+# 하네스와 함께 쓰는 공용 provenance.adapter_info이고, 옮긴 뒤에도 요약의 키와 값은 그대로다.
 def test_reports_name_the_adapter_and_its_weights(tmp_path):
+    assert evaluate_qwen.adapter_info is provenance.adapter_info
     save_adapter(tmp_path / "checkpoint-500", train_b=False)
     info = evaluate_qwen.adapter_info(str(tmp_path / "checkpoint-500"))
     weights = (tmp_path / "checkpoint-500" / "adapter_model.safetensors").read_bytes()

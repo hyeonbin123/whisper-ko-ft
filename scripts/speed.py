@@ -33,7 +33,9 @@ outputs/speed/<프리셋>-<시각>/)의 speed.json과 실행별 CSV에 남는다
 # 기다리고, 쉬는 상태가 아니면 그대로 재서 사용률과 함께 돈 프로그램을 수치 옆에 적는다(docs/experiments.md
 # 12단계). (4) ct2-int8 프리셋(12단계)을 더했다.
 # (5) --speed-only: 그때 첫 두 실행이 남긴 리포트가 이미 커밋되어 있어, 다시 재면 그 실행이 덮어쓰기 보호로
-# 멈춘다. 이 옵션은 모든 실행에 --no-report를 붙여 속도만 잰다.
+# 멈춘다. 이 옵션은 모든 실행에 --no-report를 붙여 속도만 잰다. (6) 2026-10-29부터 speed.json에 측정 코드의
+# 커밋(commit)을 적는다. 하네스 리포트의 commit과 같은 git_commit이되 scripts/(이 파일)까지 보아, 측정 절차를
+# 고친 채 잰 것은 +dirty로 드러난다.
 # [주의] Windows 전용이다: CPU 사용률과 프로세스 이름을 PowerShell(Get-CimInstance, Get-Process)로 읽는다.
 # nvidia-smi와 uv가 PATH에 있어야 한다. 쉬는 상태 확인의 Ollama 항목은 같은 PC에서 GPU를 나눠 쓰는 로컬
 # Ollama 서버에 올라간 모델을 적는 것이고, 서버가 없으면 "unreachable"로 남는다(측정에는 영향이 없다).
@@ -51,6 +53,15 @@ from pathlib import Path
 
 # ROOT: 저장소 폴더(이 파일은 scripts/ 안에 있다). 모든 실행은 이 폴더에서 돈다.
 ROOT = Path(__file__).resolve().parents[1]
+# 저장소의 src/를 import 경로에 넣어, 이 스크립트를 어디서 돌려도 whisper_ko_ft를 찾게 한다(아래 provenance와
+# warm_cache의 store). provenance는 torch·transformers를 불러오지 않아, 측정 명령을 자식 프로세스로 돌리는 이
+# 부모 프로세스가 가벼운 채로 남는다. import가 모듈 중간에 오므로 E402 검사를 끈다.
+sys.path.insert(0, str(ROOT / "src"))
+from whisper_ko_ft.provenance import CODE_PATHS, git_commit  # noqa: E402
+
+# COMMIT_PATHS: speed.json에 적는 커밋의 +dirty 판단에 보는 경로. 하네스가 보는 코드·잠금(CODE_PATHS:
+# src·pyproject.toml·uv.lock)에 이 스크립트가 있는 scripts/를 더한다.
+COMMIT_PATHS = (*CODE_PATHS, "scripts")
 # 속도 묶음: Zeroth val-500(440발화, 1.07시간). 모든 프리셋이 같은 묶음을 같은 순서로 처리한다.
 SET = "zeroth-val500"
 PY = ["uv", "run", "--no-sync", "python", "-m"]
@@ -332,7 +343,7 @@ def wait_for_idle(max_wait_seconds: int, poll_seconds: int) -> tuple[bool, list[
 
 def warm_cache() -> None:
     """묶음의 오디오를 한 번 읽어 운영체제 파일 캐시에 올린다(첫 실행만 디스크를 읽어 느려지지 않게)."""
-    sys.path.insert(0, str(ROOT / "src"))
+    # store는 여기서만 쓰므로 이 안에서 불러온다(src/는 모듈 머리에서 import 경로에 넣었다).
     from whisper_ko_ft.store import AudioStore, load_set
 
     _, utterances = load_set(SET)
@@ -434,6 +445,10 @@ def main() -> None:
             print(label, " ".join(command))
         return
 
+    # 측정 코드의 커밋(scripts/ 자신까지 보아 +dirty). 하네스 리포트의 commit과 같은 방식이고, 하네스처럼
+    # 측정을 시작하기 전에 읽는다.
+    commit = git_commit(ROOT, COMMIT_PATHS)
+    log(f"commit {commit}")
     out_dir = args.out or ROOT / "outputs" / "speed" / f"{args.preset}-{datetime.now():%Y%m%d-%H%M%S}"
     out_dir.mkdir(parents=True, exist_ok=True)
     max_wait, poll = round(args.max_wait_minutes * 60), round(args.poll_minutes * 60)
@@ -445,6 +460,7 @@ def main() -> None:
     log(f"conditions after {json.dumps(after, ensure_ascii=False)}")
     payload = {
         "preset": args.preset,
+        "commit": commit,
         "max_wait_seconds": max_wait,
         "poll_seconds": poll,
         "idle_reached": idle,

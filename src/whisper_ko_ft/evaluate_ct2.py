@@ -14,6 +14,17 @@
 측정과 같다. int8_float16은 가중치를 int8로 양자화하고 나머지 계산은 fp16). 변환을 다시 하지 않고 같은 폴더를
 쓴다. --device cpu는 확인용이라 --no-report가 있어야 한다. 요약에 정밀도·장치와 한 발화 지연의 중앙값·90번째
 백분위(batch_seconds_median, batch_seconds_p90. evaluate의 배치 1 지연과 같은 키)를 남긴다.
+
+2026-10-29: 요약에 변환 폴더의 지문(model.bin·config.json의 SHA-256)을 남긴다. 같은 경로에 다시 변환한 이력이
+있어, 리포트만으로 어느 변환으로 쟀는지 알 수 있게 하려는 것이다. --seed를 주면 모델을 띄우기 전에
+`ctranslate2.set_random_seed(seed)`를 한 번 불러, 같은 명령(같은 모델 폴더·묶음·--limit·정밀도·장치)을 다시
+돌리면 재시도(--fallback)의 temperature 표본이 같게 한다. evaluate --seed처럼 발화(배치)마다 시드를 다시 정할
+수는 없다: set_random_seed는 전역 값만 바꾸고, 난수 생성기는 디코딩하는 작업 스레드가 처음 쓸 때 그때의 값으로
+한 번 만든 뒤 다시 시드하지 않는다(CTranslate2 4.8.2 src/random.cc의 thread_local mt19937). GPU의 curand
+상태도 작업 스레드마다 한 벌이고, 더 많은 상태가 필요할 때만 그때의 값으로 다시 만든다(src/cuda/random.cu).
+2026-10-29 CPU에서 작은 무작위 모델로 확인한 결과도 같다: generate마다 앞에서 set_random_seed를 불러도 표본은
+처음 시드에서 이어질 뿐 처음으로 돌아가지 않았다. 그래서 한 실행 안의 표본은 앞 발화들이 쓴 난수에 이어지고,
+시드가 같아도 묶음이나 발화 순서가 다르면 표본이 다르다. 기본값(없음)은 기록된 측정과 같은 경로(시드 없음)다.
 """
 
 # [파일 역할] 5단계(되풀이 오류와 추론 엔진)와 2026-10-02 추가 측정에서 쓴 faster-whisper(CTranslate2) 측정
@@ -40,14 +51,16 @@ from pathlib import Path
 import numpy as np
 import torch
 
-# ct2_features.feature_kwargs: 변환된 모델의 멜 수에 맞춘 특징 설정. evaluate.git_commit: 측정 코드의 커밋
-# 기록(evaluate.py와 같은 방식). evaluate.batch_seconds_summary: 지연의 중앙값·90번째 백분위(같은 키로 남겨
-# 두 하네스를 나란히 읽는다). evaluate.report_json: 리포트 글(NaN이면 ValueError). metrics: 채점. store:
+# ct2_features.feature_kwargs: 변환된 모델의 멜 수에 맞춘 특징 설정. evaluate.batch_seconds_summary: 지연의
+# 중앙값·90번째 백분위(같은 키로 남겨 두 하네스를 나란히 읽는다). evaluate.report_json: 리포트 글(NaN이면
+# ValueError). provenance.git_commit: 측정 코드의 커밋 기록(evaluate.py와 같은 방식).
+# provenance.converted_model_hashes: 변환 폴더의 지문(model.bin·config.json SHA-256). metrics: 채점. store:
 # 묶음과 오디오.
 from whisper_ko_ft.ct2_features import feature_kwargs
-from whisper_ko_ft.evaluate import batch_seconds_summary, git_commit, report_json
+from whisper_ko_ft.evaluate import batch_seconds_summary, report_json
 from whisper_ko_ft.metrics import error_rate, interval, score
 from whisper_ko_ft.paths import REPORTS, ROOT
+from whisper_ko_ft.provenance import converted_model_hashes, git_commit
 from whisper_ko_ft.store import AudioStore, load_set
 
 # CTranslate2는 CUDA 12 라이브러리가 필요하다. Windows에서는 torch 휠에 들어 있는 것을 쓴다. 그래서
@@ -78,17 +91,32 @@ FALLBACK = {
 # int8_float16이 12단계의 후보다(compute capability 7.0 이상, RTX 2080 Ti는 7.5). int8·int8_float32·float32는
 # CPU 확인용이다(CPU에는 float16 계산이 없다).
 COMPUTE_TYPES = ("float16", "int8_float16", "int8", "int8_float32", "float32")
+# SEED_MAX: --seed로 받는 가장 큰 값. ctranslate2.set_random_seed는 C++의 unsigned int를 받아 음수와 2**32
+# 이상은 TypeError로 거부하고, 2**32 - 1(4294967295)은 CTranslate2가 '시드를 정하지 않음' 표시로 쓰는 값이라
+# 받아도 생성기를 std::random_device로 시드한다(4.8.2 src/random.cc의 default_seed. 2026-10-29 CPU에서 이 값을
+# 두 번 걸어 표본이 서로 다름을 확인). 요약에는 시드가 적히는데 표본은 실행마다 달라지는 일이 없게, --seed는
+# 0~SEED_MAX만 받는다.
+SEED_MAX = 2**32 - 2
 
 
 # 명령줄 진입점. --model은 변환된 CTranslate2 폴더, --name은 리포트 이름(필수), --fallback은 '재시도 켬'. test
 # 묶음 보호(--allow-test)와 덮어쓰기 보호(--overwrite)는 evaluate.py와 같다. --no-report는 속도만 볼 때 쓴다.
-# --compute-type과 --device는 12단계에서 더했다(기본값은 지금까지의 측정과 같다).
+# --compute-type과 --device는 12단계에서 더했다(기본값은 지금까지의 측정과 같다). --seed는 2026-10-29에
+# 더했다(기본 None = 지금까지처럼 시드 없음).
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True, help="CTranslate2 모델 폴더")
     parser.add_argument("--name", required=True, help="리포트 이름(reports/<이름>/)")
     parser.add_argument("--set", required=True, dest="set_name")
     parser.add_argument("--fallback", action="store_true")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        help="재시도(--fallback)의 temperature 표본 시드(0~4294967294). 모델을 띄우기 전에 ctranslate2의 "
+        "난수 시드를 한 번 정해, 같은 명령을 다시 돌리면 같은 표본을 뽑는다. CTranslate2는 작업 스레드의 "
+        "난수 생성기를 처음 만들 때의 시드로 계속 쓰므로 발화마다 다시 정하지는 못한다(표본은 앞 발화들이 "
+        "쓴 난수에 이어진다). 재시도 끔에서는 표본이 없어 영향이 없다. 기본은 기록된 측정과 같이 시드 없음",
+    )
     parser.add_argument("--limit", type=int)
     parser.add_argument("--allow-test", action="store_true")
     parser.add_argument("--overwrite", action="store_true", help="이미 있는 리포트를 바꿔 쓴다")
@@ -108,11 +136,20 @@ def main() -> None:
     # CPU 실행은 측정 조건이 아니므로 리포트를 남기지 못하게 한다(evaluate_qwen과 같은 보호).
     if args.device == "cpu" and not args.no_report:
         parser.error("a CPU run is not the measured condition; pass --no-report")
+    # CTranslate2가 시드로 쓰지 못하는 값(위 SEED_MAX)은 시드를 걸거나 모델을 띄우기 전에 거부한다.
+    if args.seed is not None and not 0 <= args.seed <= SEED_MAX:
+        parser.error(f"--seed must be between 0 and {SEED_MAX}")
     target = REPORTS / args.name / f"{args.set_name}.json"
     if not args.no_report and target.exists() and not args.overwrite:
         parser.error(f"{target.relative_to(ROOT)} exists; pass --overwrite to measure it again")
     # 측정 코드의 커밋은 모델이나 오디오를 읽기 전에 기록한다(evaluate.py와 같다).
     commit = git_commit()
+    # --seed가 있으면 모델을 띄우기 전에 CTranslate2의 난수 시드를 정한다. 디코딩하는 작업 스레드의 난수
+    # 생성기는 처음 쓸 때 그때의 시드로 한 번만 만들어지므로, 이 호출은 모델·첫 디코딩보다 앞서야 하고
+    # 한 번이면 된다(뒤에서 다시 불러도 이미 만든 생성기는 그대로다. 위 docstring). 기본(None)은 기록된 측정과
+    # 같이 시드를 걸지 않는다(그때 CTranslate2는 생성기마다 std::random_device로 시드한다).
+    if args.seed is not None:
+        ctranslate2.set_random_seed(args.seed)
 
     # 모델을 오디오보다 먼저 띄운다(위 docstring). 설정 파일의 멜 수가 모델과 맞지 않으면 오디오를 읽기 전에
     # 바로 멈춘다. 2026-09-20 시도는 특징을 다 만든 뒤 첫 발화에서 멈췄다(docs/experiments.md '추가 측정').
@@ -128,6 +165,13 @@ def main() -> None:
         )
     if args.limit:
         utterances = utterances[: args.limit]
+    # 변환 폴더의 지문: model.bin(turbo는 약 1.6 GB)과 config.json의 SHA-256. 리포트만으로 어느 변환으로
+    # 쟀는지 알 수 있게 남긴다(outputs/turbo-n/ct2는 같은 경로에 다시 만든 이력이 있다). 발화 지연과 wall 시계
+    # 밖에서 한 번만 계산한다. model.bin은 방금 모델을 띄우며 읽어 보통 운영체제 파일 캐시에 있다(turbo-n/ct2:
+    # 캐시에 있으면 약 2초, HDD에서 처음 읽으면 20초 안팎. 2026-10-24에 18초, 10-29에 24초). 시계 밖이라
+    # 배속·지연 수치에는 들어가지 않지만 프로세스가 도는 시간은 그만큼 길어져, scripts/speed.py가 실행
+    # 전체에서 내는 GPU·CPU 사용률 평균(gpu_util_avg_during 등)에는 이 시간이 들어간다.
+    hashes = converted_model_hashes(Path(args.model))
     # 재시도 끔/켬 조건을 고르고, 저장소별 memmap을 열어 둘 dict를 만든다.
     options = FALLBACK if args.fallback else NO_FALLBACK
     stores: dict[str, AudioStore] = {}
@@ -183,16 +227,19 @@ def main() -> None:
     audio_seconds = sum(r["seconds"] for r in rows)
     # 요약. more_edits_than_characters는 되풀이 발화(편집 수 > 정답 길이, 5단계 판정의 '정답보다 오류가 많은
     # 발화') 수, decoded_again은 다시 디코딩한 발화 수, empty_hypotheses는 빈 가설 수(위 '알려진 차이'),
-    # mel_bins는 실제로 쓴 멜 수다. 엔진 버전도 남긴다.
+    # mel_bins는 실제로 쓴 멜 수다. 엔진 버전도 남긴다. model_sha256·config_sha256(변환 폴더 지문)과
+    # seed(--seed 값, 없으면 null)는 2026-10-29에 더한 키라 그 전의 리포트에는 없다.
     # empty_hypotheses는 evaluate.decoding_counts와 같은 기준으로 센다: 채점한 발화(kept)만, 공백만 남은
     # 가설도 빈 가설로. 2026-10-13 전에는 정답이 빈 발화까지 세고 공백 가설은 세지 않았다. 커밋된
     # faster-whisper 리포트에는 정답이 빈 발화도 공백 가설도 없어, 발화 행으로 다시 세면 두 기준 모두 0이다.
     summary = {
         "model": args.model,
+        **hashes,
         "engine": "faster-whisper",
         "compute_type": args.compute_type,
         "device": args.device,
         "fallback": args.fallback,
+        "seed": args.seed,
         "set": args.set_name,
         "metric": "cer" if language == "ko" else "wer",
         "utterances": len(kept),

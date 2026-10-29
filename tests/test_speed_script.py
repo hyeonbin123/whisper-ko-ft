@@ -1,12 +1,16 @@
 # [테스트 묶음] scripts/speed.py(속도·GPU 메모리 측정 도우미)의 프리셋이 기록된 속도 수치를 만든 명령과
-# 같은지, 그리고 GPU 없이 확인할 수 있는 순수 함수(nvidia-smi 줄 읽기, 쉬는 상태 판단, 요약 꺼내기)를
-# 확인한다.
+# 같은지, GPU 없이 확인할 수 있는 순수 함수(nvidia-smi 줄 읽기, 쉬는 상태 판단, 요약 꺼내기), 그리고
+# speed.json에 측정 코드의 커밋(scripts/ 자신까지 본 +dirty 표시)이 남는지 확인한다.
 # [왜 중요한가] README의 속도 비율(CTranslate2 1.46배, Qwen 약 6.5배)은 이 절차로 잰 것이다. 세 측정
 # 스크립트를 하나로 합치면서 명령·순서·환경 변수가 달라지면, 다시 잰 수치가 같은 절차의 수치가 아니게 된다.
-# 그래서 그때 쓴 명령 목록을 여기에 그대로 적어 두고 프리셋과 비교한다.
-# [범위] 측정을 돌리지 않는다(GPU, nvidia-smi, PowerShell 없이 돈다).
+# 그래서 그때 쓴 명령 목록을 여기에 그대로 적어 두고 프리셋과 비교한다. 하네스 리포트에는 커밋이 남지만
+# speed.json에는 없어서, 어느 절차(스크립트 판)로 잰 속도인지 파일만으로는 알 수 없었다.
+# [범위] 측정을 돌리지 않는다(GPU, nvidia-smi, PowerShell 없이 돈다). 커밋 기록 테스트는 대기·캐시
+# 데우기·실행을 가짜로 바꿔 main을 돌린다.
 
 import importlib.util
+import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -132,3 +136,29 @@ def test_idle_needs_both_a_quiet_gpu_and_a_quiet_cpu(speed):
 def test_the_first_printed_summary_is_read(speed):
     text = 'loading\n{\n  "output": "raw",\n  "error_rate": 0.1\n}\n{\n  "output": "fixed"\n}\nwrote x\n'
     assert speed.first_summary(text) == {"output": "raw", "error_rate": 0.1}
+
+
+# speed.json에 측정 코드의 커밋이 남는다. 하네스와 같은 git_commit을 쓰되 scripts/(이 스크립트 자신)까지 보아,
+# 스크립트를 고친 채 재면 +dirty가 붙는다. 대기·캐시 데우기·실행·끝 조건은 가짜로 바꿔 GPU 없이 main을 돌린다.
+def test_speed_json_records_the_commit_including_the_scripts_folder(speed, tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_commit(root, paths):
+        seen["root"], seen["paths"] = root, tuple(paths)
+        return "abc1234+dirty"
+
+    monkeypatch.setattr(speed, "git_commit", fake_commit)
+    monkeypatch.setattr(speed, "wait_for_idle", lambda max_wait, poll: (True, []))
+    monkeypatch.setattr(speed, "warm_cache", lambda: None)
+    monkeypatch.setattr(speed, "conditions", lambda: {"time": "t"})
+    monkeypatch.setattr(speed, "run", lambda label, command, env_extra, out_dir: {"label": label})
+    monkeypatch.setattr(sys, "argv", ["speed.py", "--preset", "ct2-int8", "--out", str(tmp_path)])
+
+    speed.main()
+
+    payload = json.loads((tmp_path / "speed.json").read_text(encoding="utf-8"))
+    assert payload["commit"] == "abc1234+dirty"
+    assert seen == {"root": speed.ROOT, "paths": ("src", "pyproject.toml", "uv.lock", "scripts")}
+    assert [record["label"] for record in payload["runs"]] == [
+        "hf-b1-1", "ct2-fp16-1", "ct2-int8-1", "hf-b1-2", "ct2-fp16-2", "ct2-int8-2",
+    ]  # fmt: skip

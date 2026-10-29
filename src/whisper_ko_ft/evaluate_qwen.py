@@ -43,13 +43,12 @@
 # 로짓이 유한한지 기록하고, 앞 100발화를 GPU fp16과 CPU fp32로 각각 디코딩해 analyze gate9로 비교했다. fp32
 # 가중치는 약 8.2GB라 다른 프로그램과 나눠 쓰는 11GB GPU 대신 CPU에서 쟀다(docs/experiments.md 9단계 'fp16
 # 점검').
-# [연결] evaluate.py의 상수와 도우미를 가져다 쓰고, train_qwen이
+# [연결] evaluate.py의 상수와 도우미, provenance의 커밋 기록·어댑터 지문을 가져다 쓰고, train_qwen이
 # DEFAULT_MODEL·REGISTERED·LANGUAGES·first_window를 가져가 학습 입력을 평가와 같게 만든다.
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import time
 from datetime import UTC, datetime
@@ -62,19 +61,20 @@ import torch
 import transformers
 
 # channel: 10단계의 --channel telephone. evaluate: Whisper 하네스와 같은 최대 토큰 수·30초 창·채점·배치 지연
-# 요약·커밋 기록·리포트 글(report_json, NaN이면 ValueError)을 그대로 써서 두 하네스의 조건을 맞춘다. metrics,
-# paths, store: 채점, 리포트 위치, 묶음과 오디오.
+# 요약·리포트 글(report_json, NaN이면 ValueError)을 그대로 써서 두 하네스의 조건을 맞춘다. provenance: 측정
+# 코드의 커밋 기록과 어댑터 지문(adapter_info. 2026-10-29에 이 파일에서 옮겨 간 함수로, Whisper 하네스와 함께
+# 쓴다). metrics, paths, store: 채점, 리포트 위치, 묶음과 오디오.
 from whisper_ko_ft.channel import CHANNELS
 from whisper_ko_ft.evaluate import (
     MAX_NEW_TOKENS,
     WINDOW_SECONDS,
     batch_seconds_summary,
-    git_commit,
     report_json,
     score_rows,
 )
 from whisper_ko_ft.metrics import error_rate, interval
 from whisper_ko_ft.paths import REPORTS
+from whisper_ko_ft.provenance import adapter_info, git_commit
 from whisper_ko_ft.store import SAMPLE_RATE, AudioStore, load_set
 
 # DEFAULT_MODEL: 9·10단계 후보 Qwen3-ASR-1.7B의 Transformers 판(-hf).
@@ -285,21 +285,9 @@ def merge_adapter(model, adapter: str, scale: float | None = None, scope: str = 
     return merged
 
 
-# 리포트 요약에 남길 어댑터 폴더와 가중치 파일(adapter_model.safetensors)의 SHA-256. 체크포인트 폴더
-# 이름만으로는 같은 가중치인지 알 수 없어서, 어떤 가중치로 쟀는지 내용으로 확인할 수 있게 한다.
-# 2026-10-15부터 adapter_config.json(rank, alpha, 대상 층)의 SHA-256도 남긴다. 11단계처럼 같은 가중치를
-# 다른 스케일로 합친 실행은 스케일 항목(adapter_scale)으로 구분한다.
-def adapter_info(adapter: str | None) -> dict:
-    """리포트 요약에 넣을 어댑터 폴더와 그 가중치·설정의 SHA-256."""
-    if adapter is None:
-        return {"adapter": None, "adapter_sha256": None, "adapter_config_sha256": None}
-    weights = (Path(adapter) / "adapter_model.safetensors").read_bytes()
-    config = (Path(adapter) / "adapter_config.json").read_bytes()
-    return {
-        "adapter": Path(adapter).as_posix(),
-        "adapter_sha256": hashlib.sha256(weights).hexdigest(),
-        "adapter_config_sha256": hashlib.sha256(config).hexdigest(),
-    }
+# 리포트 요약의 어댑터 항목(어댑터 폴더, 가중치·설정의 SHA-256)은 provenance.adapter_info다. 2026-10-15부터
+# 이 파일에 있던 함수를 2026-10-29에 옮겼고(Whisper 하네스 evaluate도 같은 지문을 적게 되어), 키와 값의 꼴은
+# 그대로다(위 import).
 
 
 # 요약에 남길 tower별 스케일(어댑터가 없으면 None). scale이 None이면 두 tower 모두 1.0(10단계와 같은

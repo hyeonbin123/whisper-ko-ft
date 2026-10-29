@@ -23,7 +23,11 @@ outputs/<run-name>/에 쓴다: 체크포인트, `best/`(val-500 CER이 가장 �
 # [공통 설정] fp16 혼합 정밀도(RTX 2080 Ti에는 bf16이 없다), AdamW(Trainer 기본), warmup 뒤 선형 감소,
 # gradient checkpointing, 실효 배치 32, 500스텝마다 val-500 평가(docs/experiments.md 2·3단계 공통 설정).
 # [결과물] outputs/<run>/: 체크포인트, best/(val-500 CER이 가장 낮은 것. LoRA면 어댑터만), run.json(시작 기록
-# starts, 인자, 커밋, 데이터 규모, 평가 이력, 최대 GPU 메모리), hang.log(멈춤 진단).
+# starts, 인자, 커밋, 기본 모델의 revision, 데이터 규모, torch·transformers·peft 판, 평가 이력, 최대 GPU
+# 메모리), hang.log(멈춤 진단).
+# [기본 모델 revision] 2026-10-29부터 --model이 등록한 Hub ID(whisper-small, large-v3-turbo)면 기록된 학습이
+# 쓴 캐시 스냅숏과 같은 revision(provenance.WHISPER_REVISIONS)으로 처리기와 모델을 받는다. Hub의 모델이
+# 바뀌어도 같은 가중치에서 시작하게 하려는 것이고, 가중치가 같아 학습 경로는 그대로다.
 # [실행 폴더 보호] outputs/는 커밋하지 않으므로, 기록한 리포트를 낸 가중치는 그 폴더가 유일한 사본이다.
 # 예전에는 같은 --run-name으로 다시 돌리면 run.json을 곧바로 덮어쓰고, 새 체크포인트를 저장하면서 예전
 # 체크포인트를 지우고(save_total_limit 2), 끝에 best/를 덮어썼다. 그래서 학습 결과가 있는 폴더에서는 --resume
@@ -49,6 +53,7 @@ from pathlib import Path
 # 한다.
 import numpy as np
 import torch
+import transformers
 from torch.utils.data import Dataset
 from transformers import (
     Seq2SeqTrainer,
@@ -60,12 +65,14 @@ from transformers import (
 from transformers.trainer import TRAINER_STATE_NAME
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR, get_last_checkpoint
 
-# channel.telephone: 4단계에서 학습 음성 일부를 전화 음질로 바꾼다. evaluate: 평가와 같은 최대 토큰 수, 커밋
-# 기록. metrics: val-500 채점. store: 묶음과 오디오 저장소.
+# channel.telephone: 4단계에서 학습 음성 일부를 전화 음질로 바꾼다. evaluate: 평가와 같은 최대 토큰 수.
+# metrics: val-500 채점. provenance: 학습 코드의 커밋 기록, 기본 모델의 고정 revision, run.json에 적는 peft
+# 판. store: 묶음과 오디오 저장소.
 from whisper_ko_ft.channel import telephone
-from whisper_ko_ft.evaluate import MAX_NEW_TOKENS, git_commit
+from whisper_ko_ft.evaluate import MAX_NEW_TOKENS
 from whisper_ko_ft.metrics import error_rate, score
 from whisper_ko_ft.paths import OUTPUTS
+from whisper_ko_ft.provenance import git_commit, peft_version, revision_kwargs, whisper_revision
 from whisper_ko_ft.store import SAMPLE_RATE, AudioStore, Utterance, load_set
 
 # 묶음의 언어 코드를 Whisper 토크나이저·generate가 받는 언어 이름으로 바꾼다.
@@ -348,14 +355,17 @@ def main() -> None:
     if args.limit_eval:
         eval_utterances = eval_utterances[: args.limit_eval]
 
+    # 기본 모델이 등록한 Hub ID면 고정한 revision으로 받는다(위 [기본 모델 revision]). outputs/ 아래 로컬
+    # 폴더에는 revision이 없어 빈 dict가 되고 지금까지와 같은 호출이다.
+    pinned = revision_kwargs(args.model)
     # 처리기는 기본 모델의 것을 쓴다. 토크나이저에 언어와 task 접두 토큰을 정해 두어 정답 토큰이 추론 때와
     # 같은 접두로 시작하게 한다.
-    processor = WhisperProcessor.from_pretrained(args.model)
+    processor = WhisperProcessor.from_pretrained(args.model, **pinned)
     processor.tokenizer.set_prefix_tokens(language=LANGUAGE_NAMES[language], task="transcribe")
     # LoRA는 얼린 기본 가중치를 fp16으로 올려 11GB GPU에 맞추고(PEFT가 만드는 어댑터 가중치는 fp32다), 전체
     # 파인튜닝은 fp32 마스터 가중치로 올린 뒤 Trainer의 fp16 혼합 정밀도로 학습한다.
     model = WhisperForConditionalGeneration.from_pretrained(
-        args.model, dtype=torch.float16 if args.lora_r else torch.float32
+        args.model, dtype=torch.float16 if args.lora_r else torch.float32, **pinned
     )
     # 학습 중 평가(predict_with_generate)의 디코딩을 evaluate.py와 맞춘다: 언어 고정, transcribe, 최대
     # 256토큰. 예전 방식의 forced_decoder_ids와 max_length는 지워 language·task·max_new_tokens 설정과 겹치지
@@ -473,13 +483,17 @@ def main() -> None:
         callbacks=[watchdog],
     )
 
-    # 학습을 시작하기 전에 run.json을 먼저 쓴다(시작 기록, 인자, 커밋, 학습 발화 수와 시간, 평가 발화 수,
-    # torch, GPU). 학습이 도중에 죽어도 어떤 설정으로 돌렸는지 남는다.
+    # 학습을 시작하기 전에 run.json을 먼저 쓴다(시작 기록, 인자, 커밋, 기본 모델의 revision, 학습 발화 수와
+    # 시간, 평가 발화 수, torch·transformers·peft 판, GPU). 학습이 도중에 죽어도 어떤 설정으로 돌렸는지
+    # 남는다.
     # starts: 시작할 때마다 시각·커밋·이어 한 체크포인트(새로 시작하면 null)를 한 줄 덧붙인다(train_qwen과
-    # 같은 꼴). 이어 하기면 기존 run.json을 읽어 그 뒤에 덧붙이고, 맨 위의 인자·커밋·데이터 규모·torch·GPU는
+    # 같은 꼴). 이어 하기면 기존 run.json을 읽어 그 뒤에 덧붙이고, 맨 위의 인자·커밋·데이터 규모·판·GPU는
     # 이번 시작의 값으로 바꾼다(train_qwen과 같다. 시작마다의 커밋은 starts에 남는다). starts가 생기기 전에
     # 만든 run.json을 이어 하면 그 실행의 커밋을 starts 첫 줄로 옮겨 잃지 않는다(그때의 시작 시각은 기록이
     # 없어 null).
+    # revision은 등록한 Hub ID면 고정한 sha, 로컬 폴더면 null. peft는 LoRA 실행(--lora-r 또는 --init-adapter,
+    # resolve_lora_args가 lora_r을 채운다)에서만 적고 전체 파인튜닝은 null이다. 2026-10-29에 더한 세 키라 그
+    # 전의 run.json에는 없다.
     output_dir.mkdir(parents=True, exist_ok=True)
     run_path = output_dir / "run.json"
     run = json.loads(run_path.read_text(encoding="utf-8")) if resume_from and run_path.exists() else {}
@@ -493,10 +507,13 @@ def main() -> None:
         {
             "args": vars(args),
             "commit": commit,
+            "revision": whisper_revision(args.model),
             "train_utterances": len(train_utterances),
             "train_hours": round(sum(u.seconds for u in train_utterances) / 3600, 2),
             "eval_utterances": len(eval_utterances),
             "torch": torch.__version__,
+            "transformers": transformers.__version__,
+            "peft": peft_version() if args.lora_r else None,
             "gpu": torch.cuda.get_device_name(0),
         }
     )
