@@ -16,17 +16,15 @@ import json
 
 import numpy as np
 import pytest
+from report_files import report_files
 
 from whisper_ko_ft import analyze
 from whisper_ko_ft.metrics import error_rate, score
-from whisper_ko_ft.paths import REPORTS
 
 # FILES: reports/<이름>/<묶음>.json 전부. 리포트가 새로 커밋되면 자동으로 검사 대상이 된다. 리포트가 아닌
-# 파생 파일 폴더는 뺀다: 숫자 발화 목록(digit_utterances), 문장 겹침(sentence_overlap, analyze overlap이 쓰고
-# tests/test_analyze.py가 수를 고정한다), 13단계 문장 hold-out 정의(sentence_holdout, prepare_heldout이 쓰고
-# tests/test_prepare_heldout.py가 수를 고정한다). 셋 다 요약(summary)과 발화별 정답·가설이 없다.
-DERIVED = {"digit_utterances", "sentence_overlap", "sentence_holdout"}
-FILES = sorted(p for p in REPORTS.glob("*/*.json") if p.parent.name not in DERIVED)
+# 파생 파일 폴더(숫자 발화 목록, 문장 겹침, 13단계 문장 hold-out 정의)는 뺀다. 그 목록은 tests/report_files.py
+# 한 곳에 있고 tests/test_metrics.py의 요약 구간 재현도 같은 목록을 쓴다.
+FILES = report_files()
 
 
 # 리포트를 하나도 못 찾으면 아래 검사가 아무것도 하지 않고 통과하므로, 먼저 있는지 확인한다.

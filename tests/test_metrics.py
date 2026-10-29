@@ -9,6 +9,7 @@ import json
 
 import numpy as np
 import pytest
+from report_files import report_files
 
 from whisper_ko_ft import metrics
 from whisper_ko_ft.metrics import (
@@ -19,7 +20,6 @@ from whisper_ko_ft.metrics import (
     leave_one_block_out,
     score,
 )
-from whisper_ko_ft.paths import REPORTS
 
 
 # 한국어 CER: 띄어쓰기를 무시하고 글자 단위로 센다. '할수있다' 대 '할수없다'는 치환 1개, 정답 4글자다.
@@ -214,9 +214,9 @@ def test_interval_arrays_must_describe_the_same_utterances(call):
 # 같은 순서로 다시 낸다. 기본 경로(1,000번, seed 0)가 기록과 같고, numpy가 같은 시드에서 같은 수를 뽑는지도
 # 함께 지킨다(numpy 버전이 바뀌어 뽑는 수가 달라지면 여기서 깨진다).
 def test_committed_report_summaries_are_reproduced():
-    # 리포트가 아닌 파생 파일 폴더(요약이 없다): 숫자 발화 목록, 문장 겹침, 13단계 문장 hold-out 정의.
-    derived = {"digit_utterances", "sentence_overlap", "sentence_holdout"}
-    paths = sorted(p for p in REPORTS.glob("*/*.json") if p.parent.name not in derived)
+    # 리포트가 아닌 파생 파일 폴더(요약이 없다)를 뺀 목록은 tests/test_recorded_reports.py와 같은 것을 쓴다
+    # (tests/report_files.py).
+    paths = report_files()
     assert paths
     differ = []
     for path in paths:
