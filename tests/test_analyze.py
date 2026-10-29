@@ -6,16 +6,18 @@
 # [구성] 공통(load_rows 검사, 숫자 발화 목록, compare, table) → 2·3단계 verdict → 6단계 맞춘 CER과 verdict6 →
 # 되풀이와 8단계 채점·verdict8·changes·itn8 → 9단계 gate9·verdict9 → 10단계 gate10·pick10·smoke10·verdict10 →
 # 민감도 분석(robust) → 11·12단계 → Zeroth 문장 겹침(overlap, 커밋된 파생 파일의 수 고정) → 영어 보조 채점
-# en-whisper(예시, 커밋된 FLEURS 영어 리포트의 총합 고정).
+# en-whisper(예시, 커밋된 FLEURS 영어 리포트의 총합 고정) → 13단계 문장 hold-out(compare의 발화 고르기·표본
+# 수, verdict13의 판정·해석 문턱, M − C 구간).
 
 import inspect
 import json
 import sys
 
+import numpy as np
 import pytest
 
 from whisper_ko_ft import analyze
-from whisper_ko_ft.metrics import score
+from whisper_ko_ft.metrics import difference_interval, score
 from whisper_ko_ft.paths import REPORTS
 
 
@@ -1191,3 +1193,216 @@ def test_recorded_en_whisper_totals(report, set_name, edits, length):
     rows = analyze.load_rows(report, set_name, scoring="en-whisper")
     got_edits, got_lengths = analyze.arrays(rows, sorted(rows))
     assert (int(got_edits.sum()), int(got_lengths.sum())) == (edits, length)
+
+
+# --- 13단계: 처음 보는 문장에서의 같은 도메인 이득 (verdict13, 규칙 2026-10-29) ---
+
+
+# compare(only=...)는 그 발화만 담은 리포트와 같은 결과를 내고, samples는 차이 구간의 표본 수로 넘어간다.
+# 13단계가 기존 zeroth-val 리포트에서 unseen·seen 발화를 골라 B = 10,000으로 비교할 때 쓴다(기본값이면 예전과
+# 같다).
+def test_compare_keeps_only_the_given_utterances_and_takes_the_sample_count(reports, monkeypatch):
+    write_report(reports, "c", "fleurs-ko-val", rows([1, 0, 3, 2]))
+    write_report(reports, "b", "fleurs-ko-val", rows([0, 0, 1, 1]))
+    write_report(reports, "c2", "fleurs-ko-val", [r for r in rows([1, 0, 3, 2]) if r["id"] in ("u0", "u2")])
+    part = analyze.compare("fleurs-ko-val", "c", "b", only={"u0", "u2"})
+    assert part == analyze.compare("fleurs-ko-val", "c2", "b")
+    assert part["utterances"] == 2 and part["candidate"] == pytest.approx(0.2)
+
+    seen = []
+    original = analyze.difference_interval
+
+    def spy(*args, **kwargs):
+        bound = inspect.signature(original).bind(*args, **kwargs)
+        bound.apply_defaults()
+        seen.append(bound.arguments["samples"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(analyze, "difference_interval", spy)
+    analyze.compare("fleurs-ko-val", "c", "b")
+    analyze.compare("fleurs-ko-val", "c", "b", samples=10_000)
+    assert seen == [1_000, 10_000]
+
+
+YES13 = "처음 보는 문장에서도 같은 도메인 이득이 있다"
+NO13 = "처음 보는 문장에서는 이득을 보이지 못했다"
+NONE13 = "해석하지 않음 (unseen에서 N이 기준선보다 낫지 않다)"
+
+
+# 판정은 unseen에서 N-H − 기준선 turbo의 구간 상한 < 0 하나다(0이면 불만족).
+@pytest.mark.parametrize(("upper", "label"), [(-1e-6, YES13), (0.0, NO13), (0.002, NO13)])
+def test_verdict13_label(upper, label):
+    assert analyze.verdict13_label(upper) == label
+
+
+# 해석 문턱: 본 문장 몫 M − C(점 추정)가 G의 1/4 미만이면 '작다', 1/2 이상이면 '절반 이상', 그 사이는 '일부'.
+# 경계 1/4은 '일부', 1/2은 '절반 이상' 쪽이다. G ≤ 0(N이 unseen에서 기준선보다 낫지 않음)이면 해석하지 않는다.
+@pytest.mark.parametrize(
+    ("share", "gain", "label"),
+    [
+        (-0.1, 1.0, "암기 몫은 작다"),
+        (0.2, 1.0, "암기 몫은 작다"),
+        (0.25, 1.0, "이득의 일부가 본 문장 몫이다"),
+        (0.49, 1.0, "이득의 일부가 본 문장 몫이다"),
+        (0.5, 1.0, "이득의 절반 이상이 본 문장 몫이다"),
+        (1.2, 1.0, "이득의 절반 이상이 본 문장 몫이다"),
+        (0.1, 0.0, NONE13),
+        (0.1, -0.5, NONE13),
+    ],
+)
+def test_memorization13_label(share, gain, label):
+    assert analyze.memorization13_label(share, gain) == label
+
+
+# 가짜 정의 파일의 발화 묶음: validation은 화자 둘(101, 102)이 unseen·seen 넷씩, test는 둘씩.
+STAGE13_UNSEEN = ["101_003_0001", "101_003_0002", "102_003_0001", "102_003_0002"]
+STAGE13_SEEN = ["101_003_0003", "101_003_0004", "102_003_0003", "102_003_0004"]
+STAGE13_TEST_UNSEEN = ["121_003_0001", "122_003_0001"]
+STAGE13_TEST_SEEN = ["121_003_0002", "122_003_0002"]
+
+
+# 발화 ID → 편집 수로 Zeroth 행을 만든다(loop_rows와 같은 글이라 맞춘 채점으로 다시 채점해도 편집 수가 e, 길이
+# 100).
+def zeroth_rows(edits_by_id):
+    return [
+        {"id": i, "reference": "가" * 100, "hypothesis": "가" * 100 + "나" * e, "edits": e, "length": 100}
+        for i, e in edits_by_id.items()
+    ]
+
+
+# 13단계 판정용 가짜 리포트: 정의 파일, 숫자 발화 목록(unseen 첫 발화), 기준선 turbo(발화마다 4글자 틀림)와
+# N(1글자), 후보 N-H(unseen·seen 편집 수를 받음)의 zeroth-val과 FLEURS 한국어·영어 validation. test=True면 세
+# 모델의 zeroth-test도 쓴다(모델마다 unseen 첫 값을 모든 test 발화에).
+def prepare_stage13(reports, unseen, seen=(1, 1, 1, 1), candidate=True, test=False):
+    subsets = {
+        "zeroth-val-unseen": STAGE13_UNSEEN,
+        "zeroth-val-seen": STAGE13_SEEN,
+        "zeroth-test-unseen": STAGE13_TEST_UNSEEN,
+        "zeroth-test-seen": STAGE13_TEST_SEEN,
+    }
+    target = reports / "sentence_holdout" / "zeroth.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(json.dumps({"subsets": {k: {"ids": v} for k, v in subsets.items()}}), encoding="utf-8")
+    (reports / "digit_utterances").mkdir()
+    (reports / "digit_utterances" / "zeroth-val.json").write_text(
+        json.dumps({"ids": [STAGE13_UNSEEN[0]]}), encoding="utf-8"
+    )
+    models = {"whisper-large-v3-turbo": ((4,) * 4, (4,) * 4), "turbo-n": ((1,) * 4, (1,) * 4)}
+    if candidate:
+        models["turbo-nh"] = (tuple(unseen), tuple(seen))
+    for name, (unseen_edits, seen_edits) in models.items():
+        edits = dict(zip(STAGE13_UNSEEN, unseen_edits, strict=True))
+        edits.update(zip(STAGE13_SEEN, seen_edits, strict=True))
+        write_report(reports, name, "zeroth-val", zeroth_rows(edits))
+        write_report(reports, name, "fleurs-ko-val", fleurs_rows([2, 2]))
+        write_report(reports, name, "fleurs-en-val", fleurs_rows([1, 1]))
+        if test:
+            write_report(
+                reports,
+                name,
+                "zeroth-test",
+                zeroth_rows(dict.fromkeys(STAGE13_TEST_UNSEEN + STAGE13_TEST_SEEN, unseen_edits[0])),
+            )
+
+
+# 판정과 해석의 네 경우. 기준선 4%, N 1%(unseen·seen 모두)라 G = 3%p, 문턱은 G/4 = 0.75%p, G/2 = 1.5%p. 후보의
+# seen은 N과 같아 C = 0이고 M − C = M이다. 마지막 줄은 후보가 unseen에서 기준선보다 나빠 판정은 불만족이다.
+@pytest.mark.parametrize(
+    ("unseen", "m", "verdict", "interpretation"),
+    [
+        ((1, 1, 1, 2), 0.0025, YES13, "암기 몫은 작다"),
+        ((2, 2, 2, 2), 0.01, YES13, "이득의 일부가 본 문장 몫이다"),
+        ((3, 3, 3, 3), 0.02, YES13, "이득의 절반 이상이 본 문장 몫이다"),
+        ((5, 5, 5, 5), 0.04, NO13, "이득의 절반 이상이 본 문장 몫이다"),
+    ],
+)
+def test_verdict13_on_reports(reports, capsys, unseen, m, verdict, interpretation):
+    prepare_stage13(reports, unseen)
+    result = analyze.verdict13()
+    assert (result["verdict"], result["interpretation"]) == (verdict, interpretation)
+    assert result["gain"] == pytest.approx(0.03) and result["m"] == pytest.approx(m) and result["c"] == 0
+    assert result["share"] == pytest.approx(m)
+    out = capsys.readouterr().out
+    assert f"판정: {verdict}" in out and f"해석: M - C {m * 100:+.2f}%p" in out
+    assert "no digit utterances" in out and "fleurs-ko-val" in out and "fleurs-en-val" in out
+    assert "speaker blocks" in out and "zeroth-test: not measured" in out
+
+
+# 13단계의 발화 단위 구간은 판정·보고 모두 10,000번(seed 0)이다(결과 전에 정한 표본 수, 공통 규칙 '지표'의
+# 2026-10-29 관례). M − C 구간도 같은 표본 수다. 화자 블록 구간만 2026-10-15 추가 분석과 같은
+# 1,000번이다(metrics가 정함).
+def test_verdict13_uses_ten_thousand_samples(reports, monkeypatch):
+    prepare_stage13(reports, (2, 2, 2, 2))
+    seen = []
+    original, original_share = analyze.difference_interval, analyze.share_interval
+
+    def spy(*args, **kwargs):
+        bound = inspect.signature(original).bind(*args, **kwargs)
+        bound.apply_defaults()
+        seen.append(("difference", bound.arguments["samples"]))
+        return original(*args, **kwargs)
+
+    def spy_share(*args, **kwargs):
+        bound = inspect.signature(original_share).bind(*args, **kwargs)
+        bound.apply_defaults()
+        seen.append(("share", bound.arguments["samples"]))
+        return original_share(*args, **kwargs)
+
+    monkeypatch.setattr(analyze, "difference_interval", spy)
+    monkeypatch.setattr(analyze, "share_interval", spy_share)
+    analyze.verdict13()
+    assert {kind for kind, _ in seen} == {"difference", "share"}
+    assert {samples for _, samples in seen} == {10_000}
+
+
+# 후보를 재기 전에도 돌릴 수 있다: 기준선과 N의 unseen·seen 비교, G와 해석 문턱을 찍고 판정은 하지
+# 않는다(규칙의 '이미 아는 수'가 이 출력이다).
+def test_verdict13_prints_the_known_numbers_before_the_candidate_is_measured(reports, capsys):
+    prepare_stage13(reports, (2, 2, 2, 2), candidate=False)
+    assert analyze.verdict13() is None
+    out = capsys.readouterr().out
+    assert "G = whisper-large-v3-turbo - turbo-n on unseen: +3.00%p [+3.00, +3.00]" in out
+    assert "G/4 +0.75%p" in out and "G/2 +1.50%p" in out
+    assert "turbo-nh/zeroth-val: not measured" in out and "판정: 하지 않음" in out
+
+
+# 리포트가 정의 파일의 발화를 다 담지 않으면(다른 묶음이나 일부만 잰 리포트) 판정하지 않고 멈춘다.
+def test_verdict13_refuses_reports_that_miss_defined_utterances(reports):
+    prepare_stage13(reports, (2, 2, 2, 2))
+    write_report(
+        reports, "turbo-nh", "zeroth-val", zeroth_rows(dict.fromkeys(STAGE13_UNSEEN[1:] + STAGE13_SEEN, 2))
+    )
+    with pytest.raises(SystemExit, match="cover 3 of the 4"):
+        analyze.verdict13()
+
+
+# 후보의 zeroth-test가 있으면 test unseen·seen 줄을 참고로 더 찍는다. 판정은 validation 그대로다.
+def test_verdict13_adds_the_test_lines_once_test_is_measured(reports, capsys):
+    prepare_stage13(reports, (2, 2, 2, 2), test=True)
+    assert analyze.verdict13()["verdict"] == YES13
+    out = capsys.readouterr().out
+    assert "zeroth-test: not measured" not in out
+    assert "zeroth-test unseen turbo-nh vs whisper-large-v3-turbo" in out and "test M - C" in out
+
+
+# M − C 구간은 unseen과 seen을 따로 재표집한다: seed 0 생성기 하나에서 unseen 표본(M 구간과 같은 표본)을 먼저
+# 뽑고 이어서 seen 표본을 뽑아 b번째끼리 뺀다. 그래서 seen의 차이가 표본마다 0이면 M 구간과 바이트까지 같고,
+# 두 묶음이 같아도 같은 인덱스를 다시 쓰지 않으므로 0 한 점으로 모이지 않는다.
+def test_share_interval_resamples_the_two_sets_separately():
+    rng = np.random.default_rng(5)
+    a, b = rng.integers(0, 6, 30), rng.integers(0, 6, 30)
+    lengths = np.full(30, 20)
+    flat = (np.ones(40, dtype=int), np.ones(40, dtype=int), np.full(40, 20))
+    expected = difference_interval(a, b, lengths, samples=10_000)
+    assert analyze.share_interval((a, b, lengths), flat, 10_000) == expected
+    low, high = analyze.share_interval((a, b, lengths), (a, b, lengths), 10_000)
+    assert low < 0 < high
+
+
+# analyze verdict13의 기본 인자는 규칙의 이름(후보 turbo-nh, N turbo-n, 기준선 whisper-large-v3-turbo)이다.
+def test_verdict13_command_uses_the_registered_names(monkeypatch):
+    called = []
+    monkeypatch.setattr(analyze, "verdict13", lambda *args: called.append(args))
+    run_cli(monkeypatch, "verdict13")
+    run_cli(monkeypatch, "verdict13", "--candidate", "x", "--n", "y", "--baseline", "z")
+    assert called == [("turbo-nh", "turbo-n", "whisper-large-v3-turbo"), ("x", "y", "z")]

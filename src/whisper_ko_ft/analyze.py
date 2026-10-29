@@ -59,6 +59,13 @@ Zeroth·FLEURS 한국어, en-whisper는 FLEURS 영어) 다른 언어의 묶음�
 
     uv run python -m whisper_ko_ft.analyze table --set zeroth-val --reports turbo-n-ct2 turbo-n-ct2-int8 \
         --baseline turbo-n-ct2 --harmonized --bootstrap-samples 100000 --decimals 3
+
+13단계(문장 hold-out, 규칙 2026-10-29): `verdict13`은 정의 파일 reports/sentence_holdout/zeroth.json
+(prepare_heldout이 쓴다)의 unseen·seen 발화로 기존 zeroth-val 리포트를 골라, 처음 보는 문장에서 N-H가
+기준선보다 나은지 판정하고 N의 이득 중 본 문장 몫(M − C)을 보고한다. 구간은 발화 단위 짝지은 부트스트랩
+10,000번(seed 0)이다. N-H를 재기 전에도 돌릴 수 있고 그때는 기준선과 N의 수(G와 해석 문턱)만 찍는다.
+
+    uv run python -m whisper_ko_ft.analyze verdict13
 """
 
 # [파일 역할] 커밋된 리포트(reports/)만 읽어 표와 판정을 내는 분석 도구. 모델을 다시 돌리지 않는다. 예외는
@@ -78,6 +85,8 @@ Zeroth·FLEURS 한국어, en-whisper는 FLEURS 영어) 다른 언어의 묶음�
 # - 단계별 판정: verdict(2·3단계), verdict6, verdict8·itn8, gate9·verdict9, gate10·smoke10·pick10·verdict10.
 # - 민감도 분석: robust(기록된 판정 구간을 화자·문장 단위 부트스트랩으로 다시 계산, 2026-10-15).
 # - 문장 겹침: overlap(학습 묶음과 평가 묶음의 문장·화자 겹침, 2026-10-24. 셈은 splits.sentence_overlap).
+# - 13단계 문장 hold-out: verdict13(정의 파일의 unseen·seen 발화로 고른 비교, B = 10,000, M − C 구간은
+#   share_interval, 2026-10-29). compare의 only·samples 인자가 이때 생겼다(기본값이면 예전과 같다).
 # [연결] metrics(채점·구간), itn·latin(표기 변환), en_norm(영어 표준 정규화), paths.REPORTS를 쓴다. overlap만
 # splits·store.load_set과 paths.CACHE를 더 쓴다. tests/test_recorded_reports.py가 load_rows·arrays로 커밋된
 # 리포트의 맞춘 CER 총합을 고정하고, tests/test_analyze.py가 문장 겹침 파생 파일의 수와 영어 보조 지표의
@@ -91,6 +100,7 @@ import json
 import math
 import re
 import statistics
+from collections.abc import Collection, Sequence
 
 # jiwer: en-whisper 채점의 단어 단위 편집 거리(표준 정규화의 출력을 더 손대지 않고 세기 위해 metrics.score를
 # 거치지 않는다. word_edits). numpy: 발화별 편집 수·길이 배열.
@@ -100,7 +110,8 @@ import numpy as np
 # itn·latin: 다시 채점할 때 쓰는 표기 변환(한국어). en_norm: 영어 보조 지표의 표준 정규화. metrics: 채점,
 # 오류율, 부트스트랩 구간과 짝지은 차이 구간. paths.REPORTS: 리포트 폴더. paths.CACHE·store.load_set·splits:
 # overlap만 쓴다(묶음 목록 읽기와 문장 겹침 셈). CACHE는 load_set에 매번 넘겨, 테스트가 analyze.CACHE를 임시
-# 폴더로 바꿀 수 있게 한다.
+# 폴더로 바꿀 수 있게 한다. splits.HOLDOUT_DEFINITION: 13단계 정의 파일의 reports/ 아래 경로(verdict13이 읽고
+# prepare_heldout이 쓴다).
 from whisper_ko_ft.en_norm import normalize_english
 from whisper_ko_ft.itn import harmonize, to_digits
 from whisper_ko_ft.latin import letters_to_latin
@@ -115,7 +126,7 @@ from whisper_ko_ft.metrics import (
     score,
 )
 from whisper_ko_ft.paths import CACHE, REPORTS
-from whisper_ko_ft.splits import OVERLAP_KEYS, sentence_overlap
+from whisper_ko_ft.splits import HOLDOUT_DEFINITION, OVERLAP_KEYS, sentence_overlap
 from whisper_ko_ft.store import load_set
 
 # BASE_MODELS: '숫자 발화' 목록을 정할 때 보는 기본 모델 두 개(1단계 기준선).
@@ -412,6 +423,10 @@ def block_of(set_name: str, utterance_id: str) -> str:
 # without_digits: Zeroth의 숫자 발화 제외. reference_digits: 정답에 숫자가 있는(True)/없는(False)
 # 발화만(FLEURS를 나눠 보는 사후 분석이 3단계부터 정식 보고가 됐다). baseline_scoring: 기준선을 다른 방식으로
 # 채점(8단계에서 같은 리포트를 후처리 전후로 비교할 때). 기본 'same'은 후보와 같은 방식이다.
+# only(2026-10-29, 13단계): 이 발화 ID만 남긴다. 13단계는 새 묶음을 재지 않고 기존 zeroth-val·zeroth-test
+# 리포트에서 정의 파일의 unseen·seen 발화를 골라 비교한다. 그 발화만 담은 리포트로 비교한 것과 같은 결과다.
+# samples(2026-10-29): 차이 구간의 부트스트랩 표본 수(기본 1,000이 2~12단계의 모든 판정, 13단계는 10,000).
+# 블록 단위 구간은 metrics가 1,000번으로 정해 이 값과 무관하다. 둘 다 기본값이면 결과는 예전과 똑같다.
 def compare(
     set_name: str,
     candidate: str,
@@ -422,6 +437,8 @@ def compare(
     scoring: str | None = None,
     baseline_scoring: str | None = "same",
     with_blocks: bool = False,
+    only: Collection[str] | None = None,
+    samples: int = BOOTSTRAP_SAMPLES,
 ) -> dict:
     """두 리포트의 공통 발화에서 잰 오류율과, 그 차이의 짝지은 구간.
 
@@ -429,7 +446,8 @@ def compare(
     있는(True) 또는 없는(False) 발화만 남긴다. FLEURS처럼 정답이 숫자를 아라비아 숫자로 적는 묶음용이다.
     `baseline_scoring`은 기준선을 후보와 다른 방식으로 채점한다(8단계: 한 리포트를 후처리한 것과 원래 것의
     비교). 두 채점 모두 정답 길이를 같게 남겨야 한다. `with_blocks`는 같은 발화에서 블록(화자·문장) 단위
-    구간과 블록 하나 빼기 값을 더한다(민감도 분석, `robust`).
+    구간과 블록 하나 빼기 값을 더한다(민감도 분석, `robust`). `only`는 그 발화 ID만 남기고(13단계),
+    `samples`는 차이 구간의 부트스트랩 표본 수다.
     """
     scoring = "harmonized" if harmonized else scoring
     cand_rows = load_rows(candidate, set_name, scoring=scoring)
@@ -438,6 +456,9 @@ def compare(
     )
     # 공통 발화만 남기고 조건에 따라 부분집합을 고른다. 숫자 유무는 기준선 리포트의 정답 글로 판단한다.
     ids = sorted(set(cand_rows) & set(base_rows))
+    if only is not None:
+        keep = set(only)
+        ids = [i for i in ids if i in keep]
     if without_digits:
         digits = digit_ids(set_name)
         ids = [i for i in ids if i not in digits]
@@ -460,7 +481,7 @@ def compare(
         "candidate": cand,
         "delta": cand - base,
         "relative": (cand - base) / base if base else float("nan"),
-        "delta_interval": difference_interval(cand_edits, base_edits, lengths),
+        "delta_interval": difference_interval(cand_edits, base_edits, lengths, samples=samples),
     }
     # 민감도 분석(robust)일 때만: 같은 발화·같은 채점에서 블록 단위 구간과 블록 하나 빼기. 기본값에서는 결과가
     # 예전과 똑같다.
@@ -1499,6 +1520,259 @@ def overlap(
     return record
 
 
+# --- 13단계: 처음 보는 문장에서의 같은 도메인 이득 (규칙 2026-10-29, docs/experiments.md 13단계) ---
+
+# STAGE13_SAMPLES: 13단계 판정·보고의 발화 단위 구간과 M − C 구간의 부트스트랩 표본 수(seed 0). 공통 규칙
+# '지표'의 2026-10-29 관례(판정 문턱에 가까울 수 있는 조건은 결과 전에 10,000번 이상)대로 학습 전에 정했다.
+# 화자 블록 구간만 2026-10-15 추가 분석과 같은 1,000번이다(metrics.block_difference_interval이 정함).
+# STAGE13_SMALL_SHARE·STAGE13_HALF_SHARE: 해석 문턱. 본 문장 몫 M − C(점 추정)가 N의 이득 G의 1/4 미만이면
+# '암기 몫은 작다', 1/2 이상이면 '이득의 절반 이상이 본 문장 몫이다', 그 사이는 '이득의 일부가 본 문장
+# 몫이다'.
+STAGE13_SAMPLES = 10_000
+STAGE13_SMALL_SHARE = 0.25
+STAGE13_HALF_SHARE = 0.5
+# STAGE13_SUBSETS: 묶음마다 정의 파일의 (unseen, seen) 발화 묶음 이름(prepare_heldout.SUBSETS와 같다).
+# validation unseen이 판정 묶음이고 seen이 대조, test는 참고다.
+STAGE13_SUBSETS = {
+    "zeroth-val": ("zeroth-val-unseen", "zeroth-val-seen"),
+    "zeroth-test": ("zeroth-test-unseen", "zeroth-test-seen"),
+}
+# _SHARE_BATCH: M − C 구간의 재표집을 나눠 뽑는 한 묶음의 인덱스 수(metrics와 같은 2^22). 같은 생성기를 차례로
+# 쓰므로 묶음 크기는 값에 영향이 없고 메모리만 정한다.
+_SHARE_BATCH = 1 << 22
+
+
+# 커밋된 13단계 정의 파일(reports/sentence_holdout/zeroth.json, prepare_heldout --write-definition이 쓴다).
+# 판정·보고에 쓰는 unseen·seen 발화 ID가 들어 있다. 없으면 무엇을 돌릴지 적고 멈춘다.
+def holdout_definition() -> dict:
+    """커밋된 13단계 정의 파일의 내용."""
+    path = REPORTS.joinpath(*HOLDOUT_DEFINITION)
+    if not path.exists():
+        raise SystemExit(
+            f"{path} is missing; write it with python -m whisper_ko_ft.prepare_heldout --write-definition"
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def verdict13_label(upper: float) -> str:
+    """13단계 판정: unseen에서 N-H − 기준선 turbo의 95% 구간 상한이 0보다 작은지."""
+    if upper < 0:
+        return "처음 보는 문장에서도 같은 도메인 이득이 있다"
+    return "처음 보는 문장에서는 이득을 보이지 못했다"
+
+
+# 해석 문턱은 G(= (turbo − N)_unseen, N의 이득)에 대한 비율이라 G가 0 이하면 견줄 이득이 없어 해석하지 않는다.
+# 경계값은 1/4이면 '일부', 1/2이면 '절반 이상' 쪽이다(규칙의 '미만'·'이상').
+def memorization13_label(share: float, gain: float) -> str:
+    """13단계 해석: 본 문장 몫 M − C(점 추정)를 N의 이득 G에 견준다."""
+    if gain <= 0:
+        return "해석하지 않음 (unseen에서 N이 기준선보다 낫지 않다)"
+    if share < gain * STAGE13_SMALL_SHARE:
+        return "암기 몫은 작다"
+    if share >= gain * STAGE13_HALF_SHARE:
+        return "이득의 절반 이상이 본 문장 몫이다"
+    return "이득의 일부가 본 문장 몫이다"
+
+
+# 13단계 비교 하나: compare를 정의 파일의 발화로 좁히고(only) 표본 수를 STAGE13_SAMPLES로 해 부른 뒤, 두
+# 리포트가 그 발화를 모두 담았는지 본다. 다른 묶음이나 일부만 잰 리포트면 비교가 조용히 줄어든 발화로 되므로
+# 멈춘다. 숫자 발화 제외처럼 일부러 줄이는 비교는 이 함수를 거치지 않는다.
+def _stage13_compare(
+    set_name: str, candidate: str, baseline: str, ids: Sequence[str], subset: str, with_blocks: bool = False
+) -> dict:
+    result = compare(
+        set_name,
+        candidate,
+        baseline,
+        scoring="harmonized",
+        with_blocks=with_blocks,
+        only=ids,
+        samples=STAGE13_SAMPLES,
+    )
+    if result["utterances"] != len(ids):
+        raise SystemExit(
+            f"{candidate} and {baseline} on {set_name} cover {result['utterances']} of the {len(ids)}"
+            f" {subset} utterances; measure the whole set again"
+        )
+    return result
+
+
+# M − C 구간에 넣을 배열: 두 리포트의 맞춘 채점에서 ids의 (후보 편집 수, 기준 편집 수, 정답 길이). 발화는
+# compare와 같은 ID 순이라 첫 묶음의 표본이 compare의 차이 구간과 같은 발화를 가리킨다.
+def _paired_arrays(
+    set_name: str, candidate: str, baseline: str, ids: Sequence[str]
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    cand_rows = load_rows(candidate, set_name, scoring="harmonized")
+    base_rows = load_rows(baseline, set_name, scoring="harmonized")
+    order = sorted(set(cand_rows) & set(base_rows) & set(ids))
+    cand_edits, lengths = arrays(cand_rows, order)
+    base_edits, _ = arrays(base_rows, order)
+    return cand_edits, base_edits, lengths
+
+
+# 생성기 rng로 발화를 복원 추출한 표본 samples개 각각의 rate(후보) − rate(기준). metrics.difference_interval과
+# 같은 계산(행 묶음마다 '인덱싱 → 행 합', 정답 길이 합으로 나눔)이고, 생성기를 밖에서 받아 두 묶음을 한
+# 생성기에서 차례로 뽑을 수 있게 했다.
+def _paired_deltas(
+    rng: np.random.Generator, cand: np.ndarray, base: np.ndarray, lengths: np.ndarray, samples: int
+) -> np.ndarray:
+    count = len(lengths)
+    rows = max(1, _SHARE_BATCH // max(count, 1))
+    parts = []
+    for start in range(0, samples, rows):
+        picks = rng.integers(0, count, size=(min(rows, samples - start), count))
+        totals = lengths[picks].sum(axis=1)
+        parts.append(cand[picks].sum(axis=1) / totals - base[picks].sum(axis=1) / totals)
+    return np.concatenate(parts)
+
+
+# M − C의 95% 구간(13단계 보고). M은 unseen에서, C는 seen에서 잰 같은 두 모델의 차이이고 두 묶음은 다른 발화라
+# 따로 재표집한다: seed 0 생성기 하나에서 first(unseen) 표본 samples개를 먼저 뽑고(그래서 M의 차이 구간과 같은
+# 표본) 이어서 second(seen) 표본 samples개를 뽑아, b번째 표본끼리 뺀 값의 2.5·97.5 백분위를 낸다. 같은 seed로
+# 두 생성기를 새로 만들면 두 묶음의 표본이 같은 난수에서 시작해 서로 엮이므로 한 생성기를 이어 쓴다. 입력은
+# _paired_arrays의 (후보 편집 수, 기준 편집 수, 정답 길이) 둘. samples가 1보다 작으면 ValueError.
+def share_interval(
+    first: Sequence[np.ndarray], second: Sequence[np.ndarray], samples: int = STAGE13_SAMPLES
+) -> tuple[float, float]:
+    """(a − b)_first − (a − b)_second의 95% 구간. 두 묶음을 seed 0 생성기 하나에서 차례로 따로 재표집한다."""
+    if samples < 1:
+        raise ValueError(f"the bootstrap needs at least one sample, got {samples}")
+    rng = np.random.default_rng(BOOTSTRAP_SEED)
+    deltas = _paired_deltas(rng, *first, samples) - _paired_deltas(rng, *second, samples)
+    low, high = np.percentile(deltas, [2.5, 97.5])
+    return float(low), float(high)
+
+
+# 13단계 test 줄(참고, 판정 뒤 한 번 잰 zeroth-test). 후보의 zeroth-test 리포트가 있을 때만 validation과 같은
+# 줄을 test unseen·seen에서 찍는다. test 수치로 판정·해석을 바꾸지 않는다.
+def _verdict13_test(candidate: str, n: str, baseline: str, subsets: dict[str, list[str]]) -> None:
+    if not (REPORTS / candidate / "zeroth-test.json").exists():
+        print("zeroth-test: not measured (measured once after the verdict, reference only)")
+        return
+    unseen_name, seen_name = STAGE13_SUBSETS["zeroth-test"]
+    unseen, seen = subsets[unseen_name], subsets[seen_name]
+    print("zeroth-test (once, reference only; the verdict uses validation):")
+    against = _stage13_compare("zeroth-test", candidate, baseline, unseen, unseen_name)
+    gain = _stage13_compare("zeroth-test", n, baseline, unseen, unseen_name)
+    m = _stage13_compare("zeroth-test", candidate, n, unseen, unseen_name)
+    c = _stage13_compare("zeroth-test", candidate, n, seen, seen_name)
+    show(f"zeroth-test unseen {candidate} vs {baseline}", against)
+    show(f"zeroth-test unseen {n} vs {baseline}", gain)
+    show(f"zeroth-test unseen {candidate} vs {n} (M)", m)
+    show(f"zeroth-test seen {candidate} vs {n} (C)", c)
+    low, high = share_interval(
+        _paired_arrays("zeroth-test", candidate, n, unseen), _paired_arrays("zeroth-test", candidate, n, seen)
+    )
+    print(
+        f"test M - C = {(m['delta'] - c['delta']) * 100:+.2f}%p [{low * 100:+.2f}, {high * 100:+.2f}],"
+        f" G = {-gain['delta'] * 100:+.2f}%p"
+    )
+
+
+# verdict13 명령(13단계 판정): 정의 파일의 unseen·seen 발화로 기존 zeroth-val 리포트를 골라 기준선 turbo, N,
+# N-H를 맞춘 CER로 비교한다(발화 단위 짝지은 부트스트랩 B = 10,000, seed 0).
+# - 이미 아는 것(N-H 없이): 기준선 대비 N의 unseen·seen 비교, G = (turbo − N)_unseen과 해석 문턱 G/4·G/2.
+#   후보의 zeroth-val 리포트가 없으면 여기까지 찍고 판정하지 않는다(None을 돌려준다).
+# - 판정: unseen에서 N-H − turbo의 95% 구간 상한 < 0. 화자 블록 구간과 화자 하나 빼기 범위를 함께
+#   찍는다(보고만).
+# - 보고(판정 없음): M = (N-H − N)_unseen(N만 그 문장을 봄), C = (N-H − N)_seen(둘 다 봄, 학습 데이터 감소
+#   몫), M − C와 그 구간(share_interval), 해석(memorization13_label), seen에서 N-H − turbo, unseen의 숫자 발화
+#   제외, FLEURS 한국어·영어 N-H − N(망각 확인). 후보의 zeroth-test가 있으면 test 줄(_verdict13_test).
+# 돌려주는 것(dict): verdict(판정 문구), interpretation(해석 문구), gain·m·c·share(G·M·C·M − C, 0.01 = 1%p),
+# share_interval(M − C 구간), upper(판정 비교의 구간 상한).
+def verdict13(
+    candidate: str = "turbo-nh", n: str = "turbo-n", baseline: str = "whisper-large-v3-turbo"
+) -> dict | None:
+    """13단계: 처음 보는 문장(unseen)에서 N-H가 기준선보다 나은지와, N의 이득 중 본 문장 몫."""
+    subsets = {name: entry["ids"] for name, entry in holdout_definition()["subsets"].items()}
+    unseen_name, seen_name = STAGE13_SUBSETS["zeroth-val"]
+    unseen, seen = subsets[unseen_name], subsets[seen_name]
+    print(
+        f"stage 13 on zeroth-val, harmonized CER, bootstrap {STAGE13_SAMPLES:,} samples"
+        f" (seed {BOOTSTRAP_SEED}): unseen {len(unseen)}, seen {len(seen)} utterances"
+    )
+    print("known before training (baseline and N):")
+    n_unseen = _stage13_compare("zeroth-val", n, baseline, unseen, unseen_name)
+    n_seen = _stage13_compare("zeroth-val", n, baseline, seen, seen_name)
+    show(f"unseen {n} vs {baseline}", n_unseen)
+    show(f"seen {n} vs {baseline}", n_seen)
+    gain = -n_unseen["delta"]
+    low, high = n_unseen["delta_interval"]
+    small, half = gain * STAGE13_SMALL_SHARE, gain * STAGE13_HALF_SHARE
+    print(
+        f"G = {baseline} - {n} on unseen: {gain * 100:+.2f}%p [{-high * 100:+.2f}, {-low * 100:+.2f}];"
+        f" thresholds G/4 {small * 100:+.2f}%p, G/2 {half * 100:+.2f}%p"
+    )
+    if not (REPORTS / candidate / "zeroth-val.json").exists():
+        print(f"{candidate}/zeroth-val: not measured")
+        print("판정: 하지 않음 (후보의 zeroth-val 리포트가 없다)")
+        return None
+
+    against = _stage13_compare("zeroth-val", candidate, baseline, unseen, unseen_name, with_blocks=True)
+    m = _stage13_compare("zeroth-val", candidate, n, unseen, unseen_name)
+    c = _stage13_compare("zeroth-val", candidate, n, seen, seen_name)
+    seen_against = _stage13_compare("zeroth-val", candidate, baseline, seen, seen_name)
+    share = m["delta"] - c["delta"]
+    share_low, share_high = share_interval(
+        _paired_arrays("zeroth-val", candidate, n, unseen), _paired_arrays("zeroth-val", candidate, n, seen)
+    )
+    print("verdict comparison:")
+    show(f"unseen {candidate} vs {baseline}", against)
+    left_out = against["leave_one_out"].values()
+    print(
+        f"  speaker blocks {_points(against['block_interval'])} ({against['blocks']} blocks,"
+        f" {BOOTSTRAP_SAMPLES:,} samples), leave one out"
+        f" {min(left_out) * 100:+.2f} .. {max(left_out) * 100:+.2f}"
+    )
+    print("reported, no verdict:")
+    show(f"unseen {candidate} vs {n} (M)", m)
+    show(f"seen {candidate} vs {n} (C)", c)
+    print(
+        f"M - C = {share * 100:+.2f}%p [{share_low * 100:+.2f}, {share_high * 100:+.2f}]"
+        " (unseen and seen resampled separately)"
+    )
+    show(f"seen {candidate} vs {baseline}", seen_against)
+    for reference in (baseline, n):
+        part = compare(
+            "zeroth-val",
+            candidate,
+            reference,
+            without_digits=True,
+            harmonized=True,
+            only=unseen,
+            samples=STAGE13_SAMPLES,
+        )
+        show(f"unseen, no digit utterances, {candidate} vs {reference}", part)
+    for set_name, label in (("fleurs-ko-val", "fleurs-ko-val"), ("fleurs-en-val", "fleurs-en-val (WER)")):
+        if (REPORTS / candidate / f"{set_name}.json").exists():
+            part = compare(set_name, candidate, n, samples=STAGE13_SAMPLES)
+            show(f"{label} {candidate} vs {n} (forgetting)", part)
+        else:
+            print(f"{set_name}: not measured")
+    _verdict13_test(candidate, n, baseline, subsets)
+
+    upper = against["delta_interval"][1]
+    label = verdict13_label(upper)
+    interpretation = memorization13_label(share, gain)
+    met = "만족" if upper < 0 else "불만족"
+    print(f"1. zeroth-val unseen 맞춘 CER {candidate} - {baseline} 상한 < 0: {met}")
+    print(
+        f"해석: M - C {share * 100:+.2f}%p, G {gain * 100:+.2f}%p의 1/4 {small * 100:+.2f}%p"
+        f" · 1/2 {half * 100:+.2f}%p: {interpretation}"
+    )
+    print(f"판정: {label}")
+    return {
+        "verdict": label,
+        "interpretation": interpretation,
+        "gain": gain,
+        "m": m["delta"],
+        "c": c["delta"],
+        "share": share,
+        "share_interval": (share_low, share_high),
+        "upper": upper,
+    }
+
+
 # table --bootstrap-samples의 값 검사: 1 이상의 정수만 받는다(표본이 없으면 구간을 낼 수 없다). argparse가
 # 'argument --bootstrap-samples: …' 오류로 계산 전에 멈추도록 ArgumentTypeError를 낸다.
 def _sample_count(text: str) -> int:
@@ -1514,7 +1788,8 @@ def _sample_count(text: str) -> int:
 # 명령줄 진입점. 하위 명령마다 인자를 정하고 해당 함수를 부른다. 명령과 단계: digits·table·loops(공통),
 # verdict(2·3단계), verdict6(6단계), changes·verdict8·itn8(8단계), gate9·verdict9(9단계),
 # gate10·smoke10·pick10·verdict10(10단계), gate11·blocks(11단계), verdict12(12단계), robust(민감도 분석),
-# overlap(문장 겹침, 리포트가 아니라 묶음 목록을 읽는 유일한 명령).
+# overlap(문장 겹침, 리포트가 아니라 묶음 목록을 읽는 유일한 명령), verdict13(13단계, 리포트와 정의 파일만
+# 읽음).
 def main() -> None:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1656,6 +1931,25 @@ def main() -> None:
             " 넣지 않는다). 기본 --train·--sets일 때만 쓴다"
         ),
     )
+    ver13 = commands.add_parser(
+        "verdict13",
+        help="13단계 판정: 처음 보는 문장(unseen)에서의 같은 도메인 이득과 그 이득 중 본 문장 몫",
+        description=(
+            "정의 파일 reports/sentence_holdout/zeroth.json의 unseen·seen 발화로 기존 zeroth-val 리포트를"
+            " 골라 맞춘 CER로 비교한다(발화 단위 짝지은 부트스트랩 10,000번, seed 0). 판정: unseen에서 후보 −"
+            " 기준선의 95% 구간 상한 < 0. 보고: M = (후보 − N)_unseen, C = (후보 − N)_seen, M − C와 해석"
+            "(G = (기준선 − N)_unseen의 1/4·1/2 문턱), 숫자 발화 제외, FLEURS 망각, 후보의 zeroth-test가"
+            " 있으면 test 줄. 후보의 zeroth-val 리포트가 없으면 기준선과 N의 이미 아는 수(G와 문턱)만 찍고"
+            " 판정하지 않는다."
+        ),
+    )
+    ver13.add_argument(
+        "--candidate", default="turbo-nh", help="문장 hold-out 묶음으로 다시 학습한 모델(N-H)의 리포트 이름"
+    )
+    ver13.add_argument("--n", default="turbo-n", help="모든 문장으로 학습한 6단계 N의 리포트 이름")
+    ver13.add_argument(
+        "--baseline", default="whisper-large-v3-turbo", help="기준선(학습 전 turbo)의 리포트 이름"
+    )
     args = parser.parse_args()
 
     if args.command == "digits":
@@ -1694,6 +1988,8 @@ def main() -> None:
         verdict12(args.speed, args.candidate, args.baseline)
     elif args.command == "overlap":
         overlap(args.train, args.sets, args.write)
+    elif args.command == "verdict13":
+        verdict13(args.candidate, args.n, args.baseline)
     else:
         table(
             args.set_name,

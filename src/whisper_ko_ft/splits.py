@@ -1,7 +1,9 @@
 """Zeroth-Korean train을 화자 기준으로 나눠 validation을 만든다(규칙은 docs/experiments.md "데이터 분리").
 
 학습 묶음과 평가 묶음이 같은 문장을 얼마나 함께 갖는지도 센다(`sentence_overlap`, docs/experiments.md
-"추가 확인: Zeroth 문장 겹침"). 화자 기준 분리는 화자만 떼므로 문장은 겹칠 수 있다.
+"추가 확인: Zeroth 문장 겹침"). 화자 기준 분리는 화자만 떼므로 문장은 겹칠 수 있다. 13단계의 문장
+hold-out은 문장 키를 해시 순서로 정렬해 일부 문장을 통째로 학습에서 뗀다(`heldout_sentences`,
+docs/experiments.md 13단계).
 """
 
 # [파일 역할] Zeroth-Korean train을 화자 기준으로 나누는 규칙이다. validation으로 뗄 화자 10명과, 학습 중
@@ -18,6 +20,10 @@
 # 돌려도 같은 분리가 나온다. 실제로 새 클론에서 prepare 결과가 바이트 단위로 같았다(docs/experiments.md '새
 # 클론에서 재현'). 문장 겹침 셈도 파일을 읽지 않는 순수 함수라 가짜 묶음으로 테스트하고, 묶음을 읽는 일은
 # 호출하는 쪽(analyze overlap)이 맡는다.
+# [13단계 문장 hold-out] 위 겹침 때문에 기존 묶음으로는 '학습에서 본 적 없는 문장'을 잴 수 없다. 그래서 문장
+# 키의 합집합에서 SHA-256 순서로 앞 15%를 H로 정해 학습에서 통째로 빼고 N과 같은 설정으로 다시 학습한다. H를
+# 고르는 규칙(heldout_count, heldout_sentences)은 화자 고르기와 같은 해시 정렬이라 여기 둔다. 묶음 파일을 읽고
+# 쓰는 일과 학습 전 관문은 prepare_heldout이 맡는다.
 
 from __future__ import annotations
 
@@ -39,6 +45,12 @@ if TYPE_CHECKING:
 # 있어 실제로는 440발화다(docs/experiments.md 1단계 결과).
 VALIDATION_SPEAKERS = 10
 VAL500_PER_SPEAKER = 50
+# HELDOUT_PERCENT: 13단계 문장 hold-out에서 학습에서 뗄 문장의 비율(%, docs/experiments.md 13단계). 15%면
+# validation에서 그 문장을 읽은 판정 발화가 347개(화자 9명) 생기고 학습 발화는 84.9%가 남는다(같은 절 '묶음').
+# HOLDOUT_DEFINITION: 13단계 정의 파일의 reports/ 아래 경로. prepare_heldout --write-definition이 쓰고
+# 커밋하며 analyze verdict13이 읽는다. 두 모듈이 같은 위치를 쓰도록 한곳에 둔다.
+HELDOUT_PERCENT = 15
+HOLDOUT_DEFINITION = ("sentence_holdout", "zeroth.json")
 
 
 # 화자 ID 문자열의 SHA-256 16진수 값을 정렬해 앞에서 count명을 고른다(docs/experiments.md '데이터 분리'에 적은
@@ -86,6 +98,36 @@ OVERLAP_KEYS = ("raw", "normalized")
 def sentence_key(text: str, language: str = "ko") -> str:
     """겹침을 셀 때 같은 문장으로 보는 키: `text_norm.normalize(text, language)`."""
     return normalize(text, language)
+
+
+# --- 13단계 문장 hold-out (docs/experiments.md 13단계, 2026-10-29) ---
+
+
+# 문장 키의 SHA-256(UTF-8) 16진수. H를 고르는 정렬 순서이고, 정의 파일에는 글 대신 이 값을 적는다(정답 글을
+# 커밋하지 않고도 어떤 문장이 H인지 커밋된 리포트의 정답으로 다시 맞춰 볼 수 있다).
+def sentence_hash(key: str) -> str:
+    """문장 키의 SHA-256(UTF-8) 16진수."""
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+# K개 문장 중 뗄 개수: percent% × K를 반올림한 것(.5는 올림). 0.15 × K를 부동소수점으로 계산해 round를 쓰면
+# 4.5 같은 경계에서 은행가 반올림(짝수 쪽)과 부동소수점 오차가 끼므로, 정수 계산 (K × percent + 50) // 100으로
+# 정한다. 실제 Zeroth의 K = 3,004는 451개다(0.15 × 3,004 = 450.6이라 어느 방식으로도 같다).
+def heldout_count(total: int, percent: int = HELDOUT_PERCENT) -> int:
+    """K개 중 뗄 문장 수: percent% × K를 반올림(.5는 올림)한 정수."""
+    return (total * percent + 50) // 100
+
+
+# 문장 키들의 합집합(중복은 하나로)을 키의 SHA-256 순으로 정렬해 앞의 heldout_count(K)개를 그 순서대로
+# 돌려준다. 입력 순서와 중복에 흔들리지 않는다(validation_speakers와 같은 해시 정렬이라 문장 난도와 무관하게
+# 고르면서 누가 돌려도 같다). 해시가 같은 두 키는 사실상 없지만 순서를 완전히 정하려고 키 자체를 둘째 정렬
+# 기준으로 둔다. 호출 위치: prepare_heldout.holdout(입력은 zeroth-train·zeroth-val·zeroth-test의 원래 정답
+# 키).
+def heldout_sentences(keys: Iterable[str], percent: int = HELDOUT_PERCENT) -> list[str]:
+    """문장 키 합집합에서 SHA-256 순으로 앞의 percent%(반올림)개."""
+    unique = set(keys)
+    ordered = sorted(unique, key=lambda key: (sentence_hash(key), key))
+    return ordered[: heldout_count(len(unique), percent)]
 
 
 # 한 기준(raw 또는 normalized)으로 발화마다 문장 키를 만든다.

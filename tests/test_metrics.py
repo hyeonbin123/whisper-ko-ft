@@ -214,7 +214,8 @@ def test_interval_arrays_must_describe_the_same_utterances(call):
 # 같은 순서로 다시 낸다. 기본 경로(1,000번, seed 0)가 기록과 같고, numpy가 같은 시드에서 같은 수를 뽑는지도
 # 함께 지킨다(numpy 버전이 바뀌어 뽑는 수가 달라지면 여기서 깨진다).
 def test_committed_report_summaries_are_reproduced():
-    derived = {"digit_utterances", "sentence_overlap"}  # 리포트가 아닌 파생 파일 폴더(요약이 없다)
+    # 리포트가 아닌 파생 파일 폴더(요약이 없다): 숫자 발화 목록, 문장 겹침, 13단계 문장 hold-out 정의.
+    derived = {"digit_utterances", "sentence_overlap", "sentence_holdout"}
     paths = sorted(p for p in REPORTS.glob("*/*.json") if p.parent.name not in derived)
     assert paths
     differ = []
