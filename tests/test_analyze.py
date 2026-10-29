@@ -8,7 +8,9 @@
 # 민감도 분석(robust) → 11·12단계 → Zeroth 문장 겹침(overlap, 커밋된 파생 파일의 수 고정) → 영어 보조 채점
 # en-whisper(예시, 커밋된 FLEURS 영어 리포트의 총합 고정).
 
+import inspect
 import json
+import sys
 
 import pytest
 
@@ -147,6 +149,81 @@ def test_table_prints_nan_relative_change_when_the_baseline_makes_no_errors(repo
 
     line = next(x for x in capsys.readouterr().out.splitlines() if x.strip().startswith("cand"))
     assert "vs base: +5.00%p" in line and "relative +nan%" in line
+
+
+# 명령줄 인자를 바꿔 analyze.main을 한 번 부른다.
+def run_cli(monkeypatch, *args):
+    monkeypatch.setattr(sys, "argv", ["analyze", *args])
+    analyze.main()
+
+
+TABLE_ARGS = (
+    "table",
+    "--set",
+    "fleurs-ko-val",
+    "--reports",
+    "base",
+    "cand",
+    "--baseline",
+    "base",
+    "--no-digit-split",
+)
+
+
+# table --bootstrap-samples(2026-10-29): 표의 구간(모델마다의 오류율 구간과 기준선과의 차이 구간)이 모두
+# 그 표본 수로 계산된다. 주지 않으면 기록과 같은 1,000번이다. 묶음 머리 줄에는 기본값이 아닐 때만 표본 수를
+# 덧붙인다(기본 출력은 예전과 한 글자도 같다).
+@pytest.mark.parametrize(("extra", "samples"), [((), 1_000), (("--bootstrap-samples", "10000"), 10_000)])
+def test_table_passes_the_bootstrap_samples(reports, monkeypatch, capsys, extra, samples):
+    write_report(reports, "base", "fleurs-ko-val", rows([1, 0, 2, 1]))
+    write_report(reports, "cand", "fleurs-ko-val", rows([0, 0, 1, 1]))
+    seen = []
+
+    # 구간 함수를 감싸 실제로 받은 표본 수(위치·키워드 어느 쪽으로 넘겨도, 안 넘기면 기본값)를 적어 둔다.
+    def spy(function):
+        def wrapped(*args, **kwargs):
+            bound = inspect.signature(function).bind(*args, **kwargs)
+            bound.apply_defaults()
+            seen.append((function.__name__, bound.arguments["samples"]))
+            return function(*args, **kwargs)
+
+        return wrapped
+
+    monkeypatch.setattr(analyze, "interval", spy(analyze.interval))
+    monkeypatch.setattr(analyze, "difference_interval", spy(analyze.difference_interval))
+    run_cli(monkeypatch, *TABLE_ARGS, *extra)
+
+    assert seen == [("interval", samples), ("interval", samples), ("difference_interval", samples)]
+    header = capsys.readouterr().out.splitlines()[1]
+    added = "" if samples == 1_000 else ", bootstrap 10,000 samples (seed 0)"
+    assert header == "fleurs-ko-val / all: 4 utterances" + added
+
+
+# table --decimals: 오류율·구간·차이를 그 자릿수로 찍는다(상대 변화는 그대로 한 자리). 문턱에 가까운 구간 끝을
+# 읽을 때 쓴다. 기본 2자리의 모양은 바로 위 테스트들이 지킨다.
+def test_table_prints_the_requested_decimals(reports, monkeypatch, capsys):
+    write_report(reports, "base", "fleurs-ko-val", rows([0, 0]))
+    write_report(reports, "cand", "fleurs-ko-val", rows([1, 0]))
+
+    run_cli(monkeypatch, *TABLE_ARGS, "--decimals", "3")
+
+    out = capsys.readouterr().out.splitlines()
+    base = next(x for x in out if x.strip().startswith("base"))
+    cand = next(x for x in out if x.strip().startswith("cand"))
+    assert base.endswith("  0.000%  [0.000, 0.000]")
+    assert cand.endswith("  5.000%  [0.000, 10.000]  vs base: +5.000%p [+0.000, +10.000], relative +nan%")
+
+
+# 표본이 없는 부트스트랩과 범위 밖 자릿수는 계산 전에 명령줄에서 그 인자의 오류로 거부한다('알 수 없는 인자'가
+# 아니라 'argument <옵션>:' 오류).
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [("--bootstrap-samples", "0"), ("--bootstrap-samples", "-5"), ("--decimals", "-1"), ("--decimals", "7")],
+)
+def test_table_refuses_bad_bootstrap_options(reports, monkeypatch, capsys, option, value):
+    with pytest.raises(SystemExit) as stop:
+        run_cli(monkeypatch, *TABLE_ARGS, option, value)
+    assert stop.value.code == 2 and f"argument {option}:" in capsys.readouterr().err
 
 
 # 정답은 Zeroth식('이천 십 팔 년 오 월')이고 가설만 다른 행들. 저장된 편집 수는 일부러 9로 둔다.

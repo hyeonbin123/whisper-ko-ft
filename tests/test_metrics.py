@@ -2,10 +2,15 @@
 # '지표').
 # [왜 중요한가] 모든 판정이 이 함수들의 결과로 정해진다. 오류율을 발화 평균으로 바꾸거나 구간이 실행마다
 # 달라지면 기록된 수치와 판정을 다시 낼 수 없다.
+# [구성] 채점·오류율 → 발화 단위 구간 → 블록 단위 구간(2026-10-15) → 표본 수 선택(2026-10-29, 커밋된 모든
+# 리포트의 요약 구간을 다시 내는 고정 테스트 포함).
+
+import json
 
 import numpy as np
 import pytest
 
+from whisper_ko_ft import metrics
 from whisper_ko_ft.metrics import (
     block_difference_interval,
     difference_interval,
@@ -14,6 +19,7 @@ from whisper_ko_ft.metrics import (
     leave_one_block_out,
     score,
 )
+from whisper_ko_ft.paths import REPORTS
 
 
 # 한국어 CER: 띄어쓰기를 무시하고 글자 단위로 센다. '할수있다' 대 '할수없다'는 치환 1개, 정답 4글자다.
@@ -112,3 +118,110 @@ def test_leave_one_block_out_drops_every_utterance_of_the_block():
 def test_block_arrays_must_describe_the_same_utterances():
     with pytest.raises(ValueError, match="same utterances"):
         block_difference_interval(np.array([1]), np.array([1]), np.array([5]), ["a", "b"])
+
+
+# --- 표본 수 선택 (2026-10-29) ---
+# 기록된 구간은 모두 1,000번(seed 0)이다. 표본 수를 고를 수 있게 하면서 기본 경로의 값이 한 자리도 바뀌지
+# 않는지, 큰 표본 수를 행 묶음으로 나눠 뽑아도 한 번에 뽑은 것과 같은지 고정한다.
+
+
+# 표본 수를 고르기 전의 계산을 그대로 옮긴 기준: seed 0 생성기 한 번으로 (표본 수, 발화 수) 인덱스를 뽑고
+# 행마다 '편집 합 ÷ 길이 합'(차이는 a의 비율 − b의 비율)을 구해 2.5·97.5 백분위를 낸다.
+def one_shot_interval(edits, lengths, samples=1_000):
+    picks = np.random.default_rng(0).integers(0, len(edits), size=(samples, len(edits)))
+    rates = edits[picks].sum(axis=1) / lengths[picks].sum(axis=1)
+    return tuple(float(x) for x in np.percentile(rates, [2.5, 97.5]))
+
+
+def one_shot_difference(edits_a, edits_b, lengths, samples=1_000):
+    picks = np.random.default_rng(0).integers(0, len(lengths), size=(samples, len(lengths)))
+    totals = lengths[picks].sum(axis=1)
+    deltas = edits_a[picks].sum(axis=1) / totals - edits_b[picks].sum(axis=1) / totals
+    return tuple(float(x) for x in np.percentile(deltas, [2.5, 97.5]))
+
+
+# 실제 리포트와 비슷한 크기(457발화)의 가짜 묶음. 두 모델의 편집 수를 함께 만든다.
+@pytest.fixture
+def utterances():
+    rng = np.random.default_rng(3)
+    lengths = rng.integers(5, 60, size=457)
+    return rng.binomial(lengths, 0.06), rng.binomial(lengths, 0.05), lengths
+
+
+# 기본값(표본 수를 주지 않음)과 samples=1,000이 표본 수를 고르기 전의 계산과 정확히 같다.
+def test_default_samples_keep_the_recorded_intervals(utterances):
+    edits_a, edits_b, lengths = utterances
+    assert metrics.BOOTSTRAP_SAMPLES == 1_000 and metrics.BOOTSTRAP_SEED == 0
+    expected = one_shot_interval(edits_a, lengths)
+    assert interval(edits_a, lengths) == interval(edits_a, lengths, samples=1_000) == expected
+    expected = one_shot_difference(edits_a, edits_b, lengths)
+    assert difference_interval(edits_a, edits_b, lengths) == expected
+    assert difference_interval(edits_a, edits_b, lengths, samples=1_000) == expected
+
+
+# samples=10,000이면 (10,000, 발화 수) 인덱스를 seed 0 생성기 한 번으로 뽑은 것과 같은 표본을 쓰고, 구간도 그
+# 표본 10,000개의 백분위다.
+def test_ten_thousand_samples_draw_ten_thousand_resampled_sets(utterances):
+    edits_a, edits_b, lengths = utterances
+    count = len(lengths)
+    picks = np.concatenate(list(metrics._resample_indices(count, samples=10_000)))
+    assert picks.shape == (10_000, count)
+    assert np.array_equal(picks, np.random.default_rng(0).integers(0, count, size=(10_000, count)))
+    assert interval(edits_a, lengths, samples=10_000) == one_shot_interval(edits_a, lengths, 10_000)
+    assert difference_interval(edits_a, edits_b, lengths, samples=10_000) == one_shot_difference(
+        edits_a, edits_b, lengths, 10_000
+    )
+
+
+# 행 묶음이 아주 작아도(한 묶음에 한 행, 인덱스 수가 홀수라 32비트 값의 반쪽이 다음 묶음으로 넘어감) 한 번에
+# 뽑은 것과 같다. 큰 표본 수(예: 100,000번)를 메모리를 적게 쓰며 계산해도 같은 값이 나온다는 근거다.
+def test_small_batches_continue_one_random_stream(utterances, monkeypatch):
+    edits_a, edits_b, lengths = (x[:5] for x in utterances)
+    monkeypatch.setattr(metrics, "_BATCH_INDICES", 7)
+    assert [batch.shape for batch in metrics._resample_indices(5, samples=3)] == [(1, 5)] * 3
+    assert interval(edits_a, lengths, samples=2_000) == one_shot_interval(edits_a, lengths, 2_000)
+    assert difference_interval(edits_a, edits_b, lengths) == one_shot_difference(edits_a, edits_b, lengths)
+    blocks = [f"b{n}" for n in range(5)]
+    assert block_difference_interval(edits_a, edits_b, lengths, blocks) == one_shot_difference(
+        edits_a, edits_b, lengths
+    )
+
+
+# 표본이 없으면 구간을 낼 수 없으므로 멈춘다(빈 배열의 백분위로 이상한 값이 나오지 않게).
+@pytest.mark.parametrize("samples", [0, -1])
+def test_samples_must_be_positive(utterances, samples):
+    edits_a, _, lengths = utterances
+    with pytest.raises(ValueError, match="at least one"):
+        interval(edits_a, lengths, samples=samples)
+
+
+# 배열 길이가 다르면 멈춘다. 예전에는 편집 수가 짧으면 그 길이로만 뽑아 정답 길이의 뒤를 조용히 버렸다(첫
+# 경우), 길면 인덱스 오류였다.
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: interval(np.array([1]), np.array([5, 5])),
+        lambda: interval(np.array([1, 2]), np.array([5])),
+        lambda: difference_interval(np.array([1]), np.array([1, 2]), np.array([5, 5])),
+    ],
+)
+def test_interval_arrays_must_describe_the_same_utterances(call):
+    with pytest.raises(ValueError, match="same utterances"):
+        call()
+
+
+# 커밋된 모든 리포트의 요약 interval_95(하네스가 묶음 순서로 계산해 소수 다섯째 자리로 적은 값)를 지금 코드가
+# 같은 순서로 다시 낸다. 기본 경로(1,000번, seed 0)가 기록과 같고, numpy가 같은 시드에서 같은 수를 뽑는지도
+# 함께 지킨다(numpy 버전이 바뀌어 뽑는 수가 달라지면 여기서 깨진다).
+def test_committed_report_summaries_are_reproduced():
+    derived = {"digit_utterances", "sentence_overlap"}  # 리포트가 아닌 파생 파일 폴더(요약이 없다)
+    paths = sorted(p for p in REPORTS.glob("*/*.json") if p.parent.name not in derived)
+    assert paths
+    differ = []
+    for path in paths:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        kept = [row for row in data["utterances"] if row["length"]]
+        low, high = interval(np.array([r["edits"] for r in kept]), np.array([r["length"] for r in kept]))
+        if [round(low, 5), round(high, 5)] != data["summary"]["interval_95"]:
+            differ.append(f"{path.parent.name}/{path.name}")
+    assert not differ

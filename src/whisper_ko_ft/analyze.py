@@ -51,6 +51,14 @@ Zeroth·FLEURS 한국어, en-whisper는 FLEURS 영어) 다른 언어의 묶음�
     uv run python -m whisper_ko_ft.analyze table --set fleurs-en-val \
         --reports whisper-large-v3-turbo turbo-n --baseline whisper-large-v3-turbo \
         --no-digit-split --scoring en-whisper
+
+표의 부트스트랩 표본 수(2026-10-29): `table --bootstrap-samples N`은 구간을 N번(seed 0) 재표집해 계산하고,
+`--decimals`는 %·%p 값의 소수 자릿수를 바꾼다. 기록된 구간과 판정은 모두 기본값(1,000번, 두 자리)이다. 판정
+문턱에 가까운 구간 끝이 표본 수에 따라 얼마나 움직이는지 사후에 볼 때 쓴다(docs/experiments.md 12단계 결과의
+2026-10-29 덧붙임).
+
+    uv run python -m whisper_ko_ft.analyze table --set zeroth-val --reports turbo-n-ct2 turbo-n-ct2-int8 \
+        --baseline turbo-n-ct2 --harmonized --bootstrap-samples 100000 --decimals 3
 """
 
 # [파일 역할] 커밋된 리포트(reports/)만 읽어 표와 판정을 내는 분석 도구. 모델을 다시 돌리지 않는다. 예외는
@@ -97,6 +105,8 @@ from whisper_ko_ft.en_norm import normalize_english
 from whisper_ko_ft.itn import harmonize, to_digits
 from whisper_ko_ft.latin import letters_to_latin
 from whisper_ko_ft.metrics import (
+    BOOTSTRAP_SAMPLES,
+    BOOTSTRAP_SEED,
     block_difference_interval,
     difference_interval,
     error_rate,
@@ -334,7 +344,13 @@ def arrays(rows: dict[str, dict], ids: list[str]) -> tuple[np.ndarray, np.ndarra
 # table 명령: 여러 리포트의 오류율과 95% 구간을 한 표로 찍는다. --baseline을 주면 각 모델과 기준선의 짝지은
 # 차이(%p, 구간)와 상대 변화도 찍는다. Zeroth 묶음은 '전체'와 '숫자 발화 제외'를 함께 보인다(FLEURS는 목록이
 # 없어 --no-digit-split).
-# 모든 리포트에 공통으로 있는 발화만 써서 같은 발화끼리 비교한다.
+# 모든 리포트에 공통으로 있는 발화만 써서 같은 발화끼리 비교한다. 발화는 ID 순으로 정렬해 쓰므로, 하네스가
+# 묶음 순서로 계산해 리포트 요약에 적은 interval_95와 구간 끝이 조금 다를 수 있다(문서의 표와 판정은 이 명령의
+# 값이다. docs/experiments.md 공통 규칙 '지표'의 2026-10-29 덧붙임).
+# samples(2026-10-29, --bootstrap-samples): 오류율 구간과 차이 구간의 부트스트랩 표본 수. 기본 1,000(seed 0)이
+# 기록된 모든 값이고, 다른 값은 판정 문턱에 가까운 구간 끝이 표본 수에 따라 얼마나 움직이는지 사후에 볼 때만
+# 쓴다. 기본값이 아니면 묶음 머리 줄에 표본 수를 덧붙인다. decimals(--decimals): %·%p 값의 소수 자릿수(기본 2,
+# 상대 변화는 늘 한 자리). 둘 다 기본값이면 출력은 예전과 같다.
 def table(
     set_name: str,
     reports: list[str],
@@ -342,6 +358,8 @@ def table(
     split_digits: bool,
     harmonized: bool = False,
     scoring: str | None = None,
+    samples: int = BOOTSTRAP_SAMPLES,
+    decimals: int = 2,
 ) -> None:
     loaded = {name: load_rows(name, set_name, harmonized, scoring) for name in reports}
     shared = sorted(set.intersection(*(set(rows) for rows in loaded.values())))
@@ -349,24 +367,29 @@ def table(
     if split_digits:
         digits = digit_ids(set_name)
         subsets["no digits"] = [i for i in shared if i not in digits]
+    # 오류율 칸의 너비는 자릿수 + 4(기본 2자리면 예전과 같은 6칸).
+    places, width = decimals, decimals + 4
+    note = "" if samples == BOOTSTRAP_SAMPLES else f", bootstrap {samples:,} samples (seed {BOOTSTRAP_SEED})"
     for label, ids in subsets.items():
-        print(f"\n{set_name} / {label}: {len(ids)} utterances")
+        print(f"\n{set_name} / {label}: {len(ids)} utterances{note}")
         for name, rows in loaded.items():
             edits, lengths = arrays(rows, ids)
-            low, high = interval(edits, lengths)
+            low, high = interval(edits, lengths, samples=samples)
             line = (
-                f"  {name:28s} {error_rate(edits, lengths) * 100:6.2f}%  [{low * 100:.2f}, {high * 100:.2f}]"
+                f"  {name:28s} {error_rate(edits, lengths) * 100:{width}.{places}f}%"
+                f"  [{low * 100:.{places}f}, {high * 100:.{places}f}]"
             )
             if baseline and name != baseline:
                 base_edits, _ = arrays(loaded[baseline], ids)
                 base_rate = error_rate(base_edits, lengths)
-                d_low, d_high = difference_interval(edits, base_edits, lengths)
+                d_low, d_high = difference_interval(edits, base_edits, lengths, samples=samples)
                 delta = error_rate(edits, lengths) - base_rate
                 # 기준선 오류율이 0이면 상대 변화를 낼 수 없어 compare처럼 nan으로 찍는다(차이와 구간은
                 # 그대로 찍는다).
                 relative = delta / base_rate if base_rate else float("nan")
                 line += (
-                    f"  vs {baseline}: {delta * 100:+.2f}%p [{d_low * 100:+.2f}, {d_high * 100:+.2f}]"
+                    f"  vs {baseline}: {delta * 100:+.{places}f}%p"
+                    f" [{d_low * 100:+.{places}f}, {d_high * 100:+.{places}f}]"
                     f", relative {relative * 100:+.1f}%"
                 )
             print(line)
@@ -1476,6 +1499,18 @@ def overlap(
     return record
 
 
+# table --bootstrap-samples의 값 검사: 1 이상의 정수만 받는다(표본이 없으면 구간을 낼 수 없다). argparse가
+# 'argument --bootstrap-samples: …' 오류로 계산 전에 멈추도록 ArgumentTypeError를 낸다.
+def _sample_count(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an integer: {text!r}") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be 1 or more, got {value}")
+    return value
+
+
 # 명령줄 진입점. 하위 명령마다 인자를 정하고 해당 함수를 부른다. 명령과 단계: digits·table·loops(공통),
 # verdict(2·3단계), verdict6(6단계), changes·verdict8·itn8(8단계), gate9·verdict9(9단계),
 # gate10·smoke10·pick10·verdict10(10단계), gate11·blocks(11단계), verdict12(12단계), robust(민감도 분석),
@@ -1500,6 +1535,26 @@ def main() -> None:
             "agnostic)은 Zeroth·FLEURS 한국어 묶음에, en-whisper(영어 표준 정규화, 판정 없는 보조 지표)는"
             " FLEURS 영어 묶음에만 쓴다"
         ),
+    )
+    tab.add_argument(
+        "--bootstrap-samples",
+        type=_sample_count,
+        default=BOOTSTRAP_SAMPLES,
+        help=(
+            f"오류율 구간과 차이 구간의 부트스트랩 표본 수(기본 {BOOTSTRAP_SAMPLES:,}, seed"
+            f" {BOOTSTRAP_SEED}, 1 이상). 기록된 구간과 판정은 모두 기본값이다. 판정 문턱에 가까운"
+            " 구간 끝이 표본 수에 따라 얼마나 움직이는지 사후에 볼 때 쓴다(예: 100000). 표본을 행"
+            " 묶음으로 나눠 뽑으므로 표본 수를 키워도 시간만 늘고 메모리는 거의 늘지 않는다. 기본값이"
+            " 아니면 묶음 머리 줄에 표본 수를 적는다"
+        ),
+    )
+    tab.add_argument(
+        "--decimals",
+        type=int,
+        choices=range(7),
+        default=2,
+        metavar="0-6",
+        help="오류율·구간·차이(%%, %%p)의 소수 자릿수(기본 2). 상대 변화는 늘 한 자리다",
     )
     ver = commands.add_parser("verdict")
     ver.add_argument("--baseline", required=True)
@@ -1641,7 +1696,14 @@ def main() -> None:
         overlap(args.train, args.sets, args.write)
     else:
         table(
-            args.set_name, args.reports, args.baseline, not args.no_digit_split, args.harmonized, args.scoring
+            args.set_name,
+            args.reports,
+            args.baseline,
+            not args.no_digit_split,
+            args.harmonized,
+            args.scoring,
+            samples=args.bootstrap_samples,
+            decimals=args.decimals,
         )
 
 
