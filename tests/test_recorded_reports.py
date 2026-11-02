@@ -106,6 +106,10 @@ def test_stored_scores_are_reproduced(path):
         ("qwen3-asr-1.7b-qn-scale-gate", "zeroth-val500-s100", 213, 18321),  # 1.16%
         # 2026-10-18, 12단계: N을 CTranslate2 int8_float16으로(기록된 float16은 위의 turbo-n-ct2 1,203개)
         ("turbo-n-ct2-int8", "zeroth-val", 1254, 93621),  # 1.34%
+        # 2026-11-03, 13단계: 문장 15%를 학습에서 뺀 N-H(turbo-nh). 판정(처음 보는 문장 347발화)은 analyze
+        # verdict13이 이 리포트에서 발화 ID로 고른다. 여기는 묶음 전체의 총합이다
+        ("turbo-nh", "zeroth-val", 1541, 93621),  # 1.65%
+        ("turbo-nh", "zeroth-test", 421, 19272),  # 2.18%
     ],
 )
 # analyze.load_rows로 맞춘 채점을 다시 해서 총합이 고정값과 같은지.
