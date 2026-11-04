@@ -43,7 +43,8 @@ outputs/speed/<프리셋>-<시각>/)의 speed.json과 실행별 CSV에 남는다
 # 남는다. 그전에는 남은 표본 프로세스(1초마다 Get-CimInstance를 부르는 PowerShell, nvidia-smi)가 다음 측정의
 # 쉬는 상태 판정과 사용률 표본을 흐릴 수 있었고, 확인 간격이 1분보다 짧으면 첫 확인 뒤에 음수 sleep으로
 # 죽었으며, 마지막 실행이 실패하면 앞 실행의 기록까지 모두 잃었다. 하네스와 함께 캐시 데우기도 저장소마다
-# memmap을 한 번만 연다(warm_cache). 측정 명령·순서·대기 기준은 그대로다.
+# memmap을 한 번만 연다(warm_cache). 측정 명령·순서·대기 기준은 그대로다. (8) 2026-11-05부터
+# --max-wait-minutes도 0 이상의 유한한 값만 받는다(nan·inf·음수는 시작하기 전에 거부, main의 주석).
 # [주의] Windows 전용이다: CPU 사용률과 프로세스 이름을 PowerShell(Get-CimInstance, Get-Process)로 읽는다.
 # nvidia-smi와 uv가 PATH에 있어야 한다. 쉬는 상태 확인의 Ollama 항목은 같은 PC에서 GPU를 나눠 쓰는 로컬
 # Ollama 서버에 올라간 모델을 적는 것이고, 서버가 없으면 "unreachable"로 남는다(측정에는 영향이 없다).
@@ -483,7 +484,8 @@ def main() -> None:
         "--max-wait-minutes",
         type=float,
         default=60,
-        help="쉬는 상태를 기다리는 최대 시간(기본 60, 12단계는 10)",
+        help="쉬는 상태를 기다리는 최대 시간(분, 기본 60, 12단계는 10). 0 이상의 유한한 값이어야 하고, 0이면 "
+        "확인을 한 번만 하고 기다리지 않는다",
     )
     parser.add_argument(
         "--poll-minutes",
@@ -511,6 +513,14 @@ def main() -> None:
         parser.error(
             f"--poll-minutes must be at least {CHECK_SECONDS // 60} (one check takes {CHECK_SECONDS} s)"
         )
+    # 최대 대기도 0 이상의 유한한 분만 받는다(2026-11-05). 2026-11-05 전에는 nan이 round(nan * 60)에서
+    # ValueError, inf가 OverflowError로 죽었는데, 그 자리가 커밋을 적고 결과 폴더를 만든(out_dir.mkdir)
+    # 뒤라 빈 결과 폴더가 남았다. 음수는 wait_for_idle의 '다음 확인이 끝날 시각이 최대 대기를 넘는가'가 첫
+    # 확인 뒤 바로 참이 되어 0처럼 돌았고(확인 한 번 뒤 바로 잰다), speed.json의 max_wait_seconds에는 음수가
+    # 남았다. 그래서 --poll-minutes와 같이 쉬는 상태를 기다리기 전에(--dry-run에도) 거부한다. 0은 받는다(확인
+    # 한 번 뒤 바로 잰다). 기록된 명령의 값(12단계 10분 등)은 모두 이 범위라 동작이 그대로다.
+    if not (math.isfinite(args.max_wait_minutes) and args.max_wait_minutes >= 0):
+        parser.error("--max-wait-minutes must be a finite number of minutes, 0 or more")
     runs, env_extra = build_runs(args.preset, extra, args.qwen_large_batch)
     if args.speed_only:
         runs = speed_only(runs)
