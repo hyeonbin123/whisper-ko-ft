@@ -2,8 +2,9 @@
 # 같은지, GPU 없이 확인할 수 있는 순수 함수(nvidia-smi 줄 읽기, 쉬는 상태 판단, 요약 꺼내기), 그리고
 # speed.json에 측정 코드의 커밋(scripts/ 자신까지 본 +dirty 표시)이 남는지 확인한다. 2026-10-29부터는 측정
 # 하네스의 견고성도 본다: 실행 하나가 예외로 끝나도 표본 프로세스(nvidia-smi, PowerShell)를 끝내는지, 1분보다
-# 짧은 확인 간격과(2026-11-05부터) 유한하지 않거나 음수인 최대 대기를 거부하는지, 중간에 멈춘 측정이 앞 실행의
-# 기록을 speed.json에 complete: false로 남기는지, 캐시 데우기가 저장소마다 memmap을 한 번만 여는지.
+# 짧은 확인 간격과(2026-11-05부터) 유한하지 않거나 음수인 최대 대기, 그리고 두 값 모두 하루(1,440분)보다 긴
+# 값을 거부하는지, 중간에 멈춘 측정이 앞 실행의 기록을 speed.json에 complete: false로 남기는지, 캐시 데우기가
+# 저장소마다 memmap을 한 번만 여는지.
 # [왜 중요한가] README의 속도 비율(CTranslate2 1.46배, Qwen 약 6.5배)은 이 절차로 잰 것이다. 세 측정
 # 스크립트를 하나로 합치면서 명령·순서·환경 변수가 달라지면, 다시 잰 수치가 같은 절차의 수치가 아니게 된다.
 # 그래서 그때 쓴 명령 목록을 여기에 그대로 적어 두고 프리셋과 비교한다. 하네스 리포트에는 커밋이 남지만
@@ -208,34 +209,41 @@ def test_a_failed_run_keeps_the_earlier_runs_as_incomplete(speed, tmp_path, monk
     assert (payload["idle_reached"], payload["checks"]) == (False, [{"time": "check"}])
 
 
-# --poll-minutes는 1 이상만 받는다. 한 번의 확인이 1분(CHECK_SECONDS)이라 그보다 짧으면 확인 사이의 sleep
-# 길이가 음수가 되어 첫 확인 뒤에 ValueError로 죽었다(nan은 round에서 죽었다). 쉬는 상태를 기다리기 전에
-# 멈춘다.
-@pytest.mark.parametrize("minutes", ["0.5", "nan"])
-def test_a_poll_interval_below_one_minute_is_refused(speed, tmp_path, monkeypatch, capsys, minutes):
+# --poll-minutes는 1분 이상 하루(1,440분) 이하만 받는다(--dry-run에서도 같다). 한 번의 확인이
+# 1분(CHECK_SECONDS)이라 그보다 짧으면 확인 사이의 sleep 길이가 음수가 되어 첫 확인 뒤에 ValueError로
+# 죽었다(nan은 round에서 죽었다). 하루 상한은 2026-11-05에 더했다: 그전에는 1e308처럼 유한하지만 초로 바꾸면
+# 무한대가 되는 값이 검사를 지나, 결과 폴더를 만든 뒤 round에서 OverflowError로 죽었다(--dry-run이면 오류 없이
+# 끝났다). 쉬는 상태를 기다리기 전에 parser.error(종료 코드 2)로 멈추고 결과 폴더를 만들지 않는다.
+@pytest.mark.parametrize("dry_run", [[], ["--dry-run"]])
+@pytest.mark.parametrize("minutes", ["0.5", "nan", "inf", "1e308", "1441"])
+def test_a_poll_interval_outside_one_minute_to_a_day_is_refused(
+    speed, tmp_path, monkeypatch, capsys, minutes, dry_run
+):
     def wait(max_wait, poll):
         raise AssertionError("waited for the idle state")
 
+    out = tmp_path / "out"
     monkeypatch.setattr(speed, "git_commit", lambda root, paths: "abc1234")
     monkeypatch.setattr(speed, "wait_for_idle", wait)
-    argv = ["speed.py", "--preset", "ct2-int8", "--out", str(tmp_path), "--poll-minutes", minutes]
+    argv = ["speed.py", "--preset", "ct2-int8", "--out", str(out), "--poll-minutes", minutes, *dry_run]
     monkeypatch.setattr(sys, "argv", argv)
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as stopped:
         speed.main()
+    assert stopped.value.code == 2  # argparse의 사용법 오류
     assert "--poll-minutes" in capsys.readouterr().err
-    assert not (tmp_path / "speed.json").exists()
+    assert not out.exists()
 
 
-# --max-wait-minutes는 0 이상의 유한한 분만 받는다(--dry-run에서도 같다). 고치기 전에는 nan이
+# --max-wait-minutes는 0 이상 하루(1,440분) 이하의 분만 받는다(--dry-run에서도 같다). 고치기 전에는 nan이
 # round(nan * 60)에서 ValueError, inf가 OverflowError로 죽었는데, 그 자리가 결과 폴더를 만든 뒤라 빈 폴더가
 # 남았다. 음수는 0처럼 돌아(확인 한 번 뒤 바로 잰다) 명령에 적은 대기와 speed.json의 max_wait_seconds가
-# 실제와 달랐다. 이제 시작하기 전에 parser.error로 멈추고 결과 폴더를 만들지 않는다. 0은 그대로 받는다.
+# 실제와 달랐다. 1e308은 유한해서 0 이상 검사를 지났지만 × 60이 무한대라 같은 자리에서 OverflowError로 죽었고,
+# 하루보다 긴 값은 쓰는 명령이 없다(2026-11-05에 상한을 더함). 이제 시작하기 전에 parser.error로 멈추고 결과
+# 폴더를 만들지 않는다. 0은 그대로 받는다.
 @pytest.mark.parametrize("dry_run", [[], ["--dry-run"]])
-@pytest.mark.parametrize("minutes", ["nan", "inf", "-1"])
-def test_a_max_wait_that_is_not_a_finite_non_negative_number_is_refused(
-    speed, tmp_path, monkeypatch, capsys, minutes, dry_run
-):
+@pytest.mark.parametrize("minutes", ["nan", "inf", "-1", "1e308", "1441"])
+def test_a_max_wait_outside_zero_to_a_day_is_refused(speed, tmp_path, monkeypatch, capsys, minutes, dry_run):
     def wait(max_wait, poll):
         raise AssertionError("waited for the idle state")
 
@@ -271,6 +279,27 @@ def test_a_max_wait_of_zero_minutes_is_accepted(speed, tmp_path, monkeypatch):
     with pytest.raises(Waited):
         speed.main()
     assert seen == {"max_wait": 0, "poll": 60}
+
+
+# 상한인 하루(1,440분)는 두 값 모두 받는다: 86,400초가 wait_for_idle에 그대로 간다.
+def test_a_day_is_accepted_as_the_longest_wait_and_poll(speed, tmp_path, monkeypatch):
+    seen = {}
+
+    class Waited(Exception):
+        """인자 검사를 지나 쉬는 상태를 기다리려 한 순간(여기서 멈춘다)."""
+
+    def wait(max_wait, poll):
+        seen.update(max_wait=max_wait, poll=poll)
+        raise Waited
+
+    monkeypatch.setattr(speed, "git_commit", lambda root, paths: "abc1234")
+    monkeypatch.setattr(speed, "wait_for_idle", wait)
+    argv = ["speed.py", "--preset", "ct2-int8", "--out", str(tmp_path), "--max-wait-minutes", "1440"]
+    monkeypatch.setattr(sys, "argv", [*argv, "--poll-minutes", "1440"])
+
+    with pytest.raises(Waited):
+        speed.main()
+    assert seen == {"max_wait": 86_400, "poll": 86_400}
 
 
 # run()의 바깥 프로세스를 가짜로 바꾸는 fixture. subprocess.Popen 대역은 표본 프로세스를 띄우지 않고 받은

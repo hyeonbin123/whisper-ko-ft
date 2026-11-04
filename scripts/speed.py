@@ -45,6 +45,7 @@ outputs/speed/<프리셋>-<시각>/)의 speed.json과 실행별 CSV에 남는다
 # 죽었으며, 마지막 실행이 실패하면 앞 실행의 기록까지 모두 잃었다. 하네스와 함께 캐시 데우기도 저장소마다
 # memmap을 한 번만 연다(warm_cache). 측정 명령·순서·대기 기준은 그대로다. (8) 2026-11-05부터
 # --max-wait-minutes도 0 이상의 유한한 값만 받는다(nan·inf·음수는 시작하기 전에 거부, main의 주석).
+# 같은 날부터 --max-wait-minutes·--poll-minutes 모두 하루(MAX_MINUTES)를 넘을 수 없다.
 # [주의] Windows 전용이다: CPU 사용률과 프로세스 이름을 PowerShell(Get-CimInstance, Get-Process)로 읽는다.
 # nvidia-smi와 uv가 PATH에 있어야 한다. 쉬는 상태 확인의 Ollama 항목은 같은 PC에서 GPU를 나눠 쓰는 로컬
 # Ollama 서버에 올라간 모델을 적는 것이고, 서버가 없으면 "unreachable"로 남는다(측정에는 영향이 없다).
@@ -57,7 +58,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import subprocess
 import sys
@@ -86,6 +86,13 @@ CPU_IDLE = 15
 # 한 번의 확인에 걸리는 시간(초). 5초 간격 표본 12개다. --poll-minutes는 이보다 짧을 수 없다(확인 사이의
 # sleep이 poll − CHECK_SECONDS라 음수가 된다).
 CHECK_SECONDS = 60
+# --max-wait-minutes·--poll-minutes의 상한(분): 하루. 기본값과 기록된 명령의 값(최대 대기 60·10분, 확인 간격
+# 5·3분)보다 훨씬 크고, 하루 넘게 쉬는 상태를 기다리거나 하루에 한 번만 확인하는 측정 규칙은 없다. 상한이
+# 없으면 1e308처럼 유한하지만 초로 바꾸면(× 60) 무한대가 되는 값이 round에서 OverflowError를 내고, 그보다
+# 작아도 아주 큰 값은 확인 사이의 time.sleep이 OverflowError를 낸다(Windows의 Python 3.11.9에서 9.3e9초는
+# 거부하고 1e9초는 그대로 잠든다). 두 자리 모두 결과 폴더를 만든 뒤라 빈 폴더가 남는다. 하루로 막으면 초로
+# 바꾼 값이 늘 유한하고 sleep 길이도 하루 안이라 두 자리 모두 안전하다(main이 시작하기 전에 거부한다).
+MAX_MINUTES = 24 * 60
 # 표본 프로세스를 끝낼 때 한 단계마다 기다리는 시간(초). Windows의 terminate(TerminateProcess)는 보통 바로
 # 끝나므로 넉넉한 값이고, 정상 실행에서는 기다리는 일이 없다.
 STOP_SECONDS = 10
@@ -484,14 +491,15 @@ def main() -> None:
         "--max-wait-minutes",
         type=float,
         default=60,
-        help="쉬는 상태를 기다리는 최대 시간(분, 기본 60, 12단계는 10). 0 이상의 유한한 값이어야 하고, 0이면 "
-        "확인을 한 번만 하고 기다리지 않는다",
+        help="쉬는 상태를 기다리는 최대 시간(분, 기본 60, 12단계는 10). 0 이상 1,440(하루) 이하여야 "
+        "하고, 0이면 확인을 한 번만 하고 기다리지 않는다",
     )
     parser.add_argument(
         "--poll-minutes",
         type=float,
         default=5,
-        help="쉬는 상태 확인 간격(기본 5, 12단계는 3). 한 번의 확인이 1분 걸리므로 1 이상이어야 한다",
+        help="쉬는 상태 확인 간격(분, 기본 5, 12단계는 3). 한 번의 확인이 1분 걸리므로 1 이상이어야 하고, "
+        "1,440(하루)을 넘을 수 없다",
     )
     parser.add_argument("--out", type=Path, help="결과 폴더(기본 outputs/speed/<프리셋>-<시각>)")
     parser.add_argument(
@@ -507,20 +515,24 @@ def main() -> None:
     if extra and args.preset != "qwen-turbo":
         parser.error(f"unrecognized arguments: {' '.join(extra)}")
     # 확인 사이의 sleep은 poll − CHECK_SECONDS다. 1분보다 짧으면 음수가 되어 첫 확인 뒤에 ValueError로
-    # 죽으므로, 쉬는 상태를 기다리기(최대 --max-wait-minutes) 전에 거부한다. nan·inf도 여기서 거부한다
-    # (round에서 죽는다). --dry-run에도 같은 검사를 한다.
-    if not (math.isfinite(args.poll_minutes) and args.poll_minutes * 60 >= CHECK_SECONDS):
+    # 죽으므로, 쉬는 상태를 기다리기(최대 --max-wait-minutes) 전에 거부한다. 위로는 하루(MAX_MINUTES)를 넘지
+    # 못한다(2026-11-05, 그 상수의 주석). 두 비교를 한 줄로 이어 쓰면 nan은 어느 비교도 참이 아니라 거부되고,
+    # inf와 1e308처럼 × 60이 무한대가 되는 값은 상한을 넘어 거부된다(그전에는 inf·nan만 막고 1e308은 지나가
+    # round에서 OverflowError로 죽었다). --dry-run에도 같은 검사를 한다.
+    if not CHECK_SECONDS <= args.poll_minutes * 60 <= MAX_MINUTES * 60:
         parser.error(
-            f"--poll-minutes must be at least {CHECK_SECONDS // 60} (one check takes {CHECK_SECONDS} s)"
+            f"--poll-minutes must be from {CHECK_SECONDS // 60} to {MAX_MINUTES}"
+            f" (one check takes {CHECK_SECONDS} s)"
         )
-    # 최대 대기도 0 이상의 유한한 분만 받는다(2026-11-05). 2026-11-05 전에는 nan이 round(nan * 60)에서
-    # ValueError, inf가 OverflowError로 죽었는데, 그 자리가 커밋을 적고 결과 폴더를 만든(out_dir.mkdir)
-    # 뒤라 빈 결과 폴더가 남았다. 음수는 wait_for_idle의 '다음 확인이 끝날 시각이 최대 대기를 넘는가'가 첫
-    # 확인 뒤 바로 참이 되어 0처럼 돌았고(확인 한 번 뒤 바로 잰다), speed.json의 max_wait_seconds에는 음수가
-    # 남았다. 그래서 --poll-minutes와 같이 쉬는 상태를 기다리기 전에(--dry-run에도) 거부한다. 0은 받는다(확인
-    # 한 번 뒤 바로 잰다). 기록된 명령의 값(12단계 10분 등)은 모두 이 범위라 동작이 그대로다.
-    if not (math.isfinite(args.max_wait_minutes) and args.max_wait_minutes >= 0):
-        parser.error("--max-wait-minutes must be a finite number of minutes, 0 or more")
+    # 최대 대기도 0 이상 하루 이하의 분만 받는다(2026-11-05). 2026-11-05 전에는 nan이 round(nan * 60)에서
+    # ValueError, inf가 OverflowError로 죽었는데, 그 자리가 커밋을 적고 결과 폴더를 만든(out_dir.mkdir) 뒤라
+    # 빈 결과 폴더가 남았다. 음수는 wait_for_idle의 '다음 확인이 끝날 시각이 최대 대기를 넘는가'가 첫 확인 뒤
+    # 바로 참이 되어 0처럼 돌았고(확인 한 번 뒤 바로 잰다), speed.json의 max_wait_seconds에는 음수가 남았다.
+    # 그래서 --poll-minutes와 같이 쉬는 상태를 기다리기 전에(--dry-run에도) 거부한다. 0은 받는다(확인 한 번 뒤
+    # 바로 잰다). 상한(하루)은 --poll-minutes와 같은 이유로 같은 날 더했다. nan·inf·1e308도 위처럼 이 한 줄의
+    # 비교가 거부한다. 기록된 명령의 값(12단계 10분 등)은 모두 이 범위라 동작이 그대로다.
+    if not 0 <= args.max_wait_minutes <= MAX_MINUTES:
+        parser.error(f"--max-wait-minutes must be a finite number of minutes from 0 to {MAX_MINUTES}")
     runs, env_extra = build_runs(args.preset, extra, args.qwen_large_batch)
     if args.speed_only:
         runs = speed_only(runs)
