@@ -1,12 +1,21 @@
 # [테스트 묶음] splits.py의 화자 기준 분리 규칙(docs/experiments.md '데이터 분리')과, 학습 묶음과 평가 묶음의
-# 문장 겹침을 세는 순수 함수(sentence_overlap, docs/experiments.md '추가 확인: Zeroth 문장 겹침')를 확인한다.
+# 문장 겹침을 세는 순수 함수(sentence_overlap, docs/experiments.md '추가 확인: Zeroth 문장 겹침'), 그리고 측정
+# 하네스가 --allow-test를 요구할 묶음을 가리는 이름 규칙(is_test_set)을 확인한다.
 # [왜 중요한가] validation 화자가 실행마다 달라지면 단계끼리 서로 다른 validation으로 비교하게 된다. 분리가
 # 입력 순서나 중복에 흔들리지 않고 규칙대로 해시 순서를 따르는지 고정한다. 문장 겹침은 README의 해석 단서가
-# 기대는 수라, 원문 기준과 정규화 기준의 셈이 모두 정의대로 나오는지 작은 가짜 묶음으로 고정한다.
+# 기대는 수라, 원문 기준과 정규화 기준의 셈이 모두 정의대로 나오는지 작은 가짜 묶음으로 고정한다. test 묶음
+# 이름 규칙은 'test는 단계마다 한 번'(같은 문서 '데이터 분리'의 test 줄)을 지키는 장치라, test 묶음에서 만든
+# 이름이 그 보호를 비켜 가지 않는지 고정한다.
 
 import pytest
 
-from whisper_ko_ft.splits import sentence_key, sentence_overlap, val500_ids, validation_speakers
+from whisper_ko_ft.splits import (
+    is_test_set,
+    sentence_key,
+    sentence_overlap,
+    val500_ids,
+    validation_speakers,
+)
 from whisper_ko_ft.store import Utterance
 
 
@@ -130,3 +139,38 @@ def test_sentence_overlap_does_not_depend_on_input_order():
     forward = sentence_overlap(TRAIN, {"val": VAL})
     backward = sentence_overlap(list(reversed(TRAIN)), {"val": list(reversed(VAL))})
     assert forward == backward
+
+
+# --- test 묶음 이름 (is_test_set) ---
+
+
+# 세 측정 하네스가 --allow-test를 요구할 묶음을 이름으로 가린다. data/cache/sets의 묶음 12개 중 test는
+# 셋뿐이고 나머지 아홉(validation·학습·고르기·13단계 hold-out 묶음)은 test가 아니다. 그 밖에 test 묶음에서
+# 만든 이름('zeroth-test-unseen' 같은 꼴. 이름이 '-test'로 끝나지 않는다)과 대소문자만 다른 이름(Windows 파일
+# 시스템은 같은 묶음 파일을 연다)도 test로 본다. 하이픈 뒤의 'test'만 보므로 낱말 끝에 test가 든 이름은
+# 걸리지 않는다.
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("zeroth-test", True),
+        ("fleurs-ko-test", True),
+        ("fleurs-en-test", True),
+        ("zeroth-test-unseen", True),
+        ("zeroth-test-seen", True),
+        ("Zeroth-Test", True),
+        ("ZEROTH-TEST-UNSEEN", True),
+        ("zeroth-train", False),
+        ("zeroth-train-itn", False),
+        ("zeroth-train-itn-h", False),
+        ("zeroth-val", False),
+        ("zeroth-val500", False),
+        ("zeroth-val500-itn", False),
+        ("zeroth-val500-itn-h", False),
+        ("fleurs-ko-val", False),
+        ("fleurs-en-val", False),
+        ("zeroth-latest", False),
+        ("contest", False),
+    ],
+)
+def test_test_sets_are_told_apart_by_name(name, expected):
+    assert is_test_set(name) is expected

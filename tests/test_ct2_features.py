@@ -1,8 +1,8 @@
 # [테스트 묶음] faster-whisper 경로의 멜 필터 수(ct2_features.py, evaluate_ct2.py)를 확인한다. 합친 모델
 # 폴더에 128개 설정이 써지는지, 설정 파일이 없거나 틀린 폴더를 어떻게 다루는지, evaluate_ct2가 오디오를 읽기
 # 전에 turbo에 128개를 쓰는지. 끝에 evaluate_ct2 요약의 빈 가설 수가 evaluate와 같은 기준인지, 요약에 변환
-# 폴더의 지문(model.bin·config.json SHA-256)과 --seed가 남는지, merge_adapter가 등록한 기본 모델의 revision을
-# 고정하는지도 본다.
+# 폴더의 지문(model.bin·config.json SHA-256)과 --seed가 남는지, test 묶음(이름에 '-test'가 든 묶음)에
+# --allow-test를 요구하는지, merge_adapter가 등록한 기본 모델의 revision을 고정하는지도 본다.
 # [왜 중요한가] 2026-09-20 재시도 측정이 turbo에 멜 80개로 계산된 특징 때문에 첫 발화에서 모두
 # 멈췄다(docs/experiments.md '추가 측정', 커밋 61b4b2f에서 고침). 같은 실패가 다시 나지 않게 고정한다.
 # evaluate_ct2 테스트는 고치기 전 코드에서 실패하는 것을 확인했다(커밋 61b4b2f 메시지). 변환 폴더는 같은
@@ -287,6 +287,49 @@ def test_a_cpu_ct2_run_needs_no_report(tmp_path, monkeypatch, capsys):
     with pytest.raises(SystemExit):
         evaluate_ct2.main()
     assert "--no-report" in capsys.readouterr().err
+
+
+# test 묶음은 --allow-test가 있어야 잰다(evaluate와 같은 보호, 단계마다 한 번). 이름이 '-test'로 끝나는
+# 묶음뿐 아니라 test 묶음에서 만든 이름('zeroth-test-unseen' 꼴)과 대소문자만 다른 이름도 모델을 띄우기
+# 전에 막고(2026-11-05 전에는 '-test'로 끝나는 이름만 막았다), --allow-test를 주면 모델을 띄우는 데까지
+# 간다. test가 아닌 묶음은 --allow-test 없이 간다.
+@pytest.mark.parametrize(
+    ("name", "is_test"),
+    [
+        ("zeroth-test", True),
+        ("fleurs-ko-test", True),
+        ("zeroth-test-unseen", True),
+        ("Zeroth-Test", True),
+        ("zeroth-val500-itn-h", False),
+    ],
+)
+def test_evaluate_ct2_test_sets_need_allow_test(tmp_path, monkeypatch, capsys, name, is_test):
+    pytest.importorskip("faster_whisper")
+    from whisper_ko_ft import evaluate_ct2
+
+    class Loaded(Exception):
+        """인자 검사를 지나 모델을 띄우려 한 순간(여기서 멈춘다)."""
+
+    def loading(*args, **kwargs):
+        raise Loaded
+
+    monkeypatch.setattr(evaluate_ct2, "REPORTS", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "ROOT", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "git_commit", lambda: "test")
+    monkeypatch.setattr(evaluate_ct2, "WhisperModel", loading)
+    argv = ["evaluate_ct2", "--model", str(tmp_path), "--name", "n", "--set", name]
+
+    monkeypatch.setattr(sys, "argv", argv)
+    if is_test:
+        with pytest.raises(SystemExit):
+            evaluate_ct2.main()
+        assert "--allow-test" in capsys.readouterr().err
+    else:
+        with pytest.raises(Loaded):
+            evaluate_ct2.main()
+    monkeypatch.setattr(sys, "argv", [*argv, "--allow-test"])
+    with pytest.raises(Loaded):
+        evaluate_ct2.main()
 
 
 # 발화가 하나도 없는 묶음은 묶음을 읽은 자리에서 바로 멈춘다(오디오를 읽거나 리포트를 쓰지 않는다). 모델은

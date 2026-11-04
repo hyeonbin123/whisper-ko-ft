@@ -50,8 +50,9 @@ import transformers
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 # channel: --channel telephone(4단계 전화 음질 변환). metrics: 채점과 구간. paths: 리포트 위치와 저장소 루트.
-# provenance: 요약에 남길 지문(기본 모델의 고정 revision, 어댑터 SHA-256, peft 판)과 측정 코드의 커밋. store:
-# 묶음 목록과 오디오 저장소.
+# provenance: 요약에 남길 지문(기본 모델의 고정 revision, 어댑터 SHA-256, peft 판)과 측정 코드의 커밋.
+# splits.is_test_set: --allow-test를 요구할 test 묶음을 이름으로 가린다(세 하네스가 같은 규칙). store: 묶음
+# 목록과 오디오 저장소.
 from whisper_ko_ft.channel import CHANNELS
 from whisper_ko_ft.metrics import error_rate, interval, score
 from whisper_ko_ft.paths import REPORTS, ROOT
@@ -62,6 +63,7 @@ from whisper_ko_ft.provenance import (
     revision_kwargs,
     whisper_revision,
 )
+from whisper_ko_ft.splits import is_test_set
 from whisper_ko_ft.store import SAMPLE_RATE, AudioStore, load_set
 
 # MAX_NEW_TOKENS: 발화당 생성할 최대 토큰 수(docs/experiments.md 공통 규칙 '디코딩'). 같은 구절을 되풀이하는
@@ -323,7 +325,12 @@ def main() -> None:
     )
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--limit", type=int, help="앞의 N개 발화만 잰다(스모크 실행, 속도 확인)")
-    parser.add_argument("--allow-test", action="store_true", help="*-test 묶음을 잴 때 필요하다")
+    parser.add_argument(
+        "--allow-test",
+        action="store_true",
+        help="test 묶음(이름에 -test가 든 묶음: zeroth-test, fleurs-ko-test, zeroth-test-unseen 등)을 잴 때 "
+        "필요하다. test는 단계가 끝날 때 한 번만 잰다",
+    )
     parser.add_argument("--no-report", action="store_true", help="요약만 찍고 리포트는 쓰지 않는다")
     parser.add_argument("--overwrite", action="store_true", help="이미 있는 리포트를 바꿔 쓴다")
     parser.add_argument("--fallback", choices=list(FALLBACKS), help="temperature 재시도 후보(8단계)")
@@ -334,9 +341,11 @@ def main() -> None:
     parser.add_argument("--logprob-threshold", type=float, help="스모크 전용(--no-report): -1.0 대신 쓴다")
     args = parser.parse_args()
 
-    # 규칙을 지키게 하는 검사들. test 묶음은 단계마다 한 번만 재므로 --allow-test가 있어야 한다. --adapter로
-    # 잴 때 --name이 없으면 기본 이름이 기준 모델의 리포트 폴더가 되어 기준선 리포트와 섞이므로 막는다.
-    if args.set_name.endswith("-test") and not args.allow_test:
+    # 규칙을 지키게 하는 검사들. test 묶음은 단계마다 한 번만 재므로 --allow-test가 있어야 한다. 어느 묶음이
+    # test인지는 splits.is_test_set이 정한다(2026-11-05부터 이름에 '-test'가 든 묶음 모두. 그전에는 '-test'로
+    # 끝나는 이름만 막아 'zeroth-test-unseen' 같은 이름이 비켜 갔다). --adapter로 잴 때 --name이 없으면 기본
+    # 이름이 기준 모델의 리포트 폴더가 되어 기준선 리포트와 섞이므로 막는다.
+    if is_test_set(args.set_name) and not args.allow_test:
         parser.error("test sets are measured once per stage; pass --allow-test when the stage is done")
     if args.adapter and not args.name:
         parser.error("--adapter needs --name (the default is the base model's report folder)")

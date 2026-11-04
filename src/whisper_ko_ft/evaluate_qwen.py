@@ -63,7 +63,8 @@ import transformers
 # channel: 10단계의 --channel telephone. evaluate: Whisper 하네스와 같은 최대 토큰 수·30초 창·채점·배치 지연
 # 요약·리포트 글(report_json, NaN이면 ValueError)을 그대로 써서 두 하네스의 조건을 맞춘다. provenance: 측정
 # 코드의 커밋 기록과 어댑터 지문(adapter_info. 2026-10-29에 이 파일에서 옮겨 간 함수로, Whisper 하네스와 함께
-# 쓴다). metrics, paths, store: 채점, 리포트 위치, 묶음과 오디오.
+# 쓴다). metrics, paths, store: 채점, 리포트 위치, 묶음과 오디오. splits.is_test_set: --allow-test를 요구할
+# test 묶음을 이름으로 가린다(Whisper 하네스 둘과 같은 규칙).
 from whisper_ko_ft.channel import CHANNELS
 from whisper_ko_ft.evaluate import (
     MAX_NEW_TOKENS,
@@ -75,6 +76,7 @@ from whisper_ko_ft.evaluate import (
 from whisper_ko_ft.metrics import error_rate, interval
 from whisper_ko_ft.paths import REPORTS
 from whisper_ko_ft.provenance import adapter_info, git_commit
+from whisper_ko_ft.splits import is_test_set
 from whisper_ko_ft.store import SAMPLE_RATE, AudioStore, load_set
 
 # DEFAULT_MODEL: 9·10단계 후보 Qwen3-ASR-1.7B의 Transformers 판(-hf).
@@ -355,15 +357,21 @@ def main() -> None:
     parser.add_argument("--device", choices=["cuda", "cpu"], default="cuda")
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--limit", type=int, help="앞의 N개 발화만 잰다(fp16 점검, 스모크, 속도)")
-    parser.add_argument("--allow-test", action="store_true", help="*-test 묶음을 잴 때 필요하다")
+    parser.add_argument(
+        "--allow-test",
+        action="store_true",
+        help="test 묶음(이름에 -test가 든 묶음: zeroth-test, fleurs-ko-test, zeroth-test-unseen 등)을 잴 때 "
+        "필요하다. test는 단계가 끝날 때 한 번만 잰다",
+    )
     parser.add_argument("--no-report", action="store_true", help="요약만 찍고 리포트는 쓰지 않는다")
     parser.add_argument("--out", help="raw 리포트 하나만 이 파일에 쓴다(fp16 점검)")
     parser.add_argument("--overwrite", action="store_true", help="이미 있는 리포트를 바꿔 쓴다")
     args = parser.parse_args()
 
     # evaluate.py와 같은 규칙 보호: test 묶음은 --allow-test, 어댑터로 잴 때는 --name 필수(기준 모델의
-    # 리포트와 섞이지 않게).
-    if args.set_name.endswith("-test") and not args.allow_test:
+    # 리포트와 섞이지 않게). 어느 묶음이 test인지는 splits.is_test_set이 정한다(2026-11-05부터 이름에
+    # '-test'가 든 묶음 모두. 그전에는 '-test'로 끝나는 이름만 막았다).
+    if is_test_set(args.set_name) and not args.allow_test:
         parser.error("test sets are measured once per stage; pass --allow-test when the stage is done")
     if args.adapter and not args.name:
         parser.error("--adapter needs --name (the default is the base model's report folder)")

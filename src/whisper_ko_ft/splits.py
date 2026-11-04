@@ -3,7 +3,8 @@
 학습 묶음과 평가 묶음이 같은 문장을 얼마나 함께 갖는지도 센다(`sentence_overlap`, docs/experiments.md
 "추가 확인: Zeroth 문장 겹침"). 화자 기준 분리는 화자만 떼므로 문장은 겹칠 수 있다. 13단계의 문장
 hold-out은 문장 키를 해시 순서로 정렬해 일부 문장을 통째로 학습에서 뗀다(`heldout_sentences`,
-docs/experiments.md 13단계).
+docs/experiments.md 13단계). 측정 하네스가 `--allow-test`를 요구할 test 묶음도 여기서 이름으로
+가린다(`is_test_set`).
 """
 
 # [파일 역할] Zeroth-Korean train을 화자 기준으로 나누는 규칙이다. validation으로 뗄 화자 10명과, 학습 중
@@ -24,6 +25,10 @@ docs/experiments.md 13단계).
 # 키의 합집합에서 SHA-256 순서로 앞 15%를 H로 정해 학습에서 통째로 빼고 N과 같은 설정으로 다시 학습한다. H를
 # 고르는 규칙(heldout_count, heldout_sentences)은 화자 고르기와 같은 해시 정렬이라 여기 둔다. 묶음 파일을 읽고
 # 쓰는 일과 학습 전 관문은 prepare_heldout이 맡는다.
+# [test 묶음 이름] 'test는 단계가 끝날 때 한 번만 잰다'(docs/experiments.md '데이터 분리'의 test 줄)를
+# 지키려고 evaluate·evaluate_ct2·evaluate_qwen은 test 묶음을 --allow-test 없이 재지 않는다. 어느 묶음이
+# test인지는 나눔의 문제라 그 판단(is_test_set)도 여기 둔다. 세 하네스가 같은 함수를 써서 규칙이 하네스마다
+# 달라지지 않는다.
 
 from __future__ import annotations
 
@@ -80,6 +85,29 @@ def val500_ids(entries: Sequence[dict], per_speaker: int = VAL500_PER_SPEAKER) -
     for speaker in sorted(by_speaker):
         picked.extend(sorted(by_speaker[speaker])[:per_speaker])
     return picked
+
+
+# --- test 묶음 이름 (2026-11-05) ---
+
+
+# 묶음 이름(data/cache/sets/<이름>.json의 <이름>, 하네스의 --set 값)이 test 묶음이거나 test 묶음에서 만든
+# 묶음인지 가린다. 참이면 evaluate·evaluate_ct2·evaluate_qwen이 --allow-test 없이는 재지 않는다.
+# 규칙: 이름을 소문자로 바꿨을 때 '-test'가 들어 있으면 test로 본다(zeroth-test, fleurs-ko-test,
+# fleurs-en-test와 zeroth-test-unseen 같은 이름).
+# 왜 넓혔나: 2026-11-05 전에는 세 하네스가 이름이 '-test'로 끝나는 묶음만 막았다. 그래서 test 묶음에서 일부
+# 발화만 골라 'zeroth-test-unseen' 같은 이름으로 묶음 파일을 만들면 'test는 단계마다 한 번' 보호를 비켜 갈 수
+# 있었다(13단계는 그래서 판정 발화를 묶음 파일로 쓰지 않고 정의 파일에 발화 ID로만 두었다. docs/experiments.md
+# 13단계 '묶음').
+# 왜 하이픈을 붙여 보나: 묶음 이름은 '<데이터셋>-<나눔>[-덧붙임]' 꼴이라(zeroth-val500-itn-h) 나눔 이름 test는
+# 늘 하이픈 뒤에 온다. 그래서 'latest'·'contest'처럼 낱말 끝에 test가 든 이름은 걸리지 않는다.
+# 왜 소문자로 바꾸나: Windows 파일 시스템은 대소문자를 가리지 않아 --set Zeroth-Test도 zeroth-test 묶음
+# 파일을 읽는다.
+# 주의: 이름만 보는 장치다(묶음 파일 안에는 어느 나눔에서 왔는지가 없다). test 발화로 묶음을 새로 만들면
+# 이름에 '-test'를 넣어야 이 보호를 받는다. 학습 명령(train·train_qwen)의 --train-set·--eval-set은 이 검사를
+# 쓰지 않는다.
+def is_test_set(name: str) -> bool:
+    """묶음 이름에 '-test'가 들어 있으면(대소문자 무시) test 묶음(또는 test에서 만든 묶음)으로 본다."""
+    return "-test" in name.lower()
 
 
 # --- 문장 겹침 (docs/experiments.md '추가 확인: Zeroth 문장 겹침', 2026-10-24) ---

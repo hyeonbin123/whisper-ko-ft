@@ -54,13 +54,15 @@ import torch
 # ct2_features.feature_kwargs: 변환된 모델의 멜 수에 맞춘 특징 설정. evaluate.batch_seconds_summary: 지연의
 # 중앙값·90번째 백분위(같은 키로 남겨 두 하네스를 나란히 읽는다). evaluate.report_json: 리포트 글(NaN이면
 # ValueError). provenance.git_commit: 측정 코드의 커밋 기록(evaluate.py와 같은 방식).
-# provenance.converted_model_hashes: 변환 폴더의 지문(model.bin·config.json SHA-256). metrics: 채점. store:
-# 묶음과 오디오.
+# provenance.converted_model_hashes: 변환 폴더의 지문(model.bin·config.json SHA-256). metrics: 채점.
+# splits.is_test_set: --allow-test를 요구할 test 묶음을 이름으로 가린다(evaluate와 같은 규칙). store: 묶음과
+# 오디오.
 from whisper_ko_ft.ct2_features import feature_kwargs
 from whisper_ko_ft.evaluate import batch_seconds_summary, report_json
 from whisper_ko_ft.metrics import error_rate, interval, score
 from whisper_ko_ft.paths import REPORTS, ROOT
 from whisper_ko_ft.provenance import converted_model_hashes, git_commit
+from whisper_ko_ft.splits import is_test_set
 from whisper_ko_ft.store import AudioStore, load_set
 
 # CTranslate2는 CUDA 12 라이브러리가 필요하다. Windows에서는 torch 휠에 들어 있는 것을 쓴다. 그래서
@@ -118,7 +120,12 @@ def main() -> None:
         "쓴 난수에 이어진다). 재시도 끔에서는 표본이 없어 영향이 없다. 기본은 기록된 측정과 같이 시드 없음",
     )
     parser.add_argument("--limit", type=int)
-    parser.add_argument("--allow-test", action="store_true")
+    parser.add_argument(
+        "--allow-test",
+        action="store_true",
+        help="test 묶음(이름에 -test가 든 묶음: zeroth-test, fleurs-ko-test, zeroth-test-unseen 등)을 잴 때 "
+        "필요하다. test는 단계가 끝날 때 한 번만 잰다",
+    )
     parser.add_argument("--overwrite", action="store_true", help="이미 있는 리포트를 바꿔 쓴다")
     parser.add_argument("--no-report", action="store_true", help="요약만 찍고 리포트는 안 쓴다(속도 측정)")
     parser.add_argument(
@@ -131,7 +138,9 @@ def main() -> None:
         "--device", choices=["cuda", "cpu"], default="cuda", help="cpu는 확인용(--no-report 필요)"
     )
     args = parser.parse_args()
-    if args.set_name.endswith("-test") and not args.allow_test:
+    # test 묶음은 단계마다 한 번만 잰다(evaluate와 같은 보호). 어느 묶음이 test인지는 splits.is_test_set이
+    # 정한다(2026-11-05부터 이름에 '-test'가 든 묶음 모두. 그전에는 '-test'로 끝나는 이름만 막았다).
+    if is_test_set(args.set_name) and not args.allow_test:
         parser.error("test sets are measured once per stage; pass --allow-test when the stage is done")
     # CPU 실행은 측정 조건이 아니므로 리포트를 남기지 못하게 한다(evaluate_qwen과 같은 보호).
     if args.device == "cpu" and not args.no_report:

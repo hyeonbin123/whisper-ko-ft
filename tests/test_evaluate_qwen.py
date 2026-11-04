@@ -214,13 +214,23 @@ def run(monkeypatch, *args):
     evaluate_qwen.main()
 
 
-# test 묶음은 --allow-test가 있어야 잰다(단계마다 한 번).
-def test_test_sets_need_allow_test(reports, monkeypatch, capsys):
+# test 묶음은 --allow-test가 있어야 잰다(단계마다 한 번). 이름이 '-test'로 끝나는 묶음뿐 아니라 test 묶음에서
+# 만든 이름('zeroth-test-unseen' 꼴)과 대소문자만 다른 이름도 막는다(2026-11-05 전에는 '-test'로 끝나는 이름만
+# 막았다. Whisper 하네스 둘과 같은 규칙).
+@pytest.mark.parametrize("name", ["zeroth-test", "fleurs-en-test", "zeroth-test-unseen", "Zeroth-Test"])
+def test_test_sets_need_allow_test(reports, monkeypatch, capsys, name):
     with pytest.raises(SystemExit):
-        run(monkeypatch, "--set", "zeroth-test")
+        run(monkeypatch, "--set", name)
     assert "--allow-test" in capsys.readouterr().err
     with pytest.raises(Reached):
-        run(monkeypatch, "--set", "zeroth-test", "--allow-test")
+        run(monkeypatch, "--set", name, "--allow-test")
+
+
+# test가 아닌 묶음(13단계 고르기 묶음 등)은 --allow-test 없이 측정 단계까지 간다.
+@pytest.mark.parametrize("name", ["zeroth-val", "zeroth-val500-itn-h"])
+def test_other_sets_do_not_need_allow_test(reports, monkeypatch, name):
+    with pytest.raises(Reached):
+        run(monkeypatch, "--set", name)
 
 
 # raw와 fixed 리포트 중 하나라도 이미 있으면 --overwrite 없이는 멈춘다.
