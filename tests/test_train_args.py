@@ -2,7 +2,8 @@
 # 불러오는지 확인한다. 그리고 실행 폴더 보호(같은 --run-name이면 시작하지 않음), --resume(끝까지 저장된 마지막
 # 체크포인트에서 잇기, run.json의 starts 덧붙이기, 이미 --max-steps에 닿은 실행은 거부), 멈춤 진단(진행이
 # 없으면 스레드 스택을 hang.log에 남기는 콜백), 기본 모델 revision 고정(등록한 Hub ID에만)과 run.json의 환경
-# 기록(revision, transformers·peft 판)을 확인한다.
+# 기록(revision, transformers·peft 판), 그리고 2026-11-05부터 test 묶음을 --train-set·--eval-set으로 받지
+# 않는지(우회 없음)를 확인한다.
 # [왜 중요한가] 예전 코드는 --lora-r만 보고 LoRA 여부를 정해서, --lora-r 없이 --init-adapter만 주면 어댑터를
 # 버리고 기본 모델 전체를 fp32로 학습했다(커밋 8ad5a18에서 고침). 오류 없이 다른 실험이 되어 버리는 버그라
 # 테스트로 막는다. 또 outputs/는 커밋하지 않아 기록한 리포트를 낸 가중치의 유일한 사본인데, 예전 코드는 같은
@@ -494,3 +495,61 @@ def test_a_local_base_model_gets_no_revision_and_a_lora_run_names_peft(tmp_path,
         transformers.__version__,
         peft.__version__,
     )
+
+
+# --- test 묶음 거부 (2026-11-05) ---
+
+
+# test 묶음(splits.is_test_set: 이름에 '-test'가 든 묶음, 대소문자 무시)은 --train-set으로도 --eval-set으로도
+# 받지 않는다. --eval-set은 화면에 지표만 찍는 값이 아니라 load_best_model_at_end가 best/를 고르는 묶음이라,
+# 여기에 test를 주면 그 단계 끝에 test로 한 번 잴 모델을 test로 고르게 된다. --train-set에 주면 test로 바로
+# 학습한다. 데이터·처리기·모델을 불러오기 전에 parser.error(종료 코드 2)로 멈추고 실행 폴더도 만들지 않는다.
+# 학습에는 test를 쓸 정당한 경우가 없어 --allow-test 같은 우회는 없다. 2026-11-05 전에는 두 인자 모두 검사가
+# 없어 끝까지 학습했다(이 테스트는 그때 DID NOT RAISE로 실패한다).
+@pytest.mark.parametrize("option", ["--train-set", "--eval-set"])
+@pytest.mark.parametrize("name", ["zeroth-test", "Zeroth-Test", "zeroth-test-unseen", "fleurs-ko-test"])
+def test_a_test_set_is_never_trained_on_or_used_to_pick_checkpoints(
+    tmp_path, monkeypatch, capsys, option, name
+):
+    seen = fake_training(monkeypatch, tmp_path)
+
+    with pytest.raises(SystemExit) as stopped:
+        run_main(monkeypatch, option, name)
+
+    assert stopped.value.code == 2  # argparse의 사용법 오류
+    assert f"{option} {name} is a test set" in capsys.readouterr().err
+    assert seen["loaded"] == []  # 불러오기 전에 멈춘다
+    assert not (tmp_path / "x").exists()  # 실행 폴더(run.json·hang.log)도 만들지 않는다
+
+
+# test 묶음 검사는 실행 폴더 검사보다 먼저다: 학습 결과가 있는 폴더에 --resume으로 test 묶음을 주어도 '이어
+# 하기'로 넘어가지 않고 test 묶음이라는 이유로 멈춘다(폴더는 그대로).
+def test_the_test_set_check_comes_before_the_run_folder_check(tmp_path, monkeypatch, capsys):
+    seen = fake_training(monkeypatch, tmp_path)
+    saved_checkpoint(tmp_path / "x", 500, 1500)
+    (tmp_path / "x" / "run.json").write_text('{"commit": "0db1c24"}', encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        run_main(monkeypatch, "--resume", "--eval-set", "zeroth-test")
+
+    assert "--eval-set zeroth-test is a test set" in capsys.readouterr().err
+    assert seen["loaded"] == []
+    assert (tmp_path / "x" / "run.json").read_text(encoding="utf-8") == '{"commit": "0db1c24"}'
+
+
+# test가 아닌 묶음(기본값, 6단계 N의 숫자를 바꾼 묶음, 13단계 N-H의 학습·고르기 묶음)은 지금처럼 학습한다.
+@pytest.mark.parametrize(
+    "sets",
+    [[], ["--train-set", "zeroth-train-itn", "--eval-set", "zeroth-val500-itn"],
+     ["--train-set", "zeroth-train-itn-h", "--eval-set", "zeroth-val500-itn-h"]],
+)  # fmt: skip
+def test_sets_that_are_not_test_sets_still_train(tmp_path, monkeypatch, sets):
+    seen = fake_training(monkeypatch, tmp_path)
+
+    run_main(monkeypatch, *sets)
+
+    args = seen["run_at_start"]["args"]
+    expected = dict(zip(sets[::2], sets[1::2], strict=True))
+    assert args["train_set"] == expected.get("--train-set", "zeroth-train")
+    assert args["eval_set"] == expected.get("--eval-set", "zeroth-val500")
+    assert seen["loaded"][:2] == ["data", "data"]

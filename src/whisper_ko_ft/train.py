@@ -12,6 +12,8 @@ outputs/<run-name>/에 쓴다: 체크포인트, `best/`(val-500 CER이 가장 �
 그 폴더에 이미 학습 결과(run.json, best/, 체크포인트)가 있으면 --resume 없이는 시작하지 않는다. 마지막
 체크포인트가 이미 --max-steps에 닿은(끝난) 실행은 --resume으로도 다시 돌지 않는다(더 길게 하려면 더 큰
 --max-steps).
+--train-set·--eval-set에는 test 묶음(이름에 -test가 든 묶음)을 줄 수 없다(학습에도 체크포인트 고르기에도
+test를 쓰지 않는다).
 --init-adapter는 저장된 어댑터에서 rank, alpha, dropout, 대상 층을 가져오며 --lora-*는 무시한다.
 """
 
@@ -72,12 +74,14 @@ from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR, get_last_checkpoin
 
 # channel.telephone: 4단계에서 학습 음성 일부를 전화 음질로 바꾼다. evaluate: 평가와 같은 최대 토큰 수.
 # metrics: val-500 채점. provenance: 학습 코드의 커밋 기록, 기본 모델의 고정 revision, run.json에 적는 peft
-# 판. store: 묶음과 오디오 저장소.
+# 판. splits.is_test_set: --train-set·--eval-set에 test 묶음을 받지 않으려고 측정 하네스와 같은 이름 규칙으로
+# 가린다. store: 묶음과 오디오 저장소.
 from whisper_ko_ft.channel import telephone
 from whisper_ko_ft.evaluate import MAX_NEW_TOKENS
 from whisper_ko_ft.metrics import error_rate, score
 from whisper_ko_ft.paths import OUTPUTS
 from whisper_ko_ft.provenance import git_commit, peft_version, revision_kwargs, whisper_revision
+from whisper_ko_ft.splits import is_test_set
 from whisper_ko_ft.store import SAMPLE_RATE, AudioStore, Utterance, load_set
 
 # 묶음의 언어 코드를 Whisper 토크나이저·generate가 받는 언어 이름으로 바꾼다.
@@ -350,8 +354,16 @@ def main() -> None:
         default=0.0,
         help="학습 음성 중 전화 채널을 통과시킬 비율",
     )
-    parser.add_argument("--train-set", default="zeroth-train")
-    parser.add_argument("--eval-set", default="zeroth-val500")
+    parser.add_argument(
+        "--train-set",
+        default="zeroth-train",
+        help="학습 묶음(data/cache/sets/<이름>.json). test 묶음(이름에 -test가 든 묶음)은 받지 않는다",
+    )
+    parser.add_argument(
+        "--eval-set",
+        default="zeroth-val500",
+        help="학습 중 평가 묶음. 이 묶음의 CER로 best/를 고른다. test 묶음은 받지 않는다",
+    )
     parser.add_argument("--max-steps", type=int, default=3_000)
     parser.add_argument("--warmup-steps", type=int, default=500)
     parser.add_argument("--eval-steps", type=int, default=500)
@@ -369,6 +381,20 @@ def main() -> None:
         "이미 --max-steps에 닿은(끝난) 실행은 거부한다(더 길게 이으려면 더 큰 --max-steps)",
     )
     args = parser.parse_args()
+    # test 묶음은 학습에도, 학습 중 체크포인트 고르기에도 쓰지 않는다(2026-11-05). --eval-set은 화면에 지표만
+    # 찍는 값이 아니라 load_best_model_at_end가 best/를 고르는 묶음이다(아래 Trainer 설정). 여기에 test를 주면
+    # 그 단계 끝에 test로 한 번 잴 모델을 test로 고르게 되어, 선택에는 validation만 쓰고 test는 단계가 끝날 때
+    # 한 번만 잰다는 규칙(docs/experiments.md '데이터 분리')이 깨진다. --train-set에 주면 test로 바로
+    # 학습한다. 2026-11-05 전에는 두 인자 모두 이 검사가 없었다(기록된 학습 실행의 묶음은 모두
+    # zeroth-train·zeroth-val500과 그 -itn·-itn-h 판이라 test가 아니다). 어느 묶음이 test인지는 측정 하네스와
+    # 같은 splits.is_test_set이 정한다(이름에 '-test'가 들면 test, 대소문자 무시). 측정 하네스의 --allow-test
+    # 같은 우회는 두지 않는다: 단계 끝의 test 측정과 달리 학습에 test를 쓰는 정당한 경우가 없다. 실행 폴더
+    # 검사보다 먼저 해서, 거부할 때는 아무것도 읽거나 쓰지 않는다(--resume으로 이어 하는 실행도 같다).
+    for option, name in (("--train-set", args.train_set), ("--eval-set", args.eval_set)):
+        if is_test_set(name):
+            parser.error(
+                f"{option} {name} is a test set; training and checkpoint picking never use test sets"
+            )
     # 실행 폴더 보호: 데이터·처리기·모델을 불러오기 전에 확인해, 거부할 때는 아무것도 읽거나 쓰지 않는다.
     run_dir = OUTPUTS / args.run_name
     resume_from = check_run_dir(parser, run_dir, args.resume, args.max_steps)

@@ -499,6 +499,33 @@ def test_training_on_the_cpu_needs_fp32_but_the_initial_adapter_does_not(tmp_pat
         train_qwen.parse_args(["--run-name", "a", "--max-steps", "50", "--longest-at", "51"])
 
 
+# test 묶음(splits.is_test_set: 이름에 '-test'가 든 묶음, 대소문자 무시)으로는 학습하지 않는다(2026-11-05,
+# train.main과 같은 검사). 이 학습에는 학습 중 평가가 없어 볼 묶음은 --train-set 하나다. main이 커밋을 적고
+# 실행 폴더를 만들고 묶음을 읽기 전에(load_set은 닿으면 실패하게 바꿔 둔다) parser.error(종료 코드 2)로
+# 멈춘다. 우회 플래그는 없다. 2026-11-05 전에는 검사가 없어 이 테스트가 load_set에 닿아 실패한다.
+@pytest.mark.parametrize("name", ["zeroth-test", "Zeroth-Test", "zeroth-test-unseen", "fleurs-en-test"])
+def test_a_test_set_is_never_trained_on(tmp_path, monkeypatch, capsys, name):
+    def load_set(set_name):
+        raise AssertionError(f"read the set {set_name}")
+
+    monkeypatch.setattr(train_qwen, "OUTPUTS", tmp_path)
+    monkeypatch.setattr(train_qwen, "load_set", load_set)
+
+    with pytest.raises(SystemExit) as stopped:
+        train_qwen.main(["--run-name", "qn", "--train-set", name])
+
+    assert stopped.value.code == 2  # argparse의 사용법 오류
+    assert f"--train-set {name} is a test set" in capsys.readouterr().err
+    assert not (tmp_path / "qn").exists()  # 실행 폴더도 만들지 않는다
+
+
+# test가 아닌 학습 묶음(13단계 N-H의 학습 묶음 같은 것)은 지금처럼 받는다.
+def test_a_training_set_that_is_not_a_test_set_is_accepted(tmp_path, monkeypatch):
+    monkeypatch.setattr(train_qwen, "OUTPUTS", tmp_path)
+    args = train_qwen.parse_args(["--run-name", "qn", "--train-set", "zeroth-train-itn-h"])
+    assert args.train_set == "zeroth-train-itn-h"
+
+
 # 일시 정지는 'pause' 이벤트로 따로 기록되고, 기다린 12.5초는 스텝 시간에 들어가지 않으며 요약의
 # paused_seconds에 모인다.
 def test_a_pause_is_logged_and_left_out_of_the_step_time(tmp_path, monkeypatch):

@@ -63,11 +63,13 @@ import torch.nn.functional as F
 import transformers
 
 # evaluate.git_commit: 학습 코드의 커밋 기록. evaluate_qwen: 평가와 같은 모델·revision·언어 이름·앞 30초 창을
-# 써서 학습 입력이 추론 입력과 같게 한다. store·train: 묶음 목록과 오디오를 읽는
+# 써서 학습 입력이 추론 입력과 같게 한다. splits.is_test_set: --train-set에 test 묶음을 받지 않으려고 측정
+# 하네스·train과 같은 이름 규칙으로 가린다. store·train: 묶음 목록과 오디오를 읽는
 # 데이터셋(train.UtteranceDataset)을 그대로 쓴다.
 from whisper_ko_ft.evaluate import git_commit
 from whisper_ko_ft.evaluate_qwen import DEFAULT_MODEL, LANGUAGES, REGISTERED, first_window
 from whisper_ko_ft.paths import OUTPUTS
+from whisper_ko_ft.splits import is_test_set
 from whisper_ko_ft.store import SAMPLE_RATE, load_set
 from whisper_ko_ft.train import UtteranceDataset
 
@@ -560,7 +562,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-name", required=True)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--revision", help="기본값은 등록한 모델의 고정 revision")
-    parser.add_argument("--train-set", default="zeroth-train-itn")
+    parser.add_argument(
+        "--train-set",
+        default="zeroth-train-itn",
+        help="학습 묶음(data/cache/sets/<이름>.json). test 묶음(이름에 -test가 든 묶음)은 받지 않는다",
+    )
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--warmup-steps", type=int, default=500)
     parser.add_argument("--max-steps", type=int, default=1_500, help="0이면 처음 어댑터만 저장하고 멈춘다")
@@ -580,6 +586,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--precision", choices=list(DTYPES), default="fp16", help="얼린 기본 가중치의 정밀도")
     parser.add_argument("--resume", action="store_true", help="outputs/<run>/resume에서 이어 간다")
     args = parser.parse_args(argv)
+    # test 묶음으로는 학습하지 않는다(2026-11-05, train.main과 같은 검사와 이유: 학습에 test를 쓰는 정당한
+    # 경우가 없어 --allow-test 같은 우회도 두지 않는다). 이 학습에는 학습 중 평가가 없어 볼 묶음은 --train-set
+    # 하나다. 어느 묶음이 test인지는 splits.is_test_set이 정한다(이름에 '-test'가 들면 test, 대소문자 무시).
+    # 다른 검사보다 먼저 해서, main이 커밋을 적고 실행 폴더를 만들고 묶음을 읽기 전에 멈춘다.
+    if is_test_set(args.train_set):
+        parser.error(f"--train-set {args.train_set} is a test set; training never uses test sets")
     # 등록한 모델이면 고정한 revision을 쓰고, 아니면 --revision을 요구한다.
     if args.revision is None:
         if args.model not in REGISTERED:
