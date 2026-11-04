@@ -2,7 +2,8 @@
 
 # [테스트 묶음] evaluate_qwen.py(9·10단계 Qwen3-ASR 하네스)를 가중치 없이 확인한다: raw 출력이 공식 파서에서
 # 반복 제거만 뺀 것인지, 앞 30초 자르기, 생성 토큰 수와 한도 도달, fp16 넘침 감시, 한 디코딩에서 두 리포트,
-# 인자 검사(test 묶음, 덮어쓰기, CPU 실행, 등록 모델, 어댑터 이름, 채널), 어댑터 병합과 SHA-256 기록.
+# 인자 검사(test 묶음, 덮어쓰기, CPU 실행, 등록 모델, 어댑터 이름·로컬 폴더, 채널), 어댑터 병합과 SHA-256
+# 기록.
 # [왜 중요한가] 9단계 판정은 raw 출력으로 Whisper 하네스와 같은 조건에서 비교한다는 전제 위에 있다. raw에 반복
 # 제거가 섞이거나, 30초 창·프롬프트·생성 인자가 달라지면 비교 조건이 무너진다. 10단계에서는 어댑터 병합이
 # 겨냥한 층만 바꾸는지가 결과 해석의 전제다.
@@ -287,13 +288,31 @@ def test_registered_models_have_a_pinned_revision_and_a_report_name(reports, mon
 # --- 10단계: 기본 가중치에 합친 LoRA 어댑터, 그리고 전화 채널 ---
 
 
-# 10단계: 어댑터를 합쳐 잴 때는 --name이 필수다(학습 전 모델의 리포트 폴더에 섞이지 않게).
+# 10단계: 어댑터를 합쳐 잴 때는 --name이 필수다(학습 전 모델의 리포트 폴더에 섞이지 않게). 측정 단계까지 가는
+# 경우는 실제로 있는 어댑터 폴더를 준다(2026-11-05부터 로컬 폴더가 아니면 멈춘다. 아래 테스트).
 def test_an_adapter_needs_a_name(reports, monkeypatch, capsys):
+    monkeypatch.chdir(reports)
+    (reports / "a").mkdir()
     with pytest.raises(SystemExit):
         run(monkeypatch, "--set", "zeroth-val", "--adapter", "outputs/qwen-qn/checkpoint-500")
     assert "--name" in capsys.readouterr().err
     with pytest.raises(Reached):
         run(monkeypatch, "--set", "zeroth-val", "--adapter", "a", "--name", "qwen3-asr-1.7b-qn")
+
+
+# --adapter는 로컬 어댑터 폴더여야 한다(Whisper 하네스와 같다): 요약의 어댑터 항목(adapter_info)이 그 폴더의
+# 가중치·설정 SHA-256을 읽는다. Hub ID, 없는 경로, 폴더가 아닌 파일은 묶음·모델을 읽기 전에 parser.error로
+# 멈춘다(2026-11-05 전에는 묶음을 읽은 뒤 지문을 읽다가 FileNotFoundError 추적 정보로 멈췄다). 상대 경로가
+# 우연히 있는 폴더를 가리키지 않게 빈 임시 폴더에서 돈다.
+@pytest.mark.parametrize("adapter", ["someone/qwen-lora", "missing", "file"])
+def test_an_adapter_that_is_not_a_local_folder_is_refused(reports, monkeypatch, capsys, adapter):
+    monkeypatch.chdir(reports)
+    (reports / "adapter_model.safetensors").write_bytes(b"weights")
+    path = {"missing": str(reports / "missing"), "file": str(reports / "adapter_model.safetensors")}
+    with pytest.raises(SystemExit):
+        run(monkeypatch, "--set", "zeroth-val", "--name", "qn", "--adapter", path.get(adapter, adapter))
+    err = capsys.readouterr().err
+    assert "--adapter" in err and "local folder" in err
 
 
 # 채널 리포트는 <묶음>@telephone.json이라 깨끗한 음성 리포트와 다른 파일이다. 전화 음질 리포트만 있으면 깨끗한
@@ -433,8 +452,11 @@ def test_reports_record_the_scale_of_each_tower():
     assert evaluate_qwen.adapter_scale_info(None, None, "all") is None
 
 
-# 인자 검사: 스케일은 어댑터와 함께만, 음수는 안 되고, --adapter-scope는 스케일과 함께만 준다.
+# 인자 검사: 스케일은 어댑터와 함께만, 음수는 안 되고, --adapter-scope는 스케일과 함께만 준다. 측정 단계까지
+# 가는 마지막 경우를 위해 어댑터 폴더 'a'를 실제로 만든다(로컬 폴더 검사).
 def test_the_adapter_scale_needs_an_adapter_and_is_not_negative(reports, monkeypatch, capsys):
+    monkeypatch.chdir(reports)
+    (reports / "a").mkdir()
     named = ["--set", "zeroth-val", "--name", "qn-s050"]
     with pytest.raises(SystemExit):
         run(monkeypatch, *named, "--adapter-scale", "0.5")

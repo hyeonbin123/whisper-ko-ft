@@ -315,7 +315,10 @@ def load_model(path: str, adapter: str | None) -> tuple[WhisperForConditionalGen
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True, help="Hugging Face 모델 ID 또는 로컬 체크포인트 폴더")
-    parser.add_argument("--adapter", help="--model에 합칠 LoRA 어댑터 폴더")
+    parser.add_argument(
+        "--adapter",
+        help="--model에 합칠 LoRA 어댑터 폴더(로컬 폴더만. 가중치·설정의 SHA-256을 요약에 적는다)",
+    )
     parser.add_argument("--set", required=True, dest="set_name")
     parser.add_argument(
         "--name", help="리포트 이름. 기본값은 --model 경로의 마지막 부분(--adapter와 함께면 필수)"
@@ -357,6 +360,14 @@ def main() -> None:
     overridden = args.compression_ratio_threshold is not None or args.logprob_threshold is not None
     if overridden and not args.no_report:
         parser.error("threshold overrides are not registered candidates; pass --no-report (smoke runs)")
+    # --adapter는 로컬 어댑터 폴더여야 한다(2026-11-05). 요약에 넣을 어댑터 지문(adapter_model.safetensors·
+    # adapter_config.json의 SHA-256, provenance.adapter_hashes)을 그 폴더에서 읽기 때문이다. 그전에는 Hub ID나
+    # 없는 경로를 주면 이 검사들을 지나 커밋을 적고 묶음을 읽은 뒤, 지문을 읽다가 FileNotFoundError 추적
+    # 정보로 멈췄다. 이제 아무것도 읽기 전에 알린다. 폴더는 있는데 두 파일 중 하나가 없으면 지금처럼 지문을
+    # 읽을 때(모델을 올리기 전에) FileNotFoundError로 멈춘다. --model은 Hub ID를 그대로 받는다(지문 대신 고정
+    # revision을 적는다).
+    if args.adapter and not Path(args.adapter).is_dir():
+        parser.error(f"--adapter must be a local folder (its files are fingerprinted): {args.adapter}")
     # 리포트 경로: reports/<이름>/<묶음>[@채널].json. 이름 기본값은 --model의 마지막 경로 부분이다. 이미
     # 있으면 --overwrite 없이 멈춘다(커밋된 측정 기록 보호).
     suffix = f"@{args.channel}" if args.channel else ""

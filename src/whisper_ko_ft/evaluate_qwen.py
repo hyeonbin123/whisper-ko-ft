@@ -337,7 +337,8 @@ def main() -> None:
     parser.add_argument("--set", required=True, dest="set_name")
     parser.add_argument("--name", help="raw 출력의 리포트 이름. fixed는 <이름>-fixed에 간다")
     parser.add_argument(
-        "--adapter", help="--model에 합칠 LoRA 어댑터 폴더(10단계 train_qwen이 저장한 것. --name 필요)"
+        "--adapter",
+        help="--model에 합칠 LoRA 어댑터 폴더(10단계 train_qwen이 저장한 것. 로컬 폴더만, --name 필요)",
     )
     parser.add_argument(
         "--adapter-scale",
@@ -382,6 +383,12 @@ def main() -> None:
         parser.error("--adapter-scale must not be negative")
     if args.adapter_scope != "all" and args.adapter_scale is None:
         parser.error("--adapter-scope needs --adapter-scale")
+    # --adapter는 로컬 어댑터 폴더여야 한다(2026-11-05, evaluate와 같다). 요약의 어댑터 항목
+    # (provenance.adapter_info: 가중치·설정의 SHA-256)을 그 폴더에서 읽기 때문이다. 그전에는 Hub ID나 없는
+    # 경로를 주면 묶음을 읽은 뒤 지문을 읽다가 FileNotFoundError 추적 정보로 멈췄다. 이제 아무것도 읽기 전에
+    # 알린다.
+    if args.adapter and not Path(args.adapter).is_dir():
+        parser.error(f"--adapter must be a local folder (its files are fingerprinted): {args.adapter}")
     # 등록한 모델이면 고정한 revision과 리포트 이름을 쓰고, 명령줄 값이 있으면 그것이 우선한다. 등록하지 않은
     # 모델은 둘 다 직접 줘야 한다.
     revision, name = REGISTERED.get(args.model, (args.revision, args.name))

@@ -107,7 +107,12 @@ SEED_MAX = 2**32 - 2
 # 더했다(기본 None = 지금까지처럼 시드 없음).
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", required=True, help="CTranslate2 모델 폴더")
+    parser.add_argument(
+        "--model",
+        required=True,
+        help="변환한 CTranslate2 모델 폴더(로컬 폴더만. model.bin·config.json의 SHA-256을 요약에 적으므로 "
+        "크기 이름이나 Hub ID는 받지 않는다)",
+    )
     parser.add_argument("--name", required=True, help="리포트 이름(reports/<이름>/)")
     parser.add_argument("--set", required=True, dest="set_name")
     parser.add_argument("--fallback", action="store_true")
@@ -148,6 +153,17 @@ def main() -> None:
     # CTranslate2가 시드로 쓰지 못하는 값(위 SEED_MAX)은 시드를 걸거나 모델을 띄우기 전에 거부한다.
     if args.seed is not None and not 0 <= args.seed <= SEED_MAX:
         parser.error(f"--seed must be between 0 and {SEED_MAX}")
+    # --model은 변환한 CTranslate2 폴더(로컬)여야 한다(2026-11-05). 요약에 넣을 변환 폴더의 지문(model.bin·
+    # config.json의 SHA-256, provenance.converted_model_hashes)을 그 폴더에서 읽기 때문이다. faster-whisper의
+    # WhisperModel은 크기 이름(large-v3 등)이나 Hub ID를 받으면 Hub에서 모델을 내려받아 띄우므로, 그전에는 수
+    # GB를 받은 뒤에야 지문을 읽다가 FileNotFoundError로 멈췄다. 이제 모델을 띄우기 전에(커밋을 적거나 시드를
+    # 걸기 전에) 알린다. 폴더가 변환 결과인지(model.bin이 있는지)는 지금처럼 WhisperModel과 지문 읽기가
+    # 가린다.
+    if not Path(args.model).is_dir():
+        parser.error(
+            "--model must be a local folder with a converted CTranslate2 model "
+            f"(its files are fingerprinted): {args.model}"
+        )
     target = REPORTS / args.name / f"{args.set_name}.json"
     if not args.no_report and target.exists() and not args.overwrite:
         parser.error(f"{target.relative_to(ROOT)} exists; pass --overwrite to measure it again")

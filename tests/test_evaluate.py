@@ -1,7 +1,7 @@
 # [테스트 묶음] evaluate.py의 규칙 보호 장치(인자 검사)와 리포트 요약 도우미를 확인한다: test 묶음(이름에
-# '-test'가 든 묶음)은 --allow-test가 있어야 잼, --adapter에는 --name 필수, 있는 리포트는 --overwrite 없이
-# 덮어쓰지 않음, 스모크용 기준값은 --no-report에서만, 행 채점과 배치 시간 요약, 등록한 Hub ID에만 고정
-# revision을 넘기는 모델 불러오기, 요약의 재현 지문(revision·라이브러리 판·어댑터 SHA-256).
+# '-test'가 든 묶음)은 --allow-test가 있어야 잼, --adapter에는 --name 필수이고 로컬 폴더여야 함, 있는 리포트는
+# --overwrite 없이 덮어쓰지 않음, 스모크용 기준값은 --no-report에서만, 행 채점과 배치 시간 요약, 등록한 Hub
+# ID에만 고정 revision을 넘기는 모델 불러오기, 요약의 재현 지문(revision·라이브러리 판·어댑터 SHA-256).
 # [왜 중요한가] 리포트는 커밋된 측정 기록이고 모든 판정이 이것을 다시 읽는다. 어댑터 평가가 기준선 리포트를
 # 덮어쓰거나, 일부만 잰 리포트가 전체 리포트를 대신하는 사고(커밋 a29a975가 막은 것)가 다시 생기지 않게 한다.
 # 기본 모델의 revision과 어댑터 가중치의 지문이 없으면 Hub의 모델이 바뀌거나 outputs/의 어댑터를 다시 만든
@@ -50,14 +50,33 @@ def run(monkeypatch, *args):
 
 
 # --adapter인데 --name이 없으면 parser.error로 멈추고(오류 메시지에 --name), --name을 주면 측정 단계까지 간다.
+# 어댑터는 실제로 있는 폴더를 준다(2026-11-05부터 로컬 폴더가 아니면 아래 검사가 먼저 멈춘다).
 def test_adapter_needs_a_report_name(reports, monkeypatch, capsys):
-    adapter = ["--model", "openai/whisper-large-v3-turbo", "--adapter", "x", "--set", "zeroth-val"]
+    folder = reports / "x"
+    folder.mkdir()
+    adapter = ["--model", "openai/whisper-large-v3-turbo", "--adapter", str(folder), "--set", "zeroth-val"]
     # --name이 없으면 리포트가 기본 모델의 폴더에 들어간다.
     with pytest.raises(SystemExit):
         run(monkeypatch, *adapter)
     assert "--name" in capsys.readouterr().err
     with pytest.raises(Reached):
         run(monkeypatch, *adapter, "--name", "l2")
+
+
+# --adapter는 로컬 어댑터 폴더여야 한다: 요약에 넣을 가중치·설정의 SHA-256을 그 폴더에서 읽는다. Hub ID, 없는
+# 경로, 폴더가 아닌 파일은 묶음·모델을 읽기 전에(Reached에 닿기 전에) parser.error로 멈춘다. 2026-11-05 전에는
+# 인자 검사를 지나 묶음을 읽은 뒤 지문을 읽다가 FileNotFoundError 추적 정보로 멈췄다. 상대 경로가 우연히 있는
+# 폴더를 가리키지 않게 빈 임시 폴더에서 돈다.
+@pytest.mark.parametrize("adapter", ["someone/whisper-lora", "missing", "file"])
+def test_an_adapter_that_is_not_a_local_folder_is_refused(reports, monkeypatch, capsys, adapter):
+    monkeypatch.chdir(reports)
+    (reports / "adapter_model.safetensors").write_bytes(b"weights")
+    path = {"missing": str(reports / "missing"), "file": str(reports / "adapter_model.safetensors")}
+    turbo = ["--model", "openai/whisper-large-v3-turbo", "--name", "n", "--set", "zeroth-val"]
+    with pytest.raises(SystemExit):
+        run(monkeypatch, *turbo, "--adapter", path.get(adapter, adapter))
+    err = capsys.readouterr().err
+    assert "--adapter" in err and "local folder" in err
 
 
 # test 묶음은 --allow-test가 있어야 잰다(단계마다 한 번). 이름이 '-test'로 끝나는 묶음뿐 아니라 test 묶음에서

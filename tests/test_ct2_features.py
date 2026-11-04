@@ -2,7 +2,8 @@
 # 폴더에 128개 설정이 써지는지, 설정 파일이 없거나 틀린 폴더를 어떻게 다루는지, evaluate_ct2가 오디오를 읽기
 # 전에 turbo에 128개를 쓰는지. 끝에 evaluate_ct2 요약의 빈 가설 수가 evaluate와 같은 기준인지, 요약에 변환
 # 폴더의 지문(model.bin·config.json SHA-256)과 --seed가 남는지, test 묶음(이름에 '-test'가 든 묶음)에
-# --allow-test를 요구하는지, merge_adapter가 등록한 기본 모델의 revision을 고정하는지도 본다.
+# --allow-test를 요구하는지, --model이 로컬 폴더가 아니면 모델을 띄우기 전에 멈추는지, merge_adapter가 등록한
+# 기본 모델의 revision을 고정하는지도 본다.
 # [왜 중요한가] 2026-09-20 재시도 측정이 turbo에 멜 80개로 계산된 특징 때문에 첫 발화에서 모두
 # 멈췄다(docs/experiments.md '추가 측정', 커밋 61b4b2f에서 고침). 같은 실패가 다시 나지 않게 고정한다.
 # evaluate_ct2 테스트는 고치기 전 코드에서 실패하는 것을 확인했다(커밋 61b4b2f 메시지). 변환 폴더는 같은
@@ -330,6 +331,35 @@ def test_evaluate_ct2_test_sets_need_allow_test(tmp_path, monkeypatch, capsys, n
     monkeypatch.setattr(sys, "argv", [*argv, "--allow-test"])
     with pytest.raises(Loaded):
         evaluate_ct2.main()
+
+
+# --model은 변환된 CTranslate2 폴더(로컬)여야 한다: 요약에 넣을 model.bin·config.json의 SHA-256을 그
+# 폴더에서 읽는다. faster-whisper는 크기 이름(large-v3)이나 Hub ID를 받으면 Hub에서 모델을 내려받아
+# 띄우므로, 2026-11-05 전에는 수 GB를 받은 뒤에야 지문을 읽다가 FileNotFoundError로 멈췄다. 이제 모델을 띄우기
+# 전에(가짜 WhisperModel이 불리기 전에) parser.error로 멈춘다. 없는 경로와 폴더가 아닌 파일도 같다. 상대
+# 경로가 우연히 있는 폴더를 가리키지 않게 빈 임시 폴더에서 돈다.
+@pytest.mark.parametrize("model", ["large-v3", "Systran/faster-whisper-large-v3", "missing", "file"])
+def test_evaluate_ct2_refuses_a_model_that_is_not_a_local_folder(tmp_path, monkeypatch, capsys, model):
+    pytest.importorskip("faster_whisper")
+    from whisper_ko_ft import evaluate_ct2
+
+    def loading(*args, **kwargs):
+        raise AssertionError("the model was loaded")
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "model.bin").write_bytes(b"ct2 weights")
+    path = {"missing": str(tmp_path / "missing"), "file": str(tmp_path / "model.bin")}
+    monkeypatch.setattr(evaluate_ct2, "REPORTS", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "ROOT", tmp_path)
+    monkeypatch.setattr(evaluate_ct2, "git_commit", lambda: "test")
+    monkeypatch.setattr(evaluate_ct2, "WhisperModel", loading)
+    argv = ["evaluate_ct2", "--model", path.get(model, model), "--name", "n", "--set", "x"]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit):
+        evaluate_ct2.main()
+    err = capsys.readouterr().err
+    assert "--model" in err and "local folder" in err
 
 
 # 발화가 하나도 없는 묶음은 묶음을 읽은 자리에서 바로 멈춘다(오디오를 읽거나 리포트를 쓰지 않는다). 모델은
