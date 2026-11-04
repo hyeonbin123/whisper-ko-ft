@@ -1389,6 +1389,7 @@ test 비교(참고용), 판정 없이 보고만 한 비교, 점 추정만 쓰는
 - int8은 메모리를 faster-whisper README 벤치(약 −35%)보다 더 줄였지만, 이 카드·이 모델에서는 계산이 빨라지지 않았다(배속 −6%). turbo는 디코더가 4층이라 가중치를 읽는 시간보다 다른 몫이 크다고 보지만 나눠 재지 않았다
 - (2026-10-29 덧붙임) 커밋 `ca87161`부터 세 하네스(`evaluate`·`evaluate_ct2`·`evaluate_qwen`)와 `scripts/speed.py`의 캐시 데우기가 오디오 저장소의 memmap을 저장소마다 한 번만 연다. 그전에는 `dict.setdefault`의 기본값 인자가 먼저 계산되어 발화마다 새로 열었고, 그 시간이 `evaluate_ct2`의 한 발화 지연과 `evaluate`·`evaluate_qwen`의 배치 시간 안에 들어 있었다. 다음 속도 측정부터는 이 시간이 빠진다. 두 방식을 CPU에서 val-500 440발화로 번갈아 다섯 번 읽어 보면(파일 캐시가 데워진 상태) 발화당 읽기 시간의 중앙값이 0.4~0.7ms 줄어, 위 한 발화 지연 중앙값(0.227초)의 0.2~0.3%로 두 번 잰 값의 차이(1% 안)보다 작다. 위 수치와 판정은 그대로다
 - (2026-10-29 덧붙임) 같은 커밋부터 `scripts/speed.py`는 실행이 하나 끝날 때마다 그때까지의 기록을 `speed.json`에 `complete: false`로 다시 쓰고, 끝난 뒤의 확인까지 마치면 `complete: true`로 바꾼다(중간에 멈춰도 앞 실행의 기록이 남는다). `analyze verdict12`는 `complete`가 false인 파일을 거부하고, 이 키가 없는 이전 파일(위 측정)은 끝까지 돈 것으로 본다. 실행 하나가 예외로 끝나도 표본 프로세스(nvidia-smi, PowerShell)를 끝내고, `--poll-minutes`는 1 이상만 받는다. 측정 명령·순서·쉬는 상태 기준은 바꾸지 않았다
+- (2026-11-05 덧붙임) 커밋 `85f26db`부터 `scripts/speed.py`는 `--max-wait-minutes`도 0 이상의 유한한 값만 받는다(nan·inf·음수는 쉬는 상태를 기다리기 전에 거부한다. 그전에는 nan·inf가 결과 폴더를 만든 뒤에 멈추고 음수는 0처럼 돌았다). 위 측정의 명령(`--max-wait-minutes 10`)·순서·수치는 그대로다
 
 #### 정리
 - **N을 CTranslate2로 서빙할 때 int8_float16을 권한다.** 같은 변환 폴더를 불러올 때 양자화만 바꾸면 GPU 메모리가 2.4GB에서 1.4GB로 43% 줄고, Zeroth 맞춘 CER은 +0.05%p(1.28% → 1.34%)로 미리 정한 허용 폭(+0.10%p) 안이다. 대신 한 발화 지연은 약 6% 길다(0.23초 → 0.24초)
@@ -1504,6 +1505,7 @@ test 비교(참고용), 판정 없이 보고만 한 비교, 점 추정만 쓰는
 - 문장이 zeroth-train에 아예 없던 발화(N도 보지 못했다)는 validation seen에 2개(`152_003_2851`, `217_003_0624`), test unseen에 1개(`121_003_1564`)다. 규칙은 H 소속으로만 나누고 이 발화를 빼지 않는다
 - 정의 파일 `reports/sentence_holdout/zeroth.json`(커밋): H 키의 SHA-256 목록, 두 학습 묶음의 수와 묶음 파일의 SHA-256, 네 발화 묶음의 발화 ID, 문장이 학습에 없던 발화, 관문 수. 정답 글은 넣지 않는다. 수는 `tests/test_prepare_heldout.py`가 고정하고, validation·test가 정의대로 나뉘었는지는 커밋된 리포트의 정답 글로 다시 맞춰 본다(데이터 없이 CI에서도 돈다)
 - 판정·보고 발화는 묶음 파일로 쓰지 않는다: 판정이 기존 리포트에서 고르므로 필요 없고, `evaluate`는 이름이 '-test'로 끝나는 묶음만 `--allow-test`로 막으므로 'zeroth-test-unseen' 같은 파일은 'test는 단계마다 한 번' 보호를 비켜 간다
+- (2026-11-05 덧붙임, 위 줄은 그대로) 커밋 `d28b0ad`부터 `evaluate`·`evaluate_ct2`·`evaluate_qwen`은 이름에 '-test'가 든 묶음을 모두(대소문자 무시) test 묶음으로 보고 `--allow-test` 없이 거부한다(`splits.is_test_set`). 그래서 'zeroth-test-unseen' 같은 묶음 파일도 이제 'test는 단계마다 한 번' 보호를 받는다. 13단계 묶음·판정 발화·수치는 바뀌지 않는다
 
 ### 관문 (학습 전, CPU. `prepare_heldout`이 검사하고 어기면 아무것도 쓰지 않는다)
 - 입력: zeroth-train·zeroth-val·zeroth-val500·zeroth-test의 발화 수가 1단계 기록과 같고, ITN 묶음 둘은 원래 묶음과 발화 ID·순서·오디오 위치가 같고 정답 글만 다르다
